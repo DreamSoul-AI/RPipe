@@ -98,6 +98,8 @@ def pytest_configure(config: pytest.Config) -> None:
     run_id = f'{stamp}_{uuid.uuid4().hex[:6]}'
     out_dir = RESULTS_ROOT / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
+    if getattr(config.option, 'basetemp', None) is None:
+        config.option.basetemp = out_dir / 'pytest'
     config._rpipe_run_id = run_id
     config._rpipe_results_dir = out_dir
     manifest = {
@@ -106,6 +108,7 @@ def pytest_configure(config: pytest.Config) -> None:
         'cwd': str(Path.cwd()),
         'python': sys.version.split()[0],
         'platform': platform.platform(),
+        'basetemp': str(config.option.basetemp),
         'command': list(config.invocation_params.args),
         'git_sha': os.environ.get('GITHUB_SHA') or _git_sha(),
         'markexpr': getattr(config.option, 'markexpr', '') or '',
@@ -145,7 +148,7 @@ def _git_sha() -> str | None:
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
     outcome = yield
     report: pytest.TestReport = outcome.get_result()
-    if report.when != 'call' and not (report.when == 'setup' and report.failed):
+    if report.when != 'call' and not (report.failed or report.skipped):
         return
     config = item.config
     out_dir: Path = getattr(config, '_rpipe_results_dir', None)
@@ -185,6 +188,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
         'run_id': run_id,
         'attempt': 1,
         'test_id': item.nodeid,
+        'phase': report.when,
         'level': level,
         'type': kind,
         'priority': priority,
@@ -208,6 +212,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
         'duration_ms': duration_ms,
         'started_at': datetime.fromtimestamp(report.start, timezone.utc).isoformat(),
         'failure': failure,
+        'reason': str(report.longrepr) if report.skipped else None,
         'artifacts': [],
     }
     with (out_dir / 'events.jsonl').open('a', encoding='utf-8', errors='backslashreplace') as handle:
@@ -233,18 +238,32 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     out_dir: Path | None = getattr(config, '_rpipe_results_dir', None)
     if out_dir is None or not (out_dir / 'events.jsonl').is_file():
         return
+    manifest_path = out_dir / 'manifest.json'
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    manifest['exit_status'] = int(exitstatus)
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n',
+                             encoding='utf-8', errors='backslashreplace')
+    _write_report(out_dir, manifest['run_id'], int(exitstatus))
+
+
+def _write_report(out_dir: Path, run_id: str, exitstatus: int | None) -> None:
+    events = [json.loads(line) for line in (out_dir / 'events.jsonl').read_text(encoding='utf-8').splitlines()
+              if line.strip()]
+    attempts = {}
+    for event in events:
+        key = (event['test_id'], event['attempt'])
+        if key not in attempts or event['status'] == 'failed' or attempts[key]['status'] != 'failed':
+            attempts[key] = event
     counts: dict[str, int] = {}
-    for line in (out_dir / 'events.jsonl').read_text(encoding='utf-8').splitlines():
-        if not line.strip():
-            continue
-        status = json.loads(line).get('status') or 'unknown'
+    for event in attempts.values():
+        status = event.get('status') or 'unknown'
         counts[status] = counts.get(status, 0) + 1
     lines = [
         '# Test report',
         '',
-        f'- run_id: `{getattr(config, "_rpipe_run_id", "")}`',
+        f'- run_id: `{run_id}`',
         '- plan_id: `ad_hoc`',
-        f'- exit_status: {exitstatus}',
+        f'- exit_status: {exitstatus if exitstatus is not None else "unknown"}',
         '',
         '| status | count |',
         '|---|---:|',
@@ -253,8 +272,13 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         lines.append(f'| {status} | {counts[status]} |')
     lines.append('')
     lines.append('数值测量完成记 `measured`，质量判定为 null。通过率的分母不含 skipped 与 measured。')
+    for event in events:
+        reason = (event.get('failure') or {}).get('longrepr') or event.get('reason')
+        if reason:
+            lines.extend(['', f"- `{event['test_id']}` ({event.get('phase', 'unknown')}, {event['status']})",
+                          '', '```text', reason, '```'])
     lines.append('')
-    (out_dir / 'report.md').write_text('\n'.join(lines), encoding='utf-8')
+    (out_dir / 'report.md').write_text('\n'.join(lines), encoding='utf-8', errors='backslashreplace')
 
 
 @pytest.fixture

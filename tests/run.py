@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 
 def _expr(parts: list[str]) -> str:
@@ -37,8 +39,15 @@ def main(argv: list[str] | None = None) -> int:
         help='unit c1 and c2, exclude slow/external/gpu',
     )
     parser.add_argument('--all', action='store_true', help='run every collected test')
+    parser.add_argument('--report-only', type=Path, help='rebuild a saved report without executing tests')
     parser.add_argument('pytest_args', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+
+    if args.report_only is not None:
+        from conftest import _write_report
+        manifest = json.loads((args.report_only / 'manifest.json').read_text(encoding='utf-8'))
+        _write_report(args.report_only, manifest['run_id'], manifest.get('exit_status'))
+        return 0
 
     extra = list(args.pytest_args)
     if extra and extra[0] == '--':

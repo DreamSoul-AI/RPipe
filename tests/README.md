@@ -44,6 +44,10 @@ python tests/run.py --all
 
 每次运行写入 `.tmp/test-results/<run_id>/manifest.json`、`events.jsonl` 和 `report.md`。
 
+事件保存 call 及 setup/teardown 的失败或跳过，并标明实际阶段。报告按用例和尝试合并阶段，任何阶段失败均覆盖 call 通过；跳过原因及失败诊断保留。会话退出状态写入原 manifest。原进程结束后，可用 `python tests/run.py --report-only .tmp/test-results/<run_id>` 从原 manifest/events 重建报告，不重新执行测试或改写事件；缺少退出状态时明确显示 unknown。
+
+未显式传入 `--basetemp` 时，pytest 临时根使用本次结果目录下独立的 `pytest/`，不再共享 `.tmp/pytest`；显式路径保持，实际路径写入 manifest。并行调用因此不会清理另一调用的临时输入。
+
 统一入口为 pytest 子进程显式传递当前环境和 stdout/stderr；调用方捕获入口输出时，失败诊断与退出码仍可取得。该合同由 [test_run_entry.py](test_run_entry.py) 的真实轻量子进程回归覆盖。
 
 `--core` 选择 C1/C2 的 unit，排除 `external`、`gpu`、`slow`。新增流程命令选择 C1/C2 的 integration/e2e，并应用同样的排除项；覆盖本地 Flow 执行、错误结果、Study 汇总和版本隔离。参数分隔符 `--` 后的选项直接传给 pytest。
