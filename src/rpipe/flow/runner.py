@@ -44,6 +44,9 @@ class FlowRunner:
             inherited = os.environ.pop(RUN_ATTEMPT_ENV, None)
             token = ctx.state.pop(RUN_ATTEMPT_ENV, None) or inherited
         with run_lock(ctx.layout.root):
+            if token:
+                study = load_study_yaml(ctx.study_dir) if (ctx.study_dir / 'study.yaml').is_file() else {}
+                check_frozen(ctx.study_dir, study)
             start_execution(ctx.layout.root, token)
             if token:
                 try:
@@ -54,15 +57,15 @@ class FlowRunner:
                     existing.update(status=STATUS_FAILED,
                         error='rerun started; no successful result from this execution yet')
                     write_result(ctx.layout.result_path, existing)
-            return self._run_owned(ctx)
+            return self._run_owned(ctx, frozen_checked=bool(token))
 
-    def _run_owned(self, ctx: FlowContext) -> Path:
+    def _run_owned(self, ctx: FlowContext, *, frozen_checked: bool = False) -> Path:
         current = None
         try:
             logger = self._ensure_logger(ctx)
             logger.info(f'start phases={",".join(self.phases)} pid={os.getpid()}')
             study = load_study_yaml(ctx.study_dir) if (ctx.study_dir / 'study.yaml').is_file() else {}
-            if study_phases_enabled(study):
+            if not frozen_checked and study_phases_enabled(study):
                 check_frozen(ctx.study_dir, study)
             for name in self.phases:
                 current = name

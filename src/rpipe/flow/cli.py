@@ -305,6 +305,9 @@ def _execute_launch(args: argparse.Namespace) -> int:
         retry_failed=bool(getattr(args, 'retry_failed', True)),
         refused_runs=refused,
     )
+    if refused:
+        print('execution refused or unowned: ' + ' '.join(refused), flush=True)
+        return 1
     still = [
         job['run_id']
         for job in jobs
@@ -312,14 +315,12 @@ def _execute_launch(args: argparse.Namespace) -> int:
     ]
     if still:
         print('still failed: ' + ' '.join(still), flush=True)
-    if refused:
-        print('execution refused or unowned: ' + ' '.join(refused), flush=True)
     body = process_study(study_dir)
     print(process_path(study_dir), flush=True)
     if not body.get('complete'):
         print('process partial', flush=True)
     _print_launch_counts(study_dir)
-    return 1 if still or refused else 0
+    return 1 if still else 0
 
 
 def _provenance_gate(study_dir: Path) -> bool:

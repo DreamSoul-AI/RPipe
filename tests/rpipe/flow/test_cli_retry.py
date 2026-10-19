@@ -19,6 +19,60 @@ pytestmark = [
 ]
 
 
+@pytest.mark.parametrize('study_phases', [False, True])
+def test_native_launch_drift_after_parent_gate_preserves_success_and_token(tmp_path, monkeypatch, study_phases):
+    import rpipe.flow.cli as cli
+    import rpipe.structure.make.schedule as schedule
+    from _process_tree import ProcessTree
+    from rpipe.structure.artifact import artifact_layout, write_result
+    from rpipe.structure.artifact.provenance import load_provenance
+    from rpipe.structure.artifact.execution import start_execution
+    from rpipe.structure.make import expand_study
+    asset = tmp_path / 'admission.txt'
+    asset.write_text('frozen input', encoding='utf-8')
+    write_config(tmp_path / 'study.yaml', {'study':'admission', 'seeds':[0], 'freeze':True,
+        'flow':{'prepare_shared':False, 'study_phases':study_phases}, 'provenance':{'include':['admission.txt']}})
+    write_config(tmp_path / 'experiment_config.yaml', {'version':'admission-v1',
+        'data':{'name':'Toy','source':'stub'}, 'model':{'name':'none','source':'unreachable'},
+        'algorithm':{'mode':'inference','source':'unreachable'}, 'system':{'device':'cpu'}})
+    config = expand_study(tmp_path)['configs'][0]
+    layout = artifact_layout(tmp_path, config.parent.name)
+    write_result(layout.result_path, {'status':'succeeded','control':{},'metrics':{},'paths':{},
+                                    'provenance':load_provenance(tmp_path)['digest']})
+    start_execution(layout.root, 'prior-owner')
+    before = layout.result_path.read_bytes()
+    token_before = (layout.root / 'execution.json').read_bytes()
+    job = {'run_id':config.parent.name,'config':str(config),'mode':'inference','device':'cpu'}
+    schedule.write_jobs_json(tmp_path, [job], round_size=1, init_gpu=0, num_gpus=0)
+    children = []
+    actual_popen = subprocess.Popen
+    def launch(command, **kwargs):
+        asset.write_text('changed after parent gate', encoding='utf-8')
+        tree = ProcessTree()
+        with monkeypatch.context() as native:
+            native.setattr(subprocess, 'Popen', actual_popen)
+            with (tmp_path / f'child-{len(children)}.stdout').open('wb') as out, (tmp_path / f'child-{len(children)}.stderr').open('wb') as err:
+                child = tree.start(command, stdout=out, stderr=err, **kwargs)
+        wait = child.wait
+        child.wait = lambda timeout=None: wait(timeout=8 if timeout is None else timeout)
+        children.append((tree, child))
+        return child
+    monkeypatch.setattr(schedule.subprocess, 'Popen', launch)
+    monkeypatch.setenv('PYTHONPATH', str(Path(__file__).resolve().parents[3] / 'src'))
+    monkeypatch.setattr(cli, 'process_study', lambda *_: pytest.fail('refused child reached Study process'))
+    try:
+        assert cli.main(['launch',str(tmp_path),'--num-gpus','0','--round','1','--console','shared','--include-done']) == 1
+        assert len(children) == 1
+        assert b'ProvenanceChangedError' in (tmp_path / 'child-0.stderr').read_bytes()
+        assert layout.result_path.read_bytes() == before
+        assert (layout.root / 'execution.json').read_bytes() == token_before
+    finally:
+        for tree, child in children:
+            tree.terminate(timeout=3)
+            child.wait(timeout=3)
+            tree.close()
+
+
 @pytest.mark.parametrize('refusal', ['busy', 'unreceived', 'newer', 'locked'])
 @pytest.mark.parametrize('entry', ['cli', 'bash'])
 @pytest.mark.parametrize('child_exit', [0, 7])
@@ -38,8 +92,10 @@ def test_public_launch_keeps_nonzero_refusal_when_old_result_succeeded(tmp_path,
     monkeypatch.setenv('CUDA_VISIBLE_DEVICES', '-1')
     monkeypatch.setenv('PYTHONPATH', str(Path(__file__).resolve().parents[3] / 'src'))
     monkeypatch.setattr(cli, '_provenance_gate', lambda *_: True)
-    monkeypatch.setattr(cli, 'process_study', lambda *_: {'complete': True})
-    monkeypatch.setattr(process, 'run_study', lambda *_: {'complete': True})
+    def forbidden_process(*_):
+        pytest.fail('refused launch must stop before Study process')
+    monkeypatch.setattr(cli, 'process_study', forbidden_process)
+    monkeypatch.setattr(process, 'run_study', forbidden_process)
     monkeypatch.setattr(cli, '_print_launch_counts', lambda *_: None)
     actual_popen = subprocess.Popen
     children = []

@@ -5542,3 +5542,13 @@ R3/R5 已在 e7c0bb2 保存全部 phase、最终 collection、逐次 attempt、�
 实际合成树定向 81 passed / 4.59 秒。最终完整 core 为 **2851 passed、1 既有 Windows POSIX 执行权限 skip、76.57 秒**；控制器墙时 80.90 秒，180 秒 launcher / 240 秒外层预算。首轮 2850 passed / 1 failed / 1 skip 发现 execution.py 漏结构登记，补齐后重验，失败原件保留。完整 CPU Flow 为 **582 passed、7 failed、145.56 秒**，控制器 148.83 秒；七项均在未改的 SDK fixture，本机 huggingface_hub 1.21.0 与 CI 固定 1.33.0 不同。原 e7 无 Git 基线同七项全部失败（7.36 秒），逐项诊断及 origin/transfers/test_origin_sdk SHA 一致，不把这一环境结果记成新回归或全部通过。CI 的固定 SDK 与实际 Python 3.10/3.13、Ubuntu/Windows、分发包验收另看最终 head 实际运行。
 
 本机完整原件在 .tmp/rpipe-final-core、rpipe-final-core-2、rpipe-final-flow，198 份源码/测试 SHA、改动文件 Python 3.10 语法及 E9/F 静态检查在 .tmp/rpipe-final-static.json（schedule 既有兼容导出不按 F401 删除）；这些临时文件不随 clone。独立基线比对原件在任务根 rpipe-r1-baseline-check/.tmp/sdk-baseline-20261020，不随 clone。没有真实训练、GPU、校准、PPL、模型下载或科学门变动；上述测试墙时不等于工程总工时。B135/B136 旧索引据已完成的 §235 纠正，不重复计债或关闭 Issue。
+
+### 299.1 R1 初始准入和拒绝后的 Study 边界
+
+独立下游迁移复核发现两条 R1 漏验：旧 success 的 Run 已被锁持有时，CLI 和生成 Bash 虽返回拒绝，却继续调用 Study process；有 handoff token 的 rerun 在初始 freeze 门前写新 token 并撤销旧成功，来源拒绝后 scheduler 仍可按同 token 修正旧结果。首个针对性红例为 6 failed / 2 passed；仅把失效后移到顶层 freeze 后的中间候选仍未闭合 scheduler 归属，未以其中 342 项绿结果作为最终验收。
+
+最终在完整 Run 锁内，有 token 时先执行初始 `check_frozen`（无论 study_phases 是否启用），通过才写本次 execution 和撤销旧 success。私有 `_run_owned(frozen_checked=...)` 仅跳过重复的顶层门，不增加持久状态；native prepare 的后续复检属于已准入业务期，失败不承诺保留旧成功。初始拒绝不改旧 token，因此 scheduler 认定本次执行未获准，保全旧 result 且不重试。CLI 在任何后续成功读取与 process 前返回，生成 Bash 同样在 process 前退出。
+
+真实公共 launch 反例在父来源门及成功绑定通过之后、真实 Popen 之前修改独立冻结 asset；两种 study_phases 均覆盖。每个子进程由既有 ProcessTree 持有、等待截止 8 秒，整轮 Windows Job 外守卫 90 秒；原输入、旧成功和旧 token 全部保留。加入受 token 的 environment/context 准入表后，有效闭环红例为 6 failed / 4 passed，初次 ProcessTree 夹具递归错误另存且不计源码反例。最终来源拒绝只启动一个真实子进程，无新 token，无旧成功改写，无 Study process；业务已开始后的失败及 killed rerun 原合同仍覆盖。
+
+最终无 SDK 边界的窄回归为 **356 passed / 178 deselected，32.95 秒**，控制器 **34.5690 秒**、所属树清理确认。选择 cli_retry、freeze_preservation、make/test_schedule，以及 runner 的竞争、死亡恢复、非重入、token 和证据失败范围；明确排除该文件已有的真实 Toy 两步训练，其余未选不是跳过或通过。命令、JUnit、原子执行元数据和真实 child stdout/stderr 位于 `.tmp/r1-gates-followup/admission-final*`；首红、有效 admission-red-valid 和中间绿原件同目录保留，不随 clone。Python 3.10 AST、E9/F63/F7/F82 与 diff 检查通过，未实跑 3.10、GPU、科学训练、校准、PPL、下载或远端 CI；不推送、不更新 Draft、不合并 dev/main，不恢复队列或 Actions。

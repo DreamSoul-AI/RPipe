@@ -26,6 +26,42 @@ def _success(layout):
     return layout.result_path.read_bytes()
 
 
+@pytest.mark.parametrize('handoff', ['environment', 'context'])
+@pytest.mark.parametrize('study_phases', [False, True])
+@pytest.mark.parametrize('refuse', [True, False], ids=['freeze-refused', 'business-started'])
+def test_scheduled_rerun_preserves_success_until_initial_freeze_gate(tmp_path, monkeypatch, handoff, study_phases, refuse):
+    from rpipe.structure.api.artifact_api import RUN_ATTEMPT_ENV, start_execution
+    write_config(tmp_path / 'study.yaml', {'flow': {'study_phases': study_phases}})
+    layout = artifact_layout(tmp_path, 'scheduled')
+    before = _success(layout)
+    start_execution(layout.root, 'prior-token')
+    token_before = (layout.root / 'execution.json').read_bytes()
+    ctx = FlowContext(tmp_path, layout, {})
+    if handoff == 'environment':
+        monkeypatch.setenv(RUN_ATTEMPT_ENV, 'scheduled-token')
+    else:
+        ctx.state[RUN_ATTEMPT_ENV] = 'scheduled-token'
+    error = ProvenanceChangedError('initial freeze refusal') if refuse else RuntimeError('business phase failure')
+    def gate(*args):
+        if refuse:
+            raise error
+    def phase(ctx):
+        assert load_result(layout.result_path)['status'] == 'failed'
+        raise error
+    monkeypatch.setattr('rpipe.flow.runner.check_frozen', gate)
+    monkeypatch.setattr(import_module('rpipe.flow.collect'), 'run', phase)
+    with pytest.raises(type(error)) as caught:
+        FlowRunner(['collect']).run(ctx)
+    assert caught.value is error
+    if refuse:
+        assert layout.result_path.read_bytes() == before
+        assert (layout.root / 'execution.json').read_bytes() == token_before
+    else:
+        assert load_result(layout.root / 'execution.json')['attempt_token'] == 'scheduled-token'
+        assert load_result(layout.result_path)['status'] == 'failed'
+        assert 'business phase failure' in load_result(layout.result_path)['error']
+
+
 @pytest.mark.parametrize('phases', [None, ['execute']])
 @pytest.mark.parametrize('prior_success', [False, True])
 def test_freeze_refusal_preserves_success_or_creates_failure(tmp_path, monkeypatch, phases, prior_success):
