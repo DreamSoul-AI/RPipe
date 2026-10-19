@@ -24,6 +24,13 @@ REPO = Path(__file__).resolve().parent.parent
 RESULTS_ROOT = REPO / '.tmp' / 'test-results'
 
 
+def _write_manifest(path: Path, manifest: dict) -> None:
+    temporary = path.with_name(f'.manifest.json-{uuid.uuid4().hex}.tmp')
+    temporary.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n',
+                         encoding='utf-8', errors='backslashreplace')
+    os.replace(temporary, path)
+
+
 def _marker_names(item: pytest.Item) -> set[str]:
     return {marker.name for marker in item.iter_markers()}
 
@@ -95,13 +102,19 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 def pytest_configure(config: pytest.Config) -> None:
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    run_id = f'{stamp}_{uuid.uuid4().hex[:6]}'
+    run_id = os.environ.pop('RPIPE_TEST_RUN_ID', None)
+    if run_id is not None:
+        if len(run_id) != 32 or any(c not in '0123456789abcdef' for c in run_id):
+            raise pytest.UsageError('RPIPE_TEST_RUN_ID must be a lowercase UUID hex string')
+    else:
+        run_id = f'{stamp}_{uuid.uuid4().hex[:6]}'
     out_dir = RESULTS_ROOT / run_id
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=False)
     if getattr(config.option, 'basetemp', None) is None:
         config.option.basetemp = out_dir / 'pytest'
     config._rpipe_run_id = run_id
     config._rpipe_results_dir = out_dir
+    config._rpipe_attempts = {}
     manifest = {
         'run_id': run_id,
         'started_at': datetime.now(timezone.utc).isoformat(),
@@ -109,6 +122,7 @@ def pytest_configure(config: pytest.Config) -> None:
         'python': sys.version.split()[0],
         'platform': platform.platform(),
         'basetemp': str(config.option.basetemp),
+        'event_phases': ['setup', 'call', 'teardown'],
         'command': list(config.invocation_params.args),
         'git_sha': os.environ.get('GITHUB_SHA') or _git_sha(),
         'markexpr': getattr(config.option, 'markexpr', '') or '',
@@ -117,10 +131,7 @@ def pytest_configure(config: pytest.Config) -> None:
         'environment_id': 'local',
         'cost_class': list(getattr(config.option, 'cost_class', None) or []),
     }
-    (out_dir / 'manifest.json').write_text(
-        json.dumps(manifest, indent=2, ensure_ascii=False) + '\n',
-        encoding='utf-8', errors='backslashreplace',
-    )
+    _write_manifest(out_dir / 'manifest.json', manifest)
     (out_dir / 'events.jsonl').write_text('', encoding='utf-8')
     (out_dir / 'artifacts').mkdir(exist_ok=True)
 
@@ -144,17 +155,27 @@ def _git_sha() -> str | None:
         return None
 
 
+def pytest_collection_finish(session: pytest.Session) -> None:
+    path = session.config._rpipe_results_dir / 'manifest.json'
+    manifest = json.loads(path.read_text(encoding='utf-8'))
+    manifest['collected_test_ids'] = [item.nodeid for item in session.items]
+    _write_manifest(path, manifest)
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
     outcome = yield
     report: pytest.TestReport = outcome.get_result()
-    if report.when != 'call' and not (report.failed or report.skipped):
-        return
     config = item.config
     out_dir: Path = getattr(config, '_rpipe_results_dir', None)
     run_id: str = getattr(config, '_rpipe_run_id', '')
     if out_dir is None:
         return
+    attempts = getattr(config, '_rpipe_attempts', None)
+    if attempts is None:
+        attempts = config._rpipe_attempts = {}
+    if report.when == 'setup':
+        attempts[item.nodeid] = attempts.get(item.nodeid, 0) + 1
     names = _marker_names(item)
     level = next(iter(names & LEVELS), '')
     kind = next(iter(names & TYPES), '')
@@ -164,7 +185,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
     cost_class = cost_mark.kwargs.get('cost_class') if cost_mark is not None else None
     result_type = result_mark.args[0] if result_mark is not None and result_mark.args else None
     result_detail = result_mark.kwargs.get('detail') if result_mark is not None else None
-    status = _status(report, result_type)
+    status = _status(report, result_type if report.when == 'call' else None)
     duration_ms = int((report.duration or 0) * 1000)
     failure = None
     if report.failed:
@@ -186,7 +207,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
         category = None
     event = {
         'run_id': run_id,
-        'attempt': 1,
+        'attempt': attempts.get(item.nodeid, 1),
         'test_id': item.nodeid,
         'phase': report.when,
         'level': level,
@@ -241,29 +262,58 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     manifest_path = out_dir / 'manifest.json'
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
     manifest['exit_status'] = int(exitstatus)
-    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n',
-                             encoding='utf-8', errors='backslashreplace')
+    _write_manifest(manifest_path, manifest)
     _write_report(out_dir, manifest['run_id'], int(exitstatus))
 
 
 def _write_report(out_dir: Path, run_id: str, exitstatus: int | None) -> None:
-    events = [json.loads(line) for line in (out_dir / 'events.jsonl').read_text(encoding='utf-8').splitlines()
-              if line.strip()]
+    manifest = json.loads((out_dir / 'manifest.json').read_text(encoding='utf-8'))
+    raw_lines = (out_dir / 'events.jsonl').read_bytes().splitlines(keepends=True)
+    events, truncated = [], None
+    for number, raw in enumerate(raw_lines):
+        if not raw.strip():
+            continue
+        try:
+            events.append(json.loads(raw.decode('utf-8')))
+        except (UnicodeError, json.JSONDecodeError):
+            if number != len(raw_lines) - 1 or raw.endswith(b'\n'):
+                raise
+            truncated = repr(raw)
     attempts = {}
     for event in events:
-        key = (event['test_id'], event['attempt'])
-        if key not in attempts or event['status'] == 'failed' or attempts[key]['status'] != 'failed':
-            attempts[key] = event
+        phases = attempts.setdefault((event['test_id'], event['attempt']), {})
+        phases[event.get('phase', 'call')] = event
     counts: dict[str, int] = {}
-    for event in attempts.values():
-        status = event.get('status') or 'unknown'
+    incomplete = []
+    for key, phases in attempts.items():
+        if manifest.get('event_phases') and 'teardown' not in phases:
+            status = 'incomplete'
+            incomplete.append(key)
+        elif any(event['status'] == 'failed' for event in phases.values()):
+            status = 'failed'
+        else:
+            result = phases.get('call') or phases.get('setup') or phases.get('teardown')
+            if phases.get('teardown', {}).get('status') == 'skipped':
+                result = phases['teardown']
+            status = result.get('status') or 'unknown'
         counts[status] = counts.get(status, 0) + 1
+    seen = {test_id for test_id, attempt in attempts}
+    not_run = set(manifest.get('collected_test_ids', [])) - seen
+    if not_run:
+        counts['not_run'] = len(not_run)
+    execution_path = out_dir / 'execution.json'
+    execution = json.loads(execution_path.read_text(encoding='utf-8')) if execution_path.is_file() else {}
     lines = [
         '# Test report',
         '',
         f'- run_id: `{run_id}`',
         '- plan_id: `ad_hoc`',
         f'- exit_status: {exitstatus if exitstatus is not None else "unknown"}',
+        f'- launcher_status: {execution.get("status", "unknown")}',
+        f'- launcher_exit_code: {execution.get("exit_code", "unknown")}',
+        f'- cleanup_confirmed: {execution.get("cleanup_confirmed", "unknown")}',
+        f'- collection_saved: {"collected_test_ids" in manifest}',
+        f'- phase_coverage: {"setup/call/teardown" if manifest.get("event_phases") else "legacy (unknown)"}',
         '',
         '| status | count |',
         '|---|---:|',
@@ -272,6 +322,20 @@ def _write_report(out_dir: Path, run_id: str, exitstatus: int | None) -> None:
         lines.append(f'| {status} | {counts[status]} |')
     lines.append('')
     lines.append('数值测量完成记 `measured`，质量判定为 null。通过率的分母不含 skipped 与 measured。')
+    lines.append('计数按尝试；缺 teardown 记 incomplete，未开始的选中节点记 not_run。')
+    if truncated is not None:
+        lines.extend(['', 'Truncated final event (not counted); original bytes retained:', '',
+                      '```text', truncated, '```'])
+    for test_id, attempt in incomplete:
+        lines.append(f'- incomplete: `{test_id}`, attempt {attempt}')
+    for test_id in sorted(not_run):
+        lines.append(f'- not_run: `{test_id}`')
+    for cleanup in execution.get('cleanup_errors', []):
+        lines.extend(['', '```text', f'Cleanup unconfirmed: {cleanup}', '```'])
+    for diagnostic in execution.get('diagnostic_errors', []):
+        lines.extend(['', '```text', f'Diagnostic output failed: {diagnostic}', '```'])
+    for persistence in execution.get('persistence_errors', []):
+        lines.extend(['', '```text', f'Evidence persistence failed: {persistence}', '```'])
     for event in events:
         reason = (event.get('failure') or {}).get('longrepr') or event.get('reason')
         if reason:

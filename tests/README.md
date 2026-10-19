@@ -44,7 +44,13 @@ python tests/run.py --all
 
 每次运行写入 `.tmp/test-results/<run_id>/manifest.json`、`events.jsonl` 和 `report.md`。
 
-事件保存 call 及 setup/teardown 的失败或跳过，并标明实际阶段。报告按用例和尝试合并阶段，任何阶段失败均覆盖 call 通过；跳过原因及失败诊断保留。会话退出状态写入原 manifest。原进程结束后，可用 `python tests/run.py --report-only .tmp/test-results/<run_id>` 从原 manifest/events 重建报告，不重新执行测试或改写事件；缺少退出状态时明确显示 unknown。
+事件保存 setup/call/teardown，以每次 setup 区分同一节点的尝试。最终筛选后的节点清单写入 manifest。报告按用例和尝试合并阶段：缺少 teardown 记 incomplete，完整尝试中任何阶段失败均覆盖 call 通过；未开始的选中节点记 not_run。跳过原因及所有失败诊断保留，数值型用例的 call 测量不会被成功清理覆盖。会话退出状态写入原 manifest。
+
+统一入口默认整轮期限为 1800 秒（与现有 CPU CI 作业上限一致），可用 `--timeout <秒>` 指定有限正数。正常退出、超时或中断时均收尾本入口拥有的进程，防止主 pytest 已退出而 worker 继续持有输出管道。Windows 使用私有 Job Object：子进程先挂起，归属 Job 后恢复，禁止 breakaway；POSIX 使用独立进程组，等待时保留组长身份，收尾范围为该组（主动另建会话的后代不在组内）。清理后的实际退出码、活动进程数与确认状态保存到该轮 execution.json；清理未确认时保留错误，不声称资源已释放。整轮期限触发后清理另有有限的 10 秒阶段期限。私有实现见 [_process_tree.py](_process_tree.py)，不依赖模型或额外包。直接 `python -m pytest` 的期限仍由外层负责。
+
+manifest 与 execution 使用同目录临时文件及原子替换；更新中断保留上一份完整记录与未完成临时文件。首次启动未取得 manifest 时，execution 明确记录 manifest_available=false。诊断输出失败也记录在 execution，不替代超时、中断或已有非零退出。
+
+原进程结束后，可用 `python tests/run.py --report-only .tmp/test-results/<run_id>` 从原 manifest/events/execution 重建报告，不重新执行测试或改写事件；缺少会话退出状态时明确显示 unknown。旧事件没有完整 phase/收集清单时仅保留原结果，不补造完整性证据。
 
 未显式传入 `--basetemp` 时，pytest 临时根使用本次结果目录下独立的 `pytest/`，不再共享 `.tmp/pytest`；显式路径保持，实际路径写入 manifest。并行调用因此不会清理另一调用的临时输入。
 
