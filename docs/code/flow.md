@@ -58,6 +58,8 @@ flow/
 
 `PHASES = ('prepare', 'execute', 'collect', 'summarize', 'write', 'process')`。允许传入子集（例如只跑 prepare 做干检查），但不得打乱相对顺序。
 
+`FlowRunner.run` 在执行证据、logger 和阶段写入前取得非重入 Run OS 锁，调用结束（含异常）释放。忙时 `RunLockedError` 在原失败定稿之外传播，`run-one` 退出 75；拒绝者不改业务产物。入口一次消费 child 私有 token handoff，后代不继承；同进程后续执行生成新身份。获得锁后先原子保存独立 `execution.json`；失败不进入 logger / 结果失败写入。共享缓存默认重入行为不变，目录创建及锁载体不代表业务执行成功。完整边界见 [Run 执行所有权](../development/artifact_consistency_design.md#四r1run-执行所有权)。
+
 ---
 
 ## 2. `FlowContext`
@@ -391,10 +393,12 @@ make 在 Study 根写 `provenance.json`（与 `index.json` 同级，不进 Git�
 | `git` | 仓库 HEAD 与工作区是否有未提交改动；只有两次查询均成功才记录，不在 Git 仓库内、查询失败或超时则为空 |
 | `created_at` | UTC 时间 |
 | `digest` | 仅对 `files` 与 `plan` 合并内容计算 SHA-256，取前 16 个十六进制字符 |
+| `declarations`（可选） | 两份声明的原始 UTF-8 文本，读取复用时核对其 SHA 与 `files` 相符 |
+| `compatible_digests`（可选） | 此前 make 已证明同计算来源的 provenance digest；计算来源变化时重置 |
 
 文件键用相对路径：库源码相对 `rpipe` 包根，加前缀 `rpipe/`；Study 文件相对 Study 根。 rpipe/是库来源保留键域；Study输入使用该前缀时，必须能核验为对应库路径的同一物理文件（包括硬链接），否则以既有ProvenanceChangedError拒绝采集/冻结。即使当前库尚无同名文件或副本字节相同，也不能占用该键域，避免后续库新增/删除被掩盖。身份查询OSError保留cause并转为冻结拒绝；初始拒绝沿用旧成功结果保全。旧歧义清单不自动改写，须恢复对应库身份或将Study输入移到无冲突路径（如rpipe_inputs/），保留旧证据并按计划使用新version/fresh make。
 
-`provenance` 声明缺省/null按空mapping处理，其余必须为mapping；其中`include`缺省/null按空列表处理，其余必须为list，不能将false/0/字符串/映射当空配置或逐元素模式。此检查统一在既有`source_files`，被写入与freeze比较复用；非法声明以ValueError拒绝，`write_provenance`在发布之前失败，保留已有provenance及peer字节，缺目标时不新建。合法列表的模式展开、Path转字符串、未匹配/越界拒绝及来源键域不变。这里只约束来源写入入口，不将make前面已完成的config/index写入扩成多文件事务，不改变旧成功结果保全决策、错误转换或磁盘结构。
+`provenance` 声明缺省/null按空mapping处理，其余必须为mapping；其中`include`缺省/null按空列表处理，其余必须为list，不能将false/0/字符串/映射当空配置或逐元素模式。此检查统一在既有`source_files`，被写入与freeze比较复用；非法声明以ValueError拒绝，`write_provenance`在发布之前失败，保留已有provenance及peer字节，缺目标时不新建。合法列表的模式展开、Path转字符串、未匹配/越界拒绝及来源键域不变。直接调用`write_provenance`不回滚调用者此前的其他写入；make的前置来源校验见下文，仍不提供多文件事务。
 
 来源`plan_files`复用权威`load_index`的容器与Run路径校验，并要求每个计划条目有可用Run id；不自行宽松解析另一套index。index及被哈希的Run config物理路径须留在当前Study内，拒绝`..`/绝对Run路径及指向Study外的链接，先拒绝再哈希。Study内config链接仍以声明的`runs/<id>/config.yaml`逻辑键记清单，不因解析物理路径改键。坏index类型在本入口转ValueError保留原cause，供已有freeze拒绝边界使用；非预期RuntimeError原样上抛。缺index仍为空plan、合法历史空/partial结构及缺失config仍保留既有语义；不改schema/目录、hash或旧成功保全决策。
 
@@ -406,9 +410,13 @@ make 在 Study 根写 `provenance.json`（与 `index.json` 同级，不进 Git�
 
 freeze开启时，证据读取失败（含include匹配文件消失、权限拒绝）或来源JSON解析失败均以现有ProvenanceChangedError拒绝，原始异常保留在cause与日志中；初始冻结拒绝保留旧成功结果。make仍报告原输入/解析错误，freeze关闭不执行该检查，不将任意编程错误归为来源变更。
 
-`launch` 开始前核对一次。`study.yaml` 写 `freeze: true` 时，`files` 或 `plan` 有任何差异，或来源清单缺失，就退出 2，不启动 Run；prepare 也做同样核对（§5 第 4.1 步），防止直接 `run-one` 绕过。Runner 与 Study process 的检查时机见 §14.0。未启用 freeze 时，launch 对已有清单的变化打印 `provenance: N changed`，照常运行；没有清单则不作该提示。`environment`、`git` 和 `created_at` 只记录，不参与 freeze 比较，不能用 freeze 证明异机环境一致。
+`launch` 开始前核对一次。`study.yaml` 写 `freeze: true` 时，`files` 或 `plan` 有任何差异，或来源清单缺失，就退出 2，不启动 Run；prepare 也做同样核对（§5 第 4.1 步），防止直接 `run-one` 绕过。Runner 与 Study process 的检查时机见 §14.0。未启用 freeze 时，launch 对已有清单的变化打印 `provenance: N changed`；没有清单则不作该提示。已有成功 Run 仍须通过下述来源复用保护，包括显式 include-done 的启动前核对。`environment`、`git` 和 `created_at` 只记录，不参与 freeze 比较，不能用 freeze 证明异机环境一致。
 
-重新 make 会覆盖当前 `provenance.json`，接受当前来源；它不是不可变源码快照，也不自动创建新 version 或清理旧 Run。独立实测须先使用新 `version` / Run ID，按 Study 计划保存旧证据并重新准备、make 和执行适用的前置门，不能仅重写清单后把旧成功结果当成新基线。
+重新 make 不自动创建新 version 或重跑成功 Run。展开先在内存中计算候选配置，早于创建目录、activity、加载 recipe 和写 config/index/provenance/jobs 核对旧成功来源。计算来源改变且候选含已有成功时，或成功来源绑定未知时，以 ProvenanceChangedError 拒绝，保全旧业务产物，要求使用新 version；不得将拒绝变成自动重跑。完全不相交的新 Run 可 make，旧目录保留。
+
+provenance 增加可选 declarations（两份声明的原始UTF-8文本，必须与files中的SHA相符）和 compatible_digests（此前已证明同计算来源的完整provenance digest）。Run ID及旧result字节不变，digest仍只计算files/plan。描述、run_description、YAML格式和未入来源清单的普通README可兼容；tags仍参与Run身份。fixed/axes/seeds等展开字段由共同Run的规范配置身份核对，允许同来源扩展seed；recipe、flow及未知Study字段保持执行语义，不能按元数据忽略。provenance.include里的额外文件默认是计算输入，不能只凭.md后缀豁免。库Python仍按现有整个包来源合同保守比较，不猜哪些模块未使用。
+
+历史声明没有快照时，仅当当前声明SHA仍等于旧清单时可无计算升级；回用旧成功而声明已变、又无可核验旧原文时拒绝，不用当前声明倒推历史。不相交的新Run身份可建立当前快照，旧目录及其历史来源边界保留。成功result必须绑定旧清单自身digest或已证明兼容链；源码改变后新链重置，防止以后回引旧成功。调度跳过和Study聚合采用同一来源核对，声明有未make变更须先由make证明兼容；缺失/未知绑定或受管理Study丢失清单明确拒绝，不返回pending来覆盖原成功。无study.yaml且无provenance的旧ad-hoc artifact调用保持原只读语义，不等于已核验当前来源。来源JSON、声明快照或配置身份损坏同样保全拒绝；本保护不是多文件写入事务，也不保证外部进程并发修改来源时的隔离。
 
 每条 Run 的 result 写入 `environment`（summarize 时重新采集的执行环境）和 `provenance`（make 写入清单的 `digest`），便于事后核对来源与实际环境；两次环境采集不保证相同。实际计算精度开关另看 System 快照与 Study 的运行条件检查。
 
@@ -435,7 +443,7 @@ compare 不重跑计算，不改任何 Run 文件。和外部实现（例如旧 
 `flow.prepare_shared: false` 关闭 make/launch 的通用共享数据预构建（默认 true）。用于每个 Run 需先生成隔离数据、统计或注册专用 source 的 Study；此时 Study prepare / Data builder 负责准备并报告缺失原始数据。该字段必须是布尔值，不能因为未知 source 自动吞掉构造错误。main_probe 使用此选项，make 不加载探针，launch 的每个 Run 才准备一个组合。
 
 
-launch对非零run-one退出的既有成功结果纠正须先于辅助错误行输出；stdout拒绝仍按原方式向上传播，但不能因此保留本次非零退出的成功结果。既有failed/无结果策略、codes、retry、spawn与依赖屏障不扩大。见B105/Issue138。
+launch 对非零 run-one 退出的成功结果纠正先重取 Run 锁，并核对 execution token 属于本 child，再于辅助错误行输出前落盘；stdout 拒绝仍传播。锁忙、缺失 / 损坏 / 新 token 或退出 75 时，保留退出码与明确诊断，不改结果、不自动重试。零退出也必须重取当前空闲 Run 锁并核对 token；不匹配时记录拒绝，不能由旧 success 推导本轮执行成功。合法普通失败保留原重试和依赖屏障。CLI / 生成脚本通过可选 refused_runs 输出接收本轮所有权拒绝，旧 success 不能掩盖这类非零退出；普通失败重试恢复仍成功。调度旧 success 的启动失效在 Runner 获锁并落 token 后进行，Popen 之前不失效本 Run；未进入 Runner 的失败保留旧结果。见 B105/Issue138 及 R1 合同。
 
 
 Study曲线PNG单文件发布使用同目录短随机.tmp，xb排他取得所有权后以既有PNG/dpi写入，关闭句柄再复用atomic_replace；失败保留旧图或缺目标、peer staging及输入字节。目标原mode与新文件umask保持；finally只清自有独立临时文件并关闭本次figure，OS清理拒绝留诊断、不覆盖原保存/发布错误。绘制数据、坐标、标签、格式和docs/figures/learning_curves.png路径不变；不承诺PNG与process.json多文件事务，也不改变checkpoint诊断保留。见B106/Issue140。

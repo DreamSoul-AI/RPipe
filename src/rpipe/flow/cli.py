@@ -178,9 +178,10 @@ def _make_from_args(args: argparse.Namespace) -> dict[str, Any]:
     if raw_origin not in (None, ''):
         chosen = normalize_origin(raw_origin)
         hub = apply_model_origin(chosen)
+    out = expand_study(args.study_dir)
+    if raw_origin not in (None, ''):
         announce(study_hint, 'make', f'origin {chosen} model {hub}')
     announce(study_hint, 'make', 'expand')
-    out = expand_study(args.study_dir)
     _prepare_shared(out['study_dir'], list(out['configs']))
     study_dir = Path(out['study_dir'])
     announce(study_dir, 'make', 'pack')
@@ -294,6 +295,7 @@ def _execute_launch(args: argparse.Namespace) -> int:
         print(process_path(study_dir))
         _print_launch_counts(study_dir)
         return 0
+    refused: list[str] = []
     launch_jobs(
         study_dir,
         jobs,
@@ -301,6 +303,7 @@ def _execute_launch(args: argparse.Namespace) -> int:
         batches=written.get('batches'),
         console=str(getattr(args, 'console', 'auto')),
         retry_failed=bool(getattr(args, 'retry_failed', True)),
+        refused_runs=refused,
     )
     still = [
         job['run_id']
@@ -309,12 +312,14 @@ def _execute_launch(args: argparse.Namespace) -> int:
     ]
     if still:
         print('still failed: ' + ' '.join(still), flush=True)
+    if refused:
+        print('execution refused or unowned: ' + ' '.join(refused), flush=True)
     body = process_study(study_dir)
     print(process_path(study_dir), flush=True)
     if not body.get('complete'):
         print('process partial', flush=True)
     _print_launch_counts(study_dir)
-    return 1 if still else 0
+    return 1 if still or refused else 0
 
 
 def _provenance_gate(study_dir: Path) -> bool:
@@ -430,8 +435,13 @@ def _execute_status(args: argparse.Namespace) -> int:
 
 
 def _execute_run_one(args: argparse.Namespace) -> int:
+    from rpipe.structure.api.artifact_api import RUN_BUSY_EXIT, RunLockedError
     phases = _parse_phases(args.phases)
-    path = launch_one(Path(args.study_dir).resolve(), args.run_id, phases=phases)
+    try:
+        path = launch_one(Path(args.study_dir).resolve(), args.run_id, phases=phases)
+    except RunLockedError as exc:
+        print(exc, file=sys.stderr)
+        return RUN_BUSY_EXIT
     print(path)
     return 0
 

@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import os
+import threading
 from importlib import import_module
 from pathlib import Path
 
 from rpipe.structure.api.artifact_api import STATUS_FAILED, STATUS_SUCCEEDED, write_result
+from rpipe.structure.api.artifact_api import (
+    RUN_ATTEMPT_ENV, CorruptArtifactError, load_result, run_lock, start_execution,
+)
 from rpipe.flow.context import FlowContext
 from rpipe.flow.study import run_study_phase
 from rpipe.structure.api.artifact_api import ProvenanceChangedError, check_frozen
@@ -17,6 +21,7 @@ PHASES = STUDY_PHASES
 
 # Old callers may still pass ``index`` / ``persist``; map to ``write``.
 _PHASE_ALIASES = {'index': 'write', 'persist': 'write'}
+_HANDOFF_LOCK = threading.Lock()
 
 
 def _preserve_success(phase: str | None, exc: BaseException) -> bool:
@@ -35,6 +40,23 @@ class FlowRunner:
             raise ValueError('phases must be a unique subset in canonical order')
 
     def run(self, ctx: FlowContext) -> Path:
+        with _HANDOFF_LOCK:
+            inherited = os.environ.pop(RUN_ATTEMPT_ENV, None)
+            token = ctx.state.pop(RUN_ATTEMPT_ENV, None) or inherited
+        with run_lock(ctx.layout.root):
+            start_execution(ctx.layout.root, token)
+            if token:
+                try:
+                    existing = load_result(ctx.layout.result_path)
+                except (FileNotFoundError, ValueError, CorruptArtifactError, RecursionError):
+                    existing = {}
+                if existing.get('status') == STATUS_SUCCEEDED:
+                    existing.update(status=STATUS_FAILED,
+                        error='rerun started; no successful result from this execution yet')
+                    write_result(ctx.layout.result_path, existing)
+            return self._run_owned(ctx)
+
+    def _run_owned(self, ctx: FlowContext) -> Path:
         current = None
         try:
             logger = self._ensure_logger(ctx)

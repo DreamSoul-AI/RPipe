@@ -2,8 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from rpipe.structure.artifact import artifact_layout, load_result, write_config, validate_result
+from rpipe.structure.artifact import artifact_layout, load_result, write_config, validate_result, write_result
 from rpipe.flow import FlowContext, FlowRunner
+
 
 pytestmark = [
     pytest.mark.integration,
@@ -14,6 +15,170 @@ pytestmark = [
     pytest.mark.cost(cost_class='c1'),
     pytest.mark.result_type('categorical', detail='summary'),
 ]
+
+
+@pytest.mark.parametrize('kill_owner', [False, True])
+def test_public_run_one_rejects_competing_process_without_business_writes(tmp_path, kill_owner):
+    import json
+    import os
+    import subprocess
+    import sys
+    import time
+
+    layout = artifact_layout(tmp_path, 'owned')
+    write_config(layout.config_path, {})
+    script = r'''
+import sys, time
+from pathlib import Path
+import rpipe.flow.collect as collect
+from rpipe.flow.cli import main
+from rpipe.structure.artifact import write_result
+study = Path(sys.argv[1])
+def phase(ctx):
+    (ctx.layout.root / 'entered').write_text('owner', encoding='utf-8')
+    deadline = time.monotonic() + 12
+    while not (study / 'release').exists():
+        if time.monotonic() >= deadline:
+            raise TimeoutError('test owner barrier expired')
+        time.sleep(.02)
+    write_result(ctx.layout.result_path, {'status': 'succeeded', 'metrics': {}, 'paths': {}, 'control': {}})
+collect.run = phase
+raise SystemExit(main(['run-one', str(study), 'owned', '--phases', 'collect']))
+'''
+    env = os.environ.copy()
+    env['CUDA_VISIBLE_DEVICES'] = '-1'
+    env['PYTHONPATH'] = str(Path(__file__).resolve().parents[3] / 'src')
+    owner = subprocess.Popen([sys.executable, '-c', script, str(tmp_path)], env=env,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        deadline = time.monotonic() + 12
+        while not (layout.root / 'entered').exists():
+            if owner.poll() is not None or time.monotonic() >= deadline:
+                pytest.fail(f'owner did not enter: {owner.communicate(timeout=2)}')
+            time.sleep(.02)
+        before = {p.relative_to(layout.root): p.read_bytes() for p in layout.root.rglob('*')
+                  if p.is_file() and p.name != '.rpipe.lock'}
+        loser = subprocess.run([sys.executable, '-c', script, str(tmp_path)], env=env,
+                               capture_output=True, text=True, timeout=12)
+        assert loser.returncode == 75, loser.stderr
+        assert 'Run already executing' in loser.stderr
+        assert before == {p.relative_to(layout.root): p.read_bytes() for p in layout.root.rglob('*')
+                          if p.is_file() and p.name != '.rpipe.lock'}
+        scheduler = r'''
+import sys
+from pathlib import Path
+from rpipe.structure.make.schedule import launch_jobs
+study = Path(sys.argv[1])
+assert launch_jobs(study, [{'run_id': 'owned', 'mode': 'train', 'device': 'cpu'}],
+                   console='shared', retry_failed=True) == [75]
+'''
+        refused = subprocess.run([sys.executable, '-c', scheduler, str(tmp_path)], env=env,
+                                 capture_output=True, text=True, timeout=12)
+        assert refused.returncode == 0, (refused.stdout, refused.stderr)
+        assert 'not launched' in refused.stdout and 'retry ' not in refused.stdout
+        assert before == {p.relative_to(layout.root): p.read_bytes() for p in layout.root.rglob('*')
+                          if p.is_file() and p.name != '.rpipe.lock'}
+        proof = json.loads((layout.root / 'execution.json').read_text())
+        assert proof['pid'] == owner.pid and proof['attempt_token']
+        if kill_owner:
+            owner.kill()
+        (tmp_path / 'release').touch()
+        stdout, stderr = owner.communicate(timeout=12)
+        assert (owner.returncode != 0) if kill_owner else (owner.returncode == 0), (stdout, stderr)
+        recovered = subprocess.run([sys.executable, '-c', script, str(tmp_path)], env=env,
+                                   capture_output=True, text=True, timeout=12)
+        assert recovered.returncode == 0, recovered.stderr
+        assert json.loads((layout.root / 'execution.json').read_text())['attempt_token'] != proof['attempt_token']
+        assert load_result(layout.result_path)['status'] == 'succeeded'
+    finally:
+        if owner.poll() is None:
+            owner.kill()
+            owner.communicate(timeout=5)
+
+
+@pytest.mark.parametrize('failure', [RuntimeError('phase failed'), KeyboardInterrupt()])
+def test_run_lock_releases_after_exception_and_replaces_execution_identity(tmp_path, monkeypatch, failure):
+    import json
+    import rpipe.flow.collect as collect
+    layout = artifact_layout(tmp_path, 'release')
+    def fail(ctx):
+        raise failure
+    monkeypatch.setattr(collect, 'run', fail)
+    with pytest.raises(type(failure)):
+        FlowRunner(['collect']).run(FlowContext(tmp_path, layout, {}))
+    first = json.loads((layout.root / 'execution.json').read_text())['attempt_token']
+    monkeypatch.setattr(collect, 'run', lambda ctx: None)
+    FlowRunner(['collect']).run(FlowContext(tmp_path, layout, {}))
+    assert json.loads((layout.root / 'execution.json').read_text())['attempt_token'] != first
+
+
+def test_run_lock_refuses_nested_context_but_allows_other_run(tmp_path, monkeypatch):
+    import rpipe.flow.collect as collect
+    from rpipe.structure.api.artifact_api import RunLockedError
+    owned = artifact_layout(tmp_path, 'owned')
+    peer = artifact_layout(tmp_path, 'peer')
+    def phase(ctx):
+        if ctx.layout.root == owned.root:
+            with pytest.raises(RunLockedError):
+                FlowRunner(['collect']).run(FlowContext(tmp_path, owned, {}))
+            FlowRunner(['collect']).run(FlowContext(tmp_path, peer, {}))
+    monkeypatch.setattr(collect, 'run', phase)
+    FlowRunner(['collect']).run(FlowContext(tmp_path, owned, {}))
+
+
+def test_run_one_handoff_is_consumed_and_next_public_execution_gets_fresh_token(tmp_path, monkeypatch):
+    import json
+    import os
+    import rpipe.flow.collect as collect
+    from rpipe.flow.cli import main
+    from rpipe.structure.api.artifact_api import RUN_ATTEMPT_ENV
+    layout = artifact_layout(tmp_path, 'successive')
+    write_config(layout.config_path, {})
+    def phase(ctx):
+        assert RUN_ATTEMPT_ENV not in os.environ
+    monkeypatch.setattr(collect, 'run', phase)
+    monkeypatch.setenv(RUN_ATTEMPT_ENV, 'scheduler-single-use')
+    command = ['run-one', str(tmp_path), 'successive', '--phases', 'collect']
+    assert main(command) == 0
+    first = json.loads((layout.root / 'execution.json').read_text())['attempt_token']
+    assert first == 'scheduler-single-use'
+    assert RUN_ATTEMPT_ENV not in os.environ
+    assert main(command) == 0
+    second = json.loads((layout.root / 'execution.json').read_text())['attempt_token']
+    assert second != first
+    context = FlowContext(tmp_path, layout, {})
+    context.state[RUN_ATTEMPT_ENV] = 'context-single-use'
+    FlowRunner(['collect']).run(context)
+    assert json.loads((layout.root / 'execution.json').read_text())['attempt_token'] == 'context-single-use'
+    FlowRunner(['collect']).run(context)
+    assert json.loads((layout.root / 'execution.json').read_text())['attempt_token'] != 'context-single-use'
+
+
+@pytest.mark.parametrize('failure_stage', ['entry', 'replace'])
+def test_execution_evidence_failure_precedes_logger_and_failure_result(tmp_path, monkeypatch, failure_stage):
+    import rpipe.flow.runner as runner
+    import rpipe.structure.artifact._atomic as atomic
+    from rpipe.structure.api.artifact_api import start_execution
+    layout = artifact_layout(tmp_path, 'evidence')
+    write_result(layout.result_path, {'status': 'succeeded', 'metrics': {}, 'paths': {}, 'control': {}})
+    start_execution(layout.root, 'prior-execution')
+    proof_before = (layout.root / 'execution.json').read_bytes()
+    before = layout.result_path.read_bytes()
+    error = PermissionError('execution evidence denied')
+    def fail(*args, **kwargs):
+        raise error
+    if failure_stage == 'entry':
+        monkeypatch.setattr(runner, 'start_execution', fail)
+    else:
+        monkeypatch.setattr(atomic, 'atomic_replace', fail)
+    with pytest.raises(PermissionError) as caught:
+        FlowRunner(['collect']).run(FlowContext(tmp_path, layout, {}))
+    assert caught.value is error
+    assert layout.result_path.read_bytes() == before
+    assert (layout.root / 'execution.json').read_bytes() == proof_before
+    assert not list(layout.root.glob('*.tmp'))
+    assert not (layout.assets_dir / 'logs').exists()
+
 
 
 def test_full_flow_writes_succeeded_status(tmp_path: Path):

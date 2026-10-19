@@ -1042,6 +1042,7 @@ prepare：`control_from_config` →（可选契约）→ 各 `*_api` Factory.bui
 | `artifact/activity.py` | Current Study task, so a long make can be seen without waiting for the final print. |
 | `artifact/asset/kinds.py` | Run asset names, directory creation and recursive file listing. |
 | `artifact/config/io.py` | Config YAML mapping codec and atomic entity IO. |
+| `artifact/execution.py` | Run execution lock, one-use attempt identity, and owned completion checks. |
 | `artifact/index.py` | Study ``index.json`` — orchestration plan written before Flow. |
 | `artifact/layout.py` | Study/Run layout, canonical leaf names and artifact IO errors. |
 | `artifact/provenance.py` | Study provenance: source / plan hashes, environment, and the freeze gate. |
@@ -1246,7 +1247,9 @@ CPU job 的旧计划若仍有 gpu 绑定须重新 make；直接调度 CPU job �
 
 显式 batches 必须是所声明 jobs 的同一完整多重集（含每条job字段），允许组内/组间重新排序，不允许漏项、额外Run或同ID字段漂移。在既有wait_groups统一拒绝不一致；写jobs.json前与复用缓存过滤成功Run前调用同一校验。坏缓存返回原有重建请求None，原生launch/脚本生成直接拒绝，均先于旧结果失效、子进程启动或脚本覆盖。
 
-启动计划在既有 wait_groups 统一校验：声明 job 必须是 object，run_id 必须通过既有安全字符串目录组件校验；缓存读取在 include_done/就绪过滤前无条件进入，坏条目返回 None 重建，不静默丢弃。jobs.json 发布、原生启动及脚本渲染也经过该边界。重复 Run 按当前平台 Path 组件比较（Windows 大小写别名相同，POSIX 不同大小写组件独立），在脚本覆盖、子进程启动或旧结果失效前拒绝，维持 Run 单写者合同。合法空队列和缺可选字段的 legacy job 保持；不新增文件系统探测或跨调用全局锁。计划内的失败重试是后续独立轮次，不算同一清单的重复任务；需要重复实测时使用新 version。 同一wait组启动或等待/结果纠正/退出诊断出现异常时，保留首个异常并继续原等待和非零退出纠正循环，尝试本次已启动的其余句柄后传播原错，不开启后续组或重试。正常codes/顺序不变，首次wait异常对同一已知句柄追加一次恢复wait，恢复成功仍执行原非零退出纠正；完成后诊断失败不重wait。不kill/suspend；OS wait持续拒绝仅保证尝试，不能推断句柄已退出或扩大跨调用互斥。
+启动计划在既有 wait_groups 统一校验：声明 job 必须是 object，run_id 必须通过既有安全字符串目录组件校验；缓存读取在 include_done/就绪过滤前无条件进入，坏条目返回 None 重建，不静默丢弃。jobs.json 发布、原生启动及脚本渲染也经过该边界。重复 Run 按当前平台 Path 组件比较（Windows 大小写别名相同，POSIX 不同大小写组件独立），在脚本覆盖、子进程启动或旧结果失效前拒绝，维持 Run 单写者合同。合法空队列和缺可选字段的 legacy job 保持；跨调用执行由同一 Run OS 锁保护，不串行化不同 Run。计划内的失败重试是后续独立轮次，不算同一清单的重复任务；需要重复实测时使用新 version。 同一wait组启动或等待/结果纠正/退出诊断出现异常时，保留首个异常并继续原等待和非零退出纠正循环，尝试本次已启动的其余句柄后传播原错，不开启后续组或重试。正常codes/顺序不变，首次wait异常对同一已知句柄追加一次恢复wait，恢复成功仍执行原非零退出纠正；完成后诊断失败不重wait。不kill/suspend；OS wait持续拒绝仅保证尝试，不能推断句柄已退出。Run 互斥、执行 token 与拒绝不重试遵循下述 R1 合同。
+
+Run 执行锁和尝试身份由 artifact 经 `artifact_api` 提供，Runner 与调度器共用；执行、拒绝与恢复边界见 [执行所有权合同](../development/artifact_consistency_design.md#四r1run-执行所有权)。
 
 Study 展开也在写入 Run config / index 前拒绝重复内容 ID，包括重复 seed / 轴值，防止顺序执行及聚合重复计入同一产物。Accuracy 按目标形状区分每个样本的标签与类别分数，样本数不一致时报错，不允许广播得到虚假准确率。正预算训练没有 batch 时失败，不定稿零步成功；合法的已恢复 epoch 尾段保持原语义。完整 RNG 恢复仅声明 CPU / CUDA，其他后端属于部分恢复。
 

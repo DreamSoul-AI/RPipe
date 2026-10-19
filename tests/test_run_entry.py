@@ -19,6 +19,24 @@ pytestmark = [
 ]
 
 
+@pytest.mark.parametrize('missing', ['linux', 'proc', 'waitid', 'WNOWAIT'])
+def test_unsupported_process_ownership_is_refused_before_start(monkeypatch, missing):
+    import types
+    import _process_tree as ownership
+    platform_os = types.SimpleNamespace(name='posix', waitid=lambda *args: None, WNOWAIT=1)
+    if missing in ('waitid', 'WNOWAIT'):
+        delattr(platform_os, missing)
+    monkeypatch.setattr(ownership, 'os', platform_os)
+    monkeypatch.setattr(ownership, 'sys', types.SimpleNamespace(platform='darwin' if missing == 'linux' else 'linux'), raising=False)
+    monkeypatch.setattr(ownership, 'Path', lambda *_: types.SimpleNamespace(is_dir=lambda: missing != 'proc'))
+    starts = []
+    monkeypatch.setattr(ownership.subprocess, 'Popen', lambda *args, **kwargs: starts.append(args))
+    tree = ownership.ProcessTree()
+    with pytest.raises(RuntimeError, match='Windows or Linux'):
+        tree.start(['must-not-start'])
+    assert not starts and tree.proc is None and tree.job is None
+
+
 @pytest.mark.parametrize('exit_code', [0, 3])
 def test_captured_launcher_keeps_child_environment_output_and_exit(tmp_path, exit_code):
     """A lightweight pytest stand-in exercises two real Python child processes."""

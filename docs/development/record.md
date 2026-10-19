@@ -5528,3 +5528,17 @@ Enmao 明确批准可选 TensorBoard：scalars.jsonl 是唯一数值主源，展
 冻结 b2b9dba 完整 core2813 passed+1同一既有POSIXskip、CPU Flow525 passed；101源码哈希与HEAD未变。定向首次127 passed（含真实可选event读回），随后补一项flush失败分类进入完整core；正式远端CI将为可选组单独执行真实event回读，不把可选包加入主依赖。原始日志/XML/冻结证明在 .tmp/tensorboard-export，不随clone。
 
 新增展示能力覆盖：JSONL回滚尾段剔除/同坐标最后值、Run隔离、精确双精度scalar读回、整数epoch/step（含0）、tag组件转义、不读state补数值、拒绝分数/未知/越界横轴、缺依赖及writer构造/写入/flush/close失败退出2并保持源与正式result原字节、拒绝复用旧导出目录。没有真实训练/GPU/下载或服务启动。与前批dev对比，现有三个生产文件净增加54行（CLI13、共用JSONL读出4、event导出37），新增一个显式命令和一个可选依赖组；这是新能力，不计作结构净瘦身。无新生产模块、目录或Logger改动。分数epoch的TensorBoard呈现仍为明确的能力缺口，不把整数验收外推为全横轴支持。
+
+## 299. 2026-10-20 Run 执行归属、来源复用与有界测试
+
+本批从实际 `dev f55a8732` 在 `codex/debt-test-evidence` 汇总 R1–R5，交付 Draft PR，未合并 dev/main，不恢复研究队列或旧自动化。独立 Study、原 Run、失败证据、来源及下游固定副本保留。
+
+R1 复用 cache_lock 的 OS 锁覆盖 Runner 整个写入生命周期，非重入竞争者在日志/失败结果前拒绝。新增小型 artifact/execution.py 集中提供锁和尝试身份，因 Runner 与 scheduler 都需要同一合同，避免两处复制；经现有 artifact_api 导出，不新增层。调度 handoff 一次消费，不传给后代；原子 execution.json 只表示最近获准身份。零退出验收与非零结果纠正均重取空闲锁并核对 token，身份未知、不同或锁忙时保全结果、标记拒绝且不自动重试。CLI 和生成 Bash 均消费拒绝状态。对另一个 eval 的失效也持目标锁，但不声称冻结跨 Run checkpoint 或提供跨 Run 事务。
+
+R2 在 make 的业务写入/配方加载前检查已有成功 Run 的来源和配置绑定；同 version 的计算来源变化拒绝，旧结果原字节保留，使用新 version 建立新身份。已知元数据、YAML 注释和 seed 扩展可以保留来源兼容链，重引入旧 Run 仍核对原绑定。launch、run_succeeded 与聚合消费同一来源门；未知历史绑定明确拒绝，不静默变成待重跑。原 Run ID 与 result schema 不变，provenance 增加可选声明快照和兼容 digest。
+
+R3/R5 已在 e7c0bb2 保存全部 phase、最终 collection、逐次 attempt、退出及独立默认临时根。R4 的 cf37c0c2 及本批补强统一入口期限、所属进程树收尾和原子证据；正常父退出也清理遗留 worker，首错不被清理/持久化/诊断失败覆盖。report-only 保留原 events，只有末尾未换行截断可显式部分恢复。仅支持 Windows Job 与具备 /proc、waitid/WNOWAIT 的 Linux，其他平台启动前拒绝；主动 setsid 脱组的后代不在 Linux 组保护内。
+
+实际合成树定向 81 passed / 4.59 秒。最终完整 core 为 **2851 passed、1 既有 Windows POSIX 执行权限 skip、76.57 秒**；控制器墙时 80.90 秒，180 秒 launcher / 240 秒外层预算。首轮 2850 passed / 1 failed / 1 skip 发现 execution.py 漏结构登记，补齐后重验，失败原件保留。完整 CPU Flow 为 **582 passed、7 failed、145.56 秒**，控制器 148.83 秒；七项均在未改的 SDK fixture，本机 huggingface_hub 1.21.0 与 CI 固定 1.33.0 不同。原 e7 无 Git 基线同七项全部失败（7.36 秒），逐项诊断及 origin/transfers/test_origin_sdk SHA 一致，不把这一环境结果记成新回归或全部通过。CI 的固定 SDK 与实际 Python 3.10/3.13、Ubuntu/Windows、分发包验收另看最终 head 实际运行。
+
+本机完整原件在 .tmp/rpipe-final-core、rpipe-final-core-2、rpipe-final-flow，198 份源码/测试 SHA、改动文件 Python 3.10 语法及 E9/F 静态检查在 .tmp/rpipe-final-static.json（schedule 既有兼容导出不按 F401 删除）；这些临时文件不随 clone。独立基线比对原件在任务根 rpipe-r1-baseline-check/.tmp/sdk-baseline-20261020，不随 clone。没有真实训练、GPU、校准、PPL、模型下载或科学门变动；上述测试墙时不等于工程总工时。B135/B136 旧索引据已完成的 §235 纠正，不重复计债或关闭 Issue。
