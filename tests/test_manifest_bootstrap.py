@@ -351,9 +351,13 @@ def test_legacy_report_rebuild_does_not_fabricate_phase_coverage(tmp_path):
     ('xfail-call', 'xfail', 0), ('xfail-setup', 'xfail', 0),
     ('xfail-teardown', 'xfail', 0), ('failed-and-xfail', 'failed', 1),
     ('skip', 'skipped', 0), ('xpass', 'xpass', 0), ('failure', 'failed', 1),
+    ('xfail-call-empty', 'xfail', 0), ('xfail-setup-empty', 'xfail', 0),
+    ('xfail-teardown-empty', 'xfail', 0), ('xpass-empty', 'xpass', 0),
 ])
 def test_native_xfail_phases_keep_distinct_status_and_report_rebuild(tmp_path, case, expected, exit_code):
     """Public tests/run.py -> native pytest xfail phases -> distinct saved status and stable rebuild."""
+    reasonless = case.endswith('-empty')
+    case = case.removesuffix('-empty')
     source = Path(__file__).resolve().parent.parent
     (tmp_path / 'tests').mkdir()
     for name in ['tests/run.py', 'tests/_process_tree.py', 'tests/conftest.py', 'pyproject.toml']:
@@ -365,13 +369,14 @@ def test_native_xfail_phases_keep_distinct_status_and_report_rebuild(tmp_path, c
     if case in ('xfail-setup', 'xfail-teardown', 'failed-and-xfail'):
         code += '@pytest.fixture\ndef phase():\n'
         if case == 'xfail-setup':
-            code += "    pytest.xfail('known setup issue')\n"
+            code += "    pytest.xfail()\n" if reasonless else "    pytest.xfail('known setup issue')\n"
         else:
-            code += "    yield\n    pytest.xfail('known teardown issue')\n"
+            code += "    yield\n" + ("    pytest.xfail()\n" if reasonless else "    pytest.xfail('known teardown issue')\n")
         code += 'def test_case(phase):\n'
         code += "    assert False, 'ordinary failure'\n" if case == 'failed-and-xfail' else '    pass\n'
     elif case in ('xfail-call', 'xpass'):
-        code += "@pytest.mark.xfail(reason='known call issue', strict=False)\ndef test_case():\n"
+        code += ("@pytest.mark.xfail(strict=False)\n" if reasonless else
+                 "@pytest.mark.xfail(reason='known call issue', strict=False)\n") + "def test_case():\n"
         code += '    pass\n' if case == 'xpass' else "    assert False, 'known failure'\n"
     elif case == 'skip':
         code += "def test_case():\n    pytest.skip('ordinary skip')\n"
@@ -393,7 +398,12 @@ def test_native_xfail_phases_keep_distinct_status_and_report_rebuild(tmp_path, c
         phase = 'call' if case == 'xfail-call' else 'setup' if case == 'xfail-setup' else 'teardown'
         event = next(event for event in events if event['phase'] == phase)
         assert event['status'] == 'xfail' and event['verdict'] == event['category'] == 'fail'
-        assert 'known ' in event['reason']
+        assert event['reason'] is not None
+        if not reasonless:
+            assert 'known ' in event['reason']
+    if case == 'xpass':
+        event = next(event for event in events if event['phase'] == 'call')
+        assert event['status'] == 'xpass' and event['verdict'] == event['category'] == 'pass'
     report_path = directory / 'report.md'
     report = report_path.read_bytes()
     assert f'| {expected} | 1 |'.encode() in report

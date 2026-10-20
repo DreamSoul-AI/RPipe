@@ -242,14 +242,14 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
 
 def _status(report: pytest.TestReport, result_type: str | None) -> str:
     if report.skipped:
-        return 'xfail' if getattr(report, 'wasxfail', False) else 'skipped'
+        return 'xfail' if hasattr(report, 'wasxfail') else 'skipped'
     if report.passed:
-        if getattr(report, 'wasxfail', False):
+        if hasattr(report, 'wasxfail'):
             return 'xpass'
         if result_type == 'numeric':
             return 'measured'
         return 'passed'
-    if getattr(report, 'wasxfail', False):
+    if hasattr(report, 'wasxfail'):
         return 'xfail'
     return 'failed'
 
