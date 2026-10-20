@@ -49,8 +49,8 @@ def shared_paths(study_dir: Path | str) -> dict[str, Path]:
 
 
 @contextlib.contextmanager
-def cache_lock(root: Path | str, *, timeout: float = 120, reentrant: bool = True):
-    """OS-owned lock; optionally refuse same-thread reentry as well as peers."""
+def cache_lock(root: Path | str, *, timeout: float = 120):
+    """OS-owned lock; a killed writer cannot leave a permanently owned lock."""
     if not math.isfinite(timeout) or timeout < 0:
         raise ValueError('cache lock timeout must be finite and >= 0')
     root = Path(root).resolve()
@@ -58,8 +58,6 @@ def cache_lock(root: Path | str, *, timeout: float = 120, reentrant: bool = True
     key = (os.getpid(), *_root_identity(root))
     held = getattr(_held, 'roots', {})
     if key in held:
-        if not reentrant:
-            raise TimeoutError(f'shared input preparation locked: {root}')
         yield
         return
     with contextlib.ExitStack() as stack:

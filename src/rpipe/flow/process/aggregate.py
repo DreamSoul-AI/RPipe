@@ -13,7 +13,6 @@ from rpipe.structure.api.artifact_api import kinds
 from rpipe.structure.api.artifact_api import CorruptArtifactError
 from rpipe.structure.api.artifact_api import PROCESS_NAME, RESULT_NAME, RUNS_DIRNAME
 from rpipe.structure.api.artifact_api import STATUS_SUCCEEDED, load_result
-from rpipe.structure.api.artifact_api import check_result_source
 
 
 def process_path(study_dir: Path | str) -> Path:
@@ -266,7 +265,6 @@ def collect_from_index(study_dir: Path, index: dict[str, Any]) -> list[dict[str,
             if result is not None:
                 row['status'] = result.get('status')
                 if result.get('status') == STATUS_SUCCEEDED:
-                    check_result_source(study_dir, run_dir, result)
                     row['metrics'] = _numeric_metrics(result.get('metrics') or {})
             rows.append(row)
         groups.append(

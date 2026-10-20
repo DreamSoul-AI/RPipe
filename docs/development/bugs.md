@@ -2,13 +2,17 @@
 
 > 这里只保留尚未解决的缺陷。编号只增不复用；修复并验证后移除条目，开发证据留在 [record.md](record.md)，实验依据留在对应 Study 报告。正常差异或决定不修的事项不列为开放缺陷。权威仍是 [concept.md](../code/concept.md) → [layout.md](../code/layout.md) → 代码。
 
-更新日期：2026-10-20。
+更新日期：2026-10-17。
 
 ## 开放
 
-旧索引 B-135 / B-136 已关闭，修复与双侧验收见 [record.md §235](record.md)。本次未重复关闭 Issue，也不把索引纠正计为新增偿还。
+### B-135：组异常退出遗漏本次子进程收尾（本机已修，待同主题里程碑验收）
 
-2026-10-20 的 R1–R5 技术债修复位于独立 Draft 分支，尚未集成，执行和验证边界见 [record.md §299](record.md)。旧条目的历史状态保留在对应 Git 提交及开发记录中。 R1 的 make 配置写入者补充及 458 项相关回归见 [record.md §299.2](record.md#2992-r1-make-写入者准入)；该补充尚未集成，不重开旧已关闭项。R1 未选中 stale eval 锁忙时的纠错拒绝传播及 264 项窄回归见 [record.md §299.4](record.md#2994-r1-未选中-stale-eval-的纠错拒绝传播)，同属此 Draft 的未集成补充。R3 的 xfail 阶段分类补充及 89 项最终测试设施窄回归见 [record.md §299.5](record.md#2995-r3-已知失败的阶段证据与报告分类)，仍未集成，不另增主债项。第九批 R1/R2 显式缓存 metadata 与实际 Run config 的同根补齐及 320 项相关回归见 [record.md §299.6](record.md#2996-r1r2-缓存计划与实际-run-配置一致性)，同属该 Draft，未集成。
+- Issue：[185](https://github.com/DreamSoul-AI/RPipe/issues/185)。六类异常统一复用原wait/非零纠正保首错；1215806补强红证明首次wait短暂失败仍漏child，0df9943追加一次同句柄恢复wait。保留25红失败与额外非零纠正补红、8补强红失败及拒候选，不能用旧绿替代。最终合批295相邻/core2194 passed+1既有skip/Flow429 passed，新62全执行；未推送/未开PR，仍OPEN，持续OS wait拒绝仅attempt保证，不杀停或扩布局。详[record§228–233](record.md)，本机.tmp/audit135/136不随clone。
+
+### B-136：Windows Run别名丢sibling身份、误成功并绕过eval屏障（本机已修，待同主题里程碑验收）
+
+- Issue：[186](https://github.com/DreamSoul-AI/RPipe/issues/186)。原生Eval/eval samefile，alias丢父Train依赖/权重选择、父failed时readiness True且可派发替身。7ae8a6d先红30项10失败/20控制，再3594c1e将原sibling比较及调度依赖key/lookup/失效比较用平台Path；metadata原字符串、因素/seed/显式checkpoint/mtime/布局不变。原生POSIX不同大小写实体独立控制待实际CI；与185同批继续本地积累不另PR。详[record§232–233](record.md)，原始.tmp/audit136不随clone。
 
 B133–B134/#182/#183已随[PR184](https://github.com/DreamSoul-AI/RPipe/pull/184)最终head及实际dev28f3dde所有实际CI验收关闭，主题本地+remote已清；详[record§226–229](record.md)。
 
