@@ -5565,3 +5565,10 @@ R3/R5 已在 e7c0bb2 保存全部 phase、最终 collection、逐次 attempt、�
 扩展首轮为 454 passed / 4 failed；四项既有 transient_wait child 未指定 PYTHONPATH，独立探针确认解释器导入了原 SD editable 副本，不是隔离树。只补测试运行环境为隔离树 src，断言及生产代码不因这四项变化，完整原件与 import 探针保留在 `.tmp/debt-batch3/related-final`；最终 corrected 环境原件在 `related-final-env`。这些环境错误及此前无效夹具不计新债或源码失败。两层整轮期限分别 60 / 90 秒，真实子进程所属树结束时活动数 0、清理确认；没有访问原树业务资产。
 
 实际冻结来源为父提交 72b4be851587f7c9afd20dcf1215682b9f84d815 加本次 diff；最终 write.py SHA-256 `fee897dd2b53f12dd6b2523c6c06a410453e639186ea68108e3ce5f8304b54a0`，test_write.py 为 `cbfd5e1075c377db8793df32e8064f91b1881fa14ab91d326b5784848df88a66`，113 份源码 / 相关测试 SHA 在最终 command.json 回读一致。JUnit、进程执行元数据与静态 / EOL 核验在 `.tmp/debt-batch3/`，不随 clone；原 EOL 保持，Python 3.10 AST、E9/F63/F7/F82 和 diff 检查通过。未执行完整 core / Flow、真实 Python 3.10、远端 CI、训练、GPU、下载、校准或 PPL；不推送、不合并 main/dev、不恢复队列或 Actions。仍记为 R1 子例，不增加主债项数。
+
+
+### 299.3 R1 已保存计划的负 round 拒绝
+
+跨仓回补核对发现上游仍可复用负 round 计划：真实 jobs.json 含两个 Run 与逆序 batches，数值 -1 和字符串 '-2' 均返回可复用计划；公共 CLI 在 --round 0 的两种 include_done 分支均越过重建边界。有效首红 4 failed / 5 passed；0、None 和正数 2 的默认 / 顺序控制通过，原件在 `.tmp/debt-batch3/plan-negative-red`。这不是新增主债项，也不把下游已补的同一问题另计上游完成。
+
+修复只在现有存储数字转换之后补 stored_round < 1 时返回 None，沿原缓存失效 → make 重建路径；不改调用者数字错误的严格传播、0 / None → 1、合法批次顺序或 jobs.json 字节。2dc46fa 的已发 CI 只保留为该旧 head 的历史，不用于验收此后提交。生产改动仅两行。最终 schedule / saved-plan / scripts 及 CLI 入口窄回归 **326 passed、0 failed / error / skip，8.171 秒**，控制器 **10.2851 秒**，所属树清理确认；没有重复 458 项或完整 core / Flow。首红、原 JSON、JUnit 与命令保存于 `.tmp/debt-batch3/plan-negative-red` / `plan-negative-green`，113 份源码 / 相关测试 SHA 回读一致。当前 schedule.py SHA-256 `2a7dbd507e5b64e46681003a12be12824d38db11231b3e31379dba9c1f57bc9a`；新控制覆盖负数 / 负整数字符串、0 / None 默认及正 round 的 job / batch 原顺序，公共入口重建只到既有 sentinel，不启动训练子进程。Python 3.10 AST、E9/F63/F7/F82 与 diff 检查通过，原 EOL 保持；未实跑 Python 3.10、GPU、科学训练、下载或新 head 远端 CI，不推送、不合 main/dev、不恢复队列。

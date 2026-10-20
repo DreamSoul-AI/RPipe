@@ -188,6 +188,8 @@ def load_launch_plan(
         stored_round = int(payload.get('round') or 1)
     except (OSError, TypeError, ValueError, OverflowError, RecursionError):
         return None
+    if stored_round < 1:
+        return None
     if stored_init_gpu != int(init_gpu):
         return None
     if stored_num_gpus != int(num_gpus):

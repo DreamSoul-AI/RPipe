@@ -215,12 +215,14 @@ def test_native_launch_retry_policy_preserves_attempts_and_failure(tmp_path, no_
 
 
 @pytest.mark.parametrize('include_done', [False, True])
-def test_invalid_cached_launch_rebuilds_before_dispatch_or_process(tmp_path, monkeypatch, include_done):
+@pytest.mark.parametrize('damage', ['invalid-job', 'negative-round'])
+def test_invalid_cached_launch_rebuilds_before_dispatch_or_process(tmp_path, monkeypatch, include_done, damage):
     import rpipe.flow.cli as cli
 
     cache = tmp_path / 'scripts/jobs.json'
     cache.parent.mkdir()
-    cache.write_text(json.dumps({'jobs': [None], 'num_gpus': 0, 'round': 1}), encoding='utf-8')
+    cache.write_text(json.dumps({'jobs': [None] if damage == 'invalid-job' else [{'run_id': 'one'}],
+                                 'num_gpus': 0, 'round': 1 if damage == 'invalid-job' else -1}), encoding='utf-8')
     before = cache.read_bytes()
     boundary = RuntimeError('rebuild boundary reached')
     def rebuild(*args, **kwargs):
@@ -233,7 +235,7 @@ def test_invalid_cached_launch_rebuilds_before_dispatch_or_process(tmp_path, mon
     monkeypatch.setattr(cli, 'process_study', forbidden)
     flags = ['--include-done'] if include_done else []
     with pytest.raises(RuntimeError) as caught:
-        cli.main(['launch', str(tmp_path), '--num-gpus', '0', '--round', '1', *flags])
+        cli.main(['launch', str(tmp_path), '--num-gpus', '0', '--round', '0', *flags])
     assert caught.value is boundary
     assert cache.read_bytes() == before
     assert not (tmp_path / 'process.json').exists()
