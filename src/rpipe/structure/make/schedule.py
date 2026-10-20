@@ -303,6 +303,7 @@ def launch_jobs(
         run_id = str(run_id)
         if _run_result(study_dir, run_id).get('status') == STATUS_SUCCEEDED and not run_succeeded(study_dir, run_id):
             if not _fail_result(study_dir, run_id, f'sibling train {parent} is unfinished or newer; re-evaluation required', only_success=True):
+                refuse(run_id)
                 print(f'error {run_id} Run busy; result preserved', flush=True)
     # A supplied batch must not bypass the train/eval barrier either.
     waves = [

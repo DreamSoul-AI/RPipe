@@ -326,3 +326,83 @@ def test_native_launch_recovers_transient_wait_before_propagating_primary(tmp_pa
     finally:
         for child in children:
             child.communicate(timeout=10)
+
+
+@pytest.mark.parametrize('entry', ['cli', 'bash'])
+@pytest.mark.parametrize('busy', [True, False], ids=['busy-eval', 'idle-eval'])
+@pytest.mark.parametrize('parent_state', ['failed', 'newer'])
+def test_native_launch_reports_busy_stale_eval_outside_selected_jobs(tmp_path, entry, busy, parent_state):
+    """Public launch -> unselected stale eval correction refuses -> preserve prior Study process."""
+    import contextlib
+    from _process_tree import ProcessTree
+    from rpipe.structure.artifact import load_config, load_result, write_result
+    from rpipe.structure.artifact.execution import run_lock, start_execution
+    from rpipe.structure.artifact.provenance import load_provenance
+    from rpipe.structure.make import expand_study, plan_jobs
+    from rpipe.structure.make.schedule import render_bash, sibling_train_dependency, write_jobs_json
+
+    shutil.copyfile(Path(__file__).parents[2] / '_data/launch_retry_recipe.py', tmp_path / 'recipe.py')
+    write_config(tmp_path / 'study.yaml', {'study': 'stale-selection', 'seeds': [0],
+        'recipe': 'recipe.py', 'freeze': True, 'flow': {'prepare_shared': False},
+        'axes': {'algorithm.mode': ['train', 'eval', 'inference']}})
+    write_config(tmp_path / 'experiment_config.yaml', {'version': 'stale-selection-v1',
+        'data': {'name': 'Toy', 'source': 'stub'}, 'model': {'name': 'none', 'source': 'retry_fixture'},
+        'algorithm': {'mode': 'inference', 'source': 'retry_fixture', 'config': {'fail': False}},
+        'system': {'device': 'cpu'}})
+    configs = expand_study(tmp_path)['configs']
+    by_mode = {load_config(config)['algorithm']['mode']: config.parent for config in configs}
+    train, evaluation, selected = (by_mode[mode] for mode in ('train', 'eval', 'inference'))
+    assert sibling_train_dependency(tmp_path, evaluation.name) == train.name
+    provenance = load_provenance(tmp_path)['digest']
+    for root in (train, evaluation):
+        write_result(root / 'result.json', {'status': 'succeeded', 'control': {}, 'paths': {},
+                     'metrics': {'accuracy': 42}, 'provenance': provenance})
+    if parent_state == 'failed':
+        write_result(train / 'result.json', {'status': 'failed', 'error': 'prior train failed'})
+    os.utime(evaluation / 'result.json', ns=(1_000_000_000, 1_000_000_000))
+    os.utime(train / 'result.json', ns=(2_000_000_000, 2_000_000_000))
+    start_execution(evaluation, 'prior-eval-owner')
+    protected = {path: path.read_bytes() for path in (evaluation / 'result.json', evaluation / 'execution.json')}
+    jobs = plan_jobs(tmp_path, configs, init_gpu=0, num_gpus=0, include_done=True)
+    selected_jobs = [job for job in jobs if job['mode'] == 'inference']
+    assert len(selected_jobs) == 1 and selected_jobs[0]['run_id'] == selected.name
+    write_jobs_json(tmp_path, jobs, round_size=1, init_gpu=0, num_gpus=0)
+    process = tmp_path / 'process.json'
+    prior = b'{"retained": "prior Study process"}\n'
+    process.write_bytes(prior)
+    inputs = {path: path.read_bytes() for path in [tmp_path / 'study.yaml', tmp_path / 'experiment_config.yaml',
+        tmp_path / 'index.json', tmp_path / 'provenance.json', *configs]}
+    if entry == 'cli':
+        command = [sys.executable, '-m', 'rpipe', 'launch', str(tmp_path), '--mode', 'inference',
+                   '--num-gpus', '0', '--round', '1', '--console', 'shared', '--no-retry']
+    else:
+        script = render_bash(tmp_path, selected_jobs, python_exe=sys.executable, round_size=1, split_round=1)[0]
+        body = script.split("<<'RPIPE_LAUNCH'\n", 1)[1].rsplit('\nRPIPE_LAUNCH', 1)[0]
+        command = [sys.executable, '-c', body]
+    tree = ProcessTree()
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[3] / 'src'),
+               CUDA_VISIBLE_DEVICES='-1', HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1',
+               OMP_NUM_THREADS='1', MKL_NUM_THREADS='1', MPLBACKEND='Agg')
+    try:
+        with run_lock(evaluation) if busy else contextlib.nullcontext():
+            with (tmp_path / 'launch.stdout').open('wb') as out, (tmp_path / 'launch.stderr').open('wb') as err:
+                tree.start(command, cwd=Path(__file__).resolve().parents[3], env=env, stdout=out, stderr=err)
+                code = tree.wait(25)
+        output = (tmp_path / 'launch.stdout').read_text(encoding='utf-8', errors='replace')
+        assert load_result(selected / 'result.json')['status'] == 'succeeded', output
+        assert (selected / 'assets/attempts.txt').read_text().splitlines() == ['attempt']
+        assert {path: path.read_bytes() for path in inputs} == inputs
+        if busy:
+            assert code == 1, output
+            assert process.read_bytes() == prior
+            assert {path: path.read_bytes() for path in protected} == protected
+        else:
+            assert code == (0 if entry == 'cli' else 1), output
+            assert process.read_bytes() != prior
+            assert load_result(evaluation / 'result.json')['status'] == 'failed'
+            assert load_result(evaluation / 'result.json')['metrics'] == {'accuracy': 42}
+    finally:
+        tree.terminate(timeout=5)
+        if tree.proc is not None:
+            tree.proc.wait(timeout=5)
+        tree.close()

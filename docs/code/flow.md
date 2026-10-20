@@ -445,7 +445,7 @@ compare 不重跑计算，不改任何 Run 文件。和外部实现（例如旧 
 `flow.prepare_shared: false` 关闭 make/launch 的通用共享数据预构建（默认 true）。用于每个 Run 需先生成隔离数据、统计或注册专用 source 的 Study；此时 Study prepare / Data builder 负责准备并报告缺失原始数据。该字段必须是布尔值，不能因为未知 source 自动吞掉构造错误。main_probe 使用此选项，make 不加载探针，launch 的每个 Run 才准备一个组合。
 
 
-launch 对非零 run-one 退出的成功结果纠正先重取 Run 锁，并核对 execution token 属于本 child，再于辅助错误行输出前落盘；stdout 拒绝仍传播。锁忙、缺失 / 损坏 / 新 token 或退出 75 时，保留退出码与明确诊断，不改结果、不自动重试。零退出也必须重取当前空闲 Run 锁并核对 token；不匹配时记录拒绝，不能由旧 success 推导本轮执行成功。合法普通失败保留原重试和依赖屏障。CLI / 生成脚本通过可选 refused_runs 输出接收本轮所有权拒绝，旧 success 不能掩盖这类非零退出；普通失败重试恢复仍成功。调度旧 success 的启动失效在 Runner 获锁并落 token 后进行，Popen 之前不失效本 Run；未进入 Runner 的失败保留旧结果。见 B105/Issue138 及 R1 合同。
+launch 对非零 run-one 退出的成功结果纠正先重取 Run 锁，并核对 execution token 属于本 child，再于辅助错误行输出前落盘；stdout 拒绝仍传播。锁忙、缺失 / 损坏 / 新 token 或退出 75 时，保留退出码与明确诊断，不改结果、不自动重试。零退出也必须重取当前空闲 Run 锁并核对 token；不匹配时记录拒绝，不能由旧 success 推导本轮执行成功。合法普通失败保留原重试和依赖屏障。CLI / 生成脚本通过可选 refused_runs 输出接收本轮所有权拒绝，包括索引依赖纠错中未选进当前 jobs 的 stale eval 锁忙；有此拒绝时在 Study process 前退出，旧 success 不能掩盖拒绝。普通失败重试恢复仍成功。调度旧 success 的启动失效在 Runner 获锁并落 token 后进行，Popen 之前不失效本 Run；未进入 Runner 的失败保留旧结果。见 B105/Issue138 及 R1 合同。
 
 
 Study曲线PNG单文件发布使用同目录短随机.tmp，xb排他取得所有权后以既有PNG/dpi写入，关闭句柄再复用atomic_replace；失败保留旧图或缺目标、peer staging及输入字节。目标原mode与新文件umask保持；finally只清自有独立临时文件并关闭本次figure，OS清理拒绝留诊断、不覆盖原保存/发布错误。绘制数据、坐标、标签、格式和docs/figures/learning_curves.png路径不变；不承诺PNG与process.json多文件事务，也不改变checkpoint诊断保留。见B106/Issue140。
