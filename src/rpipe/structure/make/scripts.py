@@ -128,7 +128,9 @@ def render_bash(
             f'study = Path({str(study_dir.resolve())!r})',
             f'groups = {part!r}',
             'jobs = [job for group in groups for job in group]',
-            f"launch_jobs(study, jobs, round_size={round_size}, batches=groups, console='shared')",
+            'refused = []',
+            f"launch_jobs(study, jobs, round_size={round_size}, batches=groups, console='shared', refused_runs=refused)",
+            'if refused: raise SystemExit(1)',
             "failed = any(not run_succeeded(study, str(job['run_id'])) for job in jobs)",
         ]
         if index == len(partitions) - 1:

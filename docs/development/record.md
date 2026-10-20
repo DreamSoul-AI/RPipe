@@ -5528,3 +5528,79 @@ Enmao 明确批准可选 TensorBoard：scalars.jsonl 是唯一数值主源，展
 冻结 b2b9dba 完整 core2813 passed+1同一既有POSIXskip、CPU Flow525 passed；101源码哈希与HEAD未变。定向首次127 passed（含真实可选event读回），随后补一项flush失败分类进入完整core；正式远端CI将为可选组单独执行真实event回读，不把可选包加入主依赖。原始日志/XML/冻结证明在 .tmp/tensorboard-export，不随clone。
 
 新增展示能力覆盖：JSONL回滚尾段剔除/同坐标最后值、Run隔离、精确双精度scalar读回、整数epoch/step（含0）、tag组件转义、不读state补数值、拒绝分数/未知/越界横轴、缺依赖及writer构造/写入/flush/close失败退出2并保持源与正式result原字节、拒绝复用旧导出目录。没有真实训练/GPU/下载或服务启动。与前批dev对比，现有三个生产文件净增加54行（CLI13、共用JSONL读出4、event导出37），新增一个显式命令和一个可选依赖组；这是新能力，不计作结构净瘦身。无新生产模块、目录或Logger改动。分数epoch的TensorBoard呈现仍为明确的能力缺口，不把整数验收外推为全横轴支持。
+
+## 299. 2026-10-20 Run 执行归属、来源复用与有界测试
+
+本批从实际 `dev f55a8732` 在 `codex/debt-test-evidence` 汇总 R1–R5，交付 Draft PR，未合并 dev/main，不恢复研究队列或旧自动化。独立 Study、原 Run、失败证据、来源及下游固定副本保留。
+
+R1 复用 cache_lock 的 OS 锁覆盖 Runner 整个写入生命周期，非重入竞争者在日志/失败结果前拒绝。新增小型 artifact/execution.py 集中提供锁和尝试身份，因 Runner 与 scheduler 都需要同一合同，避免两处复制；经现有 artifact_api 导出，不新增层。调度 handoff 一次消费，不传给后代；原子 execution.json 只表示最近获准身份。零退出验收与非零结果纠正均重取空闲锁并核对 token，身份未知、不同或锁忙时保全结果、标记拒绝且不自动重试。CLI 和生成 Bash 均消费拒绝状态。对另一个 eval 的失效也持目标锁，但不声称冻结跨 Run checkpoint 或提供跨 Run 事务。
+
+R2 在 make 的业务写入/配方加载前检查已有成功 Run 的来源和配置绑定；同 version 的计算来源变化拒绝，旧结果原字节保留，使用新 version 建立新身份。已知元数据、YAML 注释和 seed 扩展可以保留来源兼容链，重引入旧 Run 仍核对原绑定。launch、run_succeeded 与聚合消费同一来源门；未知历史绑定明确拒绝，不静默变成待重跑。原 Run ID 与 result schema 不变，provenance 增加可选声明快照和兼容 digest。
+
+R3/R5 已在 e7c0bb2 保存全部 phase、最终 collection、逐次 attempt、退出及独立默认临时根。R4 的 cf37c0c2 及本批补强统一入口期限、所属进程树收尾和原子证据；正常父退出也清理遗留 worker，首错不被清理/持久化/诊断失败覆盖。report-only 保留原 events，只有末尾未换行截断可显式部分恢复。仅支持 Windows Job 与具备 /proc、waitid/WNOWAIT 的 Linux，其他平台启动前拒绝；主动 setsid 脱组的后代不在 Linux 组保护内。
+
+实际合成树定向 81 passed / 4.59 秒。最终完整 core 为 **2851 passed、1 既有 Windows POSIX 执行权限 skip、76.57 秒**；控制器墙时 80.90 秒，180 秒 launcher / 240 秒外层预算。首轮 2850 passed / 1 failed / 1 skip 发现 execution.py 漏结构登记，补齐后重验，失败原件保留。完整 CPU Flow 为 **582 passed、7 failed、145.56 秒**，控制器 148.83 秒；七项均在未改的 SDK fixture，本机 huggingface_hub 1.21.0 与 CI 固定 1.33.0 不同。原 e7 无 Git 基线同七项全部失败（7.36 秒），逐项诊断及 origin/transfers/test_origin_sdk SHA 一致，不把这一环境结果记成新回归或全部通过。CI 的固定 SDK 与实际 Python 3.10/3.13、Ubuntu/Windows、分发包验收另看最终 head 实际运行。
+
+本机完整原件在 .tmp/rpipe-final-core、rpipe-final-core-2、rpipe-final-flow，198 份源码/测试 SHA、改动文件 Python 3.10 语法及 E9/F 静态检查在 .tmp/rpipe-final-static.json（schedule 既有兼容导出不按 F401 删除）；这些临时文件不随 clone。独立基线比对原件在任务根 rpipe-r1-baseline-check/.tmp/sdk-baseline-20261020，不随 clone。没有真实训练、GPU、校准、PPL、模型下载或科学门变动；上述测试墙时不等于工程总工时。B135/B136 旧索引据已完成的 §235 纠正，不重复计债或关闭 Issue。
+
+### 299.1 R1 初始准入和拒绝后的 Study 边界
+
+独立下游迁移复核发现两条 R1 漏验：旧 success 的 Run 已被锁持有时，CLI 和生成 Bash 虽返回拒绝，却继续调用 Study process；有 handoff token 的 rerun 在初始 freeze 门前写新 token 并撤销旧成功，来源拒绝后 scheduler 仍可按同 token 修正旧结果。首个针对性红例为 6 failed / 2 passed；仅把失效后移到顶层 freeze 后的中间候选仍未闭合 scheduler 归属，未以其中 342 项绿结果作为最终验收。
+
+最终在完整 Run 锁内，有 token 时先执行初始 `check_frozen`（无论 study_phases 是否启用），通过才写本次 execution 和撤销旧 success。私有 `_run_owned(frozen_checked=...)` 仅跳过重复的顶层门，不增加持久状态；native prepare 的后续复检属于已准入业务期，失败不承诺保留旧成功。初始拒绝不改旧 token，因此 scheduler 认定本次执行未获准，保全旧 result 且不重试。CLI 在任何后续成功读取与 process 前返回，生成 Bash 同样在 process 前退出。
+
+真实公共 launch 反例在父来源门及成功绑定通过之后、真实 Popen 之前修改独立冻结 asset；两种 study_phases 均覆盖。每个子进程由既有 ProcessTree 持有、等待截止 8 秒，整轮 Windows Job 外守卫 90 秒；原输入、旧成功和旧 token 全部保留。加入受 token 的 environment/context 准入表后，有效闭环红例为 6 failed / 4 passed，初次 ProcessTree 夹具递归错误另存且不计源码反例。最终来源拒绝只启动一个真实子进程，无新 token，无旧成功改写，无 Study process；业务已开始后的失败及 killed rerun 原合同仍覆盖。
+
+最终无 SDK 边界的窄回归为 **356 passed / 178 deselected，32.95 秒**，控制器 **34.5690 秒**、所属树清理确认。选择 cli_retry、freeze_preservation、make/test_schedule，以及 runner 的竞争、死亡恢复、非重入、token 和证据失败范围；明确排除该文件已有的真实 Toy 两步训练，其余未选不是跳过或通过。命令、JUnit、原子执行元数据和真实 child stdout/stderr 位于 `.tmp/r1-gates-followup/admission-final*`；首红、有效 admission-red-valid 和中间绿原件同目录保留，不随 clone。Python 3.10 AST、E9/F63/F7/F82 与 diff 检查通过，未实跑 3.10、GPU、科学训练、校准、PPL、下载或远端 CI；不推送、不更新 Draft、不合并 dev/main，不恢复队列或 Actions。
+
+
+### 299.2 R1 make 写入者准入
+
+有效 CPU 反例在同 Study 的第二个展开 Run 已由现有 run_lock 持有时调用 expand_study、CLI make 与 write_run_configs：三入口仍改写配置，前两者还发布新的 provenance；空闲三控制通过（3 failed / 3 passed）。只改变生成描述、Run ID 不变，不执行科学训练。有效原件在 `.tmp/debt-batch3/make-red-corrected`，无效参数、Windows 锁文件读取及控制器夹具原件另存，不计源码失败。
+
+修复边界为 make/write.py 的两个公共配置生成入口：先取得全部本次展开 Run 的现有非重入锁，再执行既有来源门、recipe 和配置 / 索引 / provenance 写入，函数退出统一释放。后一个目标锁忙时不得先改写前一个配置；不引入新锁格式、来源兼容策略或跨 Study 事务，不声称保护不在当前展开集中的历史 Run。源码净增 10 行，不新增 helper、生产文件或依赖。锁准入可能建立 Run 目录及 .rpipe.lock；锁忙拒绝时，已有业务字节保留。
+
+本批新增十个合同节点：三个入口各有忙 / 空闲控制；两个入口各有正常 / 写入故障注入 PermissionError 控制；写入 config、index 和最终 provenance 时竞争的公共 FlowRunner 均在 execution / logger / phase 前拒绝，异常及后目标竞争之后全部锁可重新获取。单文件 41 passed；最终相关 make、CLI 重试、冻结及 Runner 所有权范围 **458 passed、0 failed / error / skip，35.541 秒**，控制器 **37.5962 秒**。原有真实 Toy 两步训练与其余非相关节点明确未选择，未把未选计通过。
+
+扩展首轮为 454 passed / 4 failed；四项既有 transient_wait child 未指定 PYTHONPATH，独立探针确认解释器导入了原 SD editable 副本，不是隔离树。只补测试运行环境为隔离树 src，断言及生产代码不因这四项变化，完整原件与 import 探针保留在 `.tmp/debt-batch3/related-final`；最终 corrected 环境原件在 `related-final-env`。这些环境错误及此前无效夹具不计新债或源码失败。两层整轮期限分别 60 / 90 秒，真实子进程所属树结束时活动数 0、清理确认；没有访问原树业务资产。
+
+实际冻结来源为父提交 72b4be851587f7c9afd20dcf1215682b9f84d815 加本次 diff；最终 write.py SHA-256 `fee897dd2b53f12dd6b2523c6c06a410453e639186ea68108e3ce5f8304b54a0`，test_write.py 为 `cbfd5e1075c377db8793df32e8064f91b1881fa14ab91d326b5784848df88a66`，113 份源码 / 相关测试 SHA 在最终 command.json 回读一致。JUnit、进程执行元数据与静态 / EOL 核验在 `.tmp/debt-batch3/`，不随 clone；原 EOL 保持，Python 3.10 AST、E9/F63/F7/F82 和 diff 检查通过。未执行完整 core / Flow、真实 Python 3.10、远端 CI、训练、GPU、下载、校准或 PPL；不推送、不合并 main/dev、不恢复队列或 Actions。仍记为 R1 子例，不增加主债项数。
+
+
+### 299.3 R1 已保存计划的负 round 拒绝
+
+跨仓回补核对发现上游仍可复用负 round 计划：真实 jobs.json 含两个 Run 与逆序 batches，数值 -1 和字符串 '-2' 均返回可复用计划；公共 CLI 在 --round 0 的两种 include_done 分支均越过重建边界。有效首红 4 failed / 5 passed；0、None 和正数 2 的默认 / 顺序控制通过，原件在 `.tmp/debt-batch3/plan-negative-red`。这不是新增主债项，也不把下游已补的同一问题另计上游完成。
+
+修复只在现有存储数字转换之后补 stored_round < 1 时返回 None，沿原缓存失效 → make 重建路径；不改调用者数字错误的严格传播、0 / None → 1、合法批次顺序或 jobs.json 字节。2dc46fa 的已发 CI 只保留为该旧 head 的历史，不用于验收此后提交。生产改动仅两行。最终 schedule / saved-plan / scripts 及 CLI 入口窄回归 **326 passed、0 failed / error / skip，8.171 秒**，控制器 **10.2851 秒**，所属树清理确认；没有重复 458 项或完整 core / Flow。首红、原 JSON、JUnit 与命令保存于 `.tmp/debt-batch3/plan-negative-red` / `plan-negative-green`，113 份源码 / 相关测试 SHA 回读一致。当前 schedule.py SHA-256 `2a7dbd507e5b64e46681003a12be12824d38db11231b3e31379dba9c1f57bc9a`；新控制覆盖负数 / 负整数字符串、0 / None 默认及正 round 的 job / batch 原顺序，公共入口重建只到既有 sentinel，不启动训练子进程。Python 3.10 AST、E9/F63/F7/F82 与 diff 检查通过，原 EOL 保持；未实跑 Python 3.10、GPU、科学训练、下载或新 head 远端 CI，不推送、不合 main/dev、不恢复队列。
+
+
+### 299.4 R1 未选中 stale eval 的纠错拒绝传播
+
+第四批先以完整原生 CLI launch --mode inference 与生成 Bash 的原生产 Python body 复现：索引内、当前 jobs 外的 eval 旧 success 因父 train 失败或更新而失效，目标 OS Run 锁忙时仅打印拒绝。独立仅记录 attempt 的 inference 夹具单次成功后，CLI 仍 exit 0 并发布 Study process；父 train 更新一支还将 stale eval 计入 planned=3 / succeeded=3 的完整聚合。有效首红 4 failed / 4 passed，空闲纠错控制通过；原件 `.tmp/debt-batch4/stale-eval-red` 保留，不把静态疑点或其他已修路径计作本轮结果。
+
+合同边界为已有 refused_runs 应包含索引依赖纠错的锁忙拒绝，即使目标 eval 不在本次选中 jobs。只在该 _fail_result 返回 False 的分支调用既有 refuse，沿现有 CLI / Bash 拒绝门在 Study process 前退出；独立选中 Run 的执行结果、原始 busy eval 字节 / token、普通空闲纠错和 job 退出码列表保持。不扩大到跨 Run 事务、停止无关 job 或自动重试。最终 scheduler / CLI 拒绝合同及上述 8 个真实入口窄回归 **264 passed、0 failed / error / skip，30.735 秒**，控制器 **32.7407 秒**；4 个 busy 分支均在 Study process 前 exit 1，eval result / execution 与既有 process 保持原字节，选中 inference 的 attempt 恰好一次，4 个空闲纠错控制均通过。测试入口有整轮和各子进程超时及所属树清理，offline / CPU / 单线程，显式 PYTHONPATH 指向本隔离树。首红 / 最终 JUnit、逐入口 stdout / stderr、真实 JSON 与 113 份源码 / 相关测试 SHA 保存在 `.tmp/debt-batch4/stale-eval-red` / `stale-eval-green`，静态回读在 `.tmp/debt-batch4/audit.json`；这些临时原件不随 Git clone 提供。schedule.py 实测 SHA-256 `5b87a08f4692177c477d7b9742e81a738d32f26b7f218c68065fe61c5e0afe18`，test_cli_retry.py 实测 SHA-256 `d0e75b039b9e7a12547136fdb86ef66f8b570bc0f006ddac58199611b488f4bd`。Python 3.10 AST、E9/F63/F7/F82 与 diff 检查通过；代码保持原工作树 EOL，测试 Git blob 沿既有 LF 规范化。未重复完整套件、未实跑 Python 3.10、GPU、科学训练、下载或新 head 远端 CI；未推送或合并。
+
+
+### 299.5 R3 已知失败的阶段证据与报告分类
+
+沿 R3 既有完整阶段证据盘点，按 testing.md 的 xfail / xpass 需单列合同，用公开 tests/run.py 启动真实 pytest。call、setup、teardown 的 expected failure 及普通 call failure 配 teardown xfail 四场均把 xfail 事件记为 skipped、verdict / category 为 null；普通 skip、xpass 和 failed 三场控制通过。有效首红 **4 failed / 3 passed**，原事件 / 原报告 / stdout / stderr / JUnit 与当时精确源码测试副本保存在 `.tmp/debt-batch7/r3-xfail-red`，控制器 **4.3990 秒**，所属树清理确认。这些是合成无计算测试，不是模型或科学实验。
+
+最小合同：_status 在原 skipped 分支核对 pytest 的 wasxfail，沿既有 xfail 状态和 fail 判定保存；报告以普通 failed 优先，其后任何阶段的 xfail 作为整次尝试状态，防止 teardown xfail 在 call passed 后被覆盖。普通 skip、xpass、measured、incomplete、attempt 与原生 pytest 退出政策保持；不把 xfail 改为阻断、不改原 events，也不新增状态、框架或依赖。8031556 中间时点的测试设施窄回归为 **85 passed、0 failed / error / skip，19.922 秒**，控制器 **20.4850 秒**；7 个新公共入口参数全部执行，普通失败覆盖 teardown xfail、原 skip / xpass 与 report-only 重建保留原 events / manifest 均通过。原件在 `.tmp/debt-batch7/r3-xfail-green`，8 份实际输入 SHA、两轮命令 / JUnit、真实 launcher 输出与所属树清理均已回读，临时原件不随 Git clone 提供。生产改动为一行状态区分及两行汇总优先级；精确原字节替换证明其他回调、退出、持久化与清理正文未改。tests/conftest.py 实测 SHA-256 `40ac963463ce05c11a7ba2168f7257f1dfd2240e1b62af317a279dc460c71b54`；test_manifest_bootstrap.py 实测 SHA-256 `75a39c4553ddb42b7eca5c3b398e1f5322f099646d8d00c8f1e490e895dadf73`。Python 3.10 AST、E9/F63/F7/F82 和 diff 检查通过，原工作树 EOL 保持。未重复完整 core / Flow，未实跑 Python 3.10、Torch、GPU、科学训练或下载，未取得新 head 远端 CI；未推送或合并。
+
+
+#### 299.5.1 空 reason 的同合同补齐
+
+8031556 独立审查与随后静态复核同时发现：pytest 的 wasxfail 身份由属性存在表示，无 reason 的合法 xfail / xpass 会设为空字符串。首轮 7 例均给非空 reason，85 passed 仅属于该中间版本，不能作为完整分类合同的最终验收。8031556 未推送，保留原历史，不 amend 或删除其首红 / 中间绿 / delivery。
+
+在 8031556 上追加真实公共入口的 reasonless call / setup / teardown xfail 和 nonstrict xpass，四支首红均直接指向该身份判断，**4 failed**，控制器 **2.5345 秒**，所属树清理确认；原件与精确当时源码 / 测试副本为 `.tmp/debt-batch7/reasonless-red`。此补充同属 R3，不增主债项。只将 _status 内三处 wasxfail 判别统一为 hasattr，与 pytest 自身规则一致；普通 failed 优先、各阶段汇总、native 退出策略及原事件保全保持。补齐后的最终同范围回归 **89 passed、0 failed / error / skip，22.464 秒**，控制器 **23.0180 秒**；11 个实际公共入口参数（含 4 个 reasonless）全部执行，报告重建保持原事件 / manifest，普通失败覆盖 xfail 及原退出控制均通过。原件 `.tmp/debt-batch7/reasonless-green` / `reasonless-audit.json` 保留当前 8 输入 SHA、整轮和各子进程截止与 owned=0 清理确认。当前 tests/conftest.py 实测 SHA-256 `763b771e86eb9fe725bd9443faba5667b4b9a2abbcd6a5940fb5608fc2f06349`，test_manifest_bootstrap.py 实测 SHA-256 `d29fb56015233148db68a229feb85da74c552dd7ee5b23b25217310da38aeebe`；精确替换核对、Python 3.10 AST、E9/F63/F7/F82 与 diff 均通过，原 EOL 保持。未重复完整 core / Flow，未执行 Torch、GPU、科学训练或下载，未实跑 Python 3.10 或新 head 远端 CI；未推送 / 合并。临时原件不随 Git clone 提供。
+
+
+### 299.6 R1/R2 缓存计划与实际 Run 配置一致性
+
+下游第九批提出同根反例后，上游独立核验 `load_launch_plan`：仅对可选 job.config 指针的存在文件校验，而子进程按实际 runs/<run_id>/config.yaml 读取。真实公共 `rpipe launch --mode eval` 遇到显式 mode=eval、实际 mode=train 时，外来 eval 文件、缺失路径及省略 config 三种指针均放行并实际进入 train CPU payload，六支包括 include_done 两种取值；既有来源门没有替代缓存 metadata 合同。实际 nested system.config.device 与保存 device 不符也有三支放行。有效首红 **9 failed / 5 passed，JUnit 7.380 秒，控制器 9.2303 秒**，14 个永久控制位于 test_cached_plan_identity.py。初轮手写 Run 未绑定成功 provenance，两个正常 eval 控制被既有 R2 正确拒绝，整轮 11 failed / 3 passed 仅为无效夹具；原件及精确输入 SHA 恢复副本保留，不计有效源码反例。
+
+最小修复是在原 job.config 校验之后增加七行：实际 Run config 存在时，经同一 _job_fields 核对 job 显式非空的 mode / device；不匹配返回原 None 重建请求。保留原指针校验、成功过滤、_job_fields 读失败语义及异常边界，不强制 config 指针身份；省略可选 metadata 的 legacy job 和没有实际 config 的虚拟计划保持，不把字段推断策略扩成本批需求。来源、result、Run ID、执行锁、token、模式筛选及研究算法不改。
+
+新 14 例直接绿后，最终相关 schedule / make / scripts 与新公共入口范围为 **320 passed、0 failed / error / skip，JUnit 11.154 秒，控制器 13.0183 秒**。错误缓存在现有 make 重建边界以 sentinel 23 截止，没有 payload；原 config / result / execution / process / index / provenance / cache 字节保全。合法 train 不误发到 eval，合法 eval 只进入已声明的轻量 CPU 观测，原 legacy / empty 控制同轮通过。原生 parser、scheduler、Runner、OS 锁及结果写入真实，科学阶段替换为无计算观测；重建 sentinel 仅证明拒绝交界，不冒称完成重新 make 或真实训练。
+
+原件 `.tmp/debt-batch9/identity-red-valid` / `identity-green` / `identity-related`，无效夹具 `identity-red` 单列；110 份实际源码 / 相关测试输入 SHA 前后相同，十个公共 CLI 各 8 秒、launcher 60 秒和外层 90 秒守卫，所有所属活动数 0、清理确认。schedule.py SHA-256 `7d90ef999852a3ad3a78b013ee0d305a8462b15d1b58b48d3d691b6642788aa5`，新测试 `d9a91b3312f16cd1da95acfcb79695cc9d3d600c6132c407fc53fd56a568f6e5`；七行精确逆替换等同父源码，原 EOL、Python 3.10 AST、E9/F63/F7/F82 检查通过。未重复完整 core / Flow 或已绿 xfail；未实跑 Python 3.10、Torch/GPU、研究训练、下载或新 head 远端 CI；普通本地提交，不推送、不合并或恢复队列。本项沿 R1/R2 子例登记，不增主债项。

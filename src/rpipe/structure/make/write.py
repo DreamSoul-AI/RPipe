@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
 from rpipe.structure.api.artifact_api import ensure_study_layout
 from rpipe.structure.api.artifact_api import write_provenance
+from rpipe.structure.api.artifact_api import prepare_make_sources
 from rpipe.structure.make.expand import expand_patches, load_study_yaml
 from rpipe.structure.make.recipe import load_recipe
 
 from rpipe.structure.api.artifact_api import (
+    RUNS_DIRNAME,
     artifact_layout,
     build_index,
     experiment_entries,
     load_config,
+    run_lock,
     write_config,
     write_index,
 )
@@ -22,7 +26,7 @@ from rpipe.structure.control import experiment_config_from_mapping, run_config_f
 from rpipe.structure.make.expand import axis_keys_from_study
 
 
-def write_run_configs(study_dir: Path, patches: list[dict[str, Any]]) -> list[Path]:
+def _run_configs(study_dir: Path, patches: list[dict[str, Any]]):
     base_path = study_dir / 'experiment_config.yaml'
     if not base_path.is_file():
         raise FileNotFoundError(f'missing experiment_config.yaml: {base_path}')
@@ -31,12 +35,24 @@ def write_run_configs(study_dir: Path, patches: list[dict[str, Any]]) -> list[Pa
     ids = [run.id for run in runs]
     if len(ids) != len(set(ids)):
         raise ValueError('duplicate Run in Study expansion; use a new version for repeated computation')
+    return runs
+
+
+def _write_configs(study_dir: Path, runs) -> list[Path]:
     written: list[Path] = []
     for run in runs:
         cfg = run.to_mapping()
         layout = artifact_layout(study_dir, run.id)
         written.append(write_config(layout.config_path, cfg))
     return written
+
+
+def write_run_configs(study_dir: Path, patches: list[dict[str, Any]]) -> list[Path]:
+    runs = _run_configs(study_dir, patches)
+    with ExitStack() as stack:
+        for run in runs:
+            stack.enter_context(run_lock(study_dir / RUNS_DIRNAME / run.id))
+        return _write_configs(study_dir, runs)
 
 
 def write_study_index(
@@ -60,13 +76,19 @@ def write_study_index(
 
 def expand_study(study_dir: Path | str) -> dict[str, Any]:
     """Write Run configs and index from ``study.yaml``."""
-    study_dir = ensure_study_layout(Path(study_dir).resolve())
+    study_dir = Path(study_dir).resolve()
     study = load_study_yaml(study_dir)
-    load_recipe(study_dir, study)
     patches = expand_patches(study)
-    configs = write_run_configs(study_dir, patches)
-    index_file = write_study_index(study_dir, study, configs)
-    provenance_file = write_provenance(study_dir, study)
+    runs = _run_configs(study_dir, patches)
+    with ExitStack() as stack:
+        for run in runs:
+            stack.enter_context(run_lock(study_dir / RUNS_DIRNAME / run.id))
+        sources = prepare_make_sources(study_dir, study, runs)
+        load_recipe(study_dir, study)
+        ensure_study_layout(study_dir)
+        configs = _write_configs(study_dir, runs)
+        index_file = write_study_index(study_dir, study, configs)
+        provenance_file = write_provenance(study_dir, study, sources=sources)
     return {
         'study_dir': study_dir,
         'index': index_file,

@@ -7,12 +7,25 @@ import pytest
 
 from rpipe.structure.artifact.layout import artifact_layout
 from rpipe.structure.artifact.shared import cache_lock, link_input, migrate_shared, shared_paths
+
 from rpipe.structure.artifact.shared import prepared_resource
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.structure_layer, pytest.mark.module_artifact,
               pytest.mark.cost(cost_class='c2'),
               pytest.mark.result_type('categorical', detail='summary')]
+
+
+def test_nonreentrant_lock_refuses_nested_owner_without_releasing_outer(tmp_path):
+    with cache_lock(tmp_path, timeout=0):
+        with pytest.raises(TimeoutError):
+            with cache_lock(tmp_path / '.', timeout=0, reentrant=False):
+                pytest.fail('nonreentrant acquisition entered')
+        with cache_lock(tmp_path, timeout=0):
+            pass  # Existing shared-cache default remains reentrant.
+    with cache_lock(tmp_path, timeout=0, reentrant=False):
+        pass
+
 
 
 def test_studies_share_inputs_but_not_run_outputs(tmp_path):

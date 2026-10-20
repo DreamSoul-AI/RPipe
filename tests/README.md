@@ -44,6 +44,16 @@ python tests/run.py --all
 
 每次运行写入 `.tmp/test-results/<run_id>/manifest.json`、`events.jsonl` 和 `report.md`。
 
+事件保存 setup/call/teardown，以每次 setup 区分同一节点的尝试。最终筛选后的节点清单写入 manifest。报告按用例和尝试合并阶段：缺少 teardown 记 incomplete，完整尝试中任何阶段失败均覆盖 call 通过；未开始的选中节点记 not_run。跳过原因及所有失败诊断保留，数值型用例的 call 测量不会被成功清理覆盖。xfail 与普通 skipped 分列，xpass 保持独立；pytest 的 wasxfail 属性存在即表示该身份，空 reason 同样有效；完整尝试中的普通 failed 优先，其后任何阶段的 xfail 覆盖 call 通过，已知失败不被成功清理或普通跳过掩盖。仅保留 pytest 原退出码，不在报告层另定 xfail 阻断策略。会话退出状态写入原 manifest。
+
+统一入口默认整轮期限为 1800 秒（与现有 CPU CI 作业上限一致），可用 `--timeout <秒>` 指定有限正数。正常退出、超时或中断时均收尾本入口拥有的进程，防止主 pytest 已退出而 worker 继续持有输出管道。Windows 使用私有 Job Object：子进程先挂起，归属 Job 后恢复，禁止 breakaway；Linux 使用独立进程组与 /proc 活跃观测，等待时以 waitid/WNOWAIT 保留组长身份至收尾后再 reap，收尾范围为该组（主动另建会话的后代不在组内）。仅支持 Windows 与具备 /proc、waitid/WNOWAIT 的 Linux；其他平台在启动子进程前明确拒绝，不把组长僵尸误当仍活跃的 worker。清理后的实际退出码、活动进程数与确认状态保存到该轮 execution.json；清理未确认时保留错误，不声称资源已释放。整轮期限触发后清理另有有限的 10 秒阶段期限。私有实现见 [_process_tree.py](_process_tree.py)，不依赖模型或额外包。直接 `python -m pytest` 的期限仍由外层负责。
+
+manifest 与 execution 使用同目录临时文件及原子替换；更新中断保留上一份完整记录与未完成临时文件。首次启动未取得 manifest 时，execution 明确记录 manifest_available=false。诊断输出失败也记录在 execution，不替代超时、中断或已有非零退出。
+
+原进程结束后，可用 `python tests/run.py --report-only .tmp/test-results/<run_id>` 从原 manifest/events/execution 重建报告，不重新执行测试或改写事件；缺少会话退出状态时明确显示 unknown。旧事件没有完整 phase/收集清单时仅保留原结果，不补造完整性证据。
+
+未显式传入 `--basetemp` 时，pytest 临时根使用本次结果目录下独立的 `pytest/`，不再共享 `.tmp/pytest`；显式路径保持，实际路径写入 manifest。并行调用因此不会清理另一调用的临时输入。
+
 统一入口为 pytest 子进程显式传递当前环境和 stdout/stderr；调用方捕获入口输出时，失败诊断与退出码仍可取得。该合同由 [test_run_entry.py](test_run_entry.py) 的真实轻量子进程回归覆盖。
 
 `--core` 选择 C1/C2 的 unit，排除 `external`、`gpu`、`slow`。新增流程命令选择 C1/C2 的 integration/e2e，并应用同样的排除项；覆盖本地 Flow 执行、错误结果、Study 汇总和版本隔离。参数分隔符 `--` 后的选项直接传给 pytest。
@@ -52,7 +62,7 @@ python tests/run.py --all
 
 [Unit Tests](../.github/workflows/unit-tests.yml) 保留 core 门，并在 Ubuntu/Windows × Python 3.10/3.13 四个环境运行上述 CPU 流程门。每个提交是否通过以其对应 Actions 结果为准。当前两个 e2e 均含 `external`，因此这条门目前选择本地 integration；今后符合条件的 e2e 自动纳入。
 
-CI 安装 `.[dev]`，未安装 `hf` 可选依赖；HF 真实 Trainer 用例可能跳过。GPU、下载依赖与慢任务不属于此门。需要验证这些能力时，按对应 Study 计划单独执行；已有复现实验只证明各自声明的配方与预算。
+CI 安装 `.[dev,tensorboard]` 与 workflow 固定的 SDK 测试版本，未安装完整 `hf` 可选组；HF 真实 Trainer 用例可能跳过。GPU、下载依赖与慢任务不属于此门。需要验证这些能力时，按对应 Study 计划单独执行；已有复现实验只证明各自声明的配方与预算。
 
 [Package Check](../.github/workflows/package-check.yml) 在 Ubuntu/Windows 构建 wheel / sdist，再分别创建环境、正常安装依赖和生成包，从源码目录之外运行 [package_smoke.py](package_smoke.py)：模块入口与 console script、离线 Toy/Stub Study 的 make→launch→process→status/logs/report、四个 Run 与两个 Experiment、已成功 Run 的重复 launch 跳过。Stub 验证的是安装及产物合同，不代表真实数据训练精度。各提交的远端结果以对应 Actions 为准。
 

@@ -5,6 +5,7 @@ import pytest
 from rpipe.flow.cli import run_study
 from rpipe.flow.process.study import run_study as process_study
 from rpipe.structure.artifact import load_config, load_index, write_config, write_result
+from rpipe.structure.artifact.provenance import load_provenance
 
 pytestmark = [
     pytest.mark.integration,
@@ -94,7 +95,8 @@ def test_run_study_new_version_replaces_index_and_preserves_old_run(tmp_path: Pa
     assert old_body['version'] == 'v1'
     old_result = write_result(
         old_config.parent / 'result.json',
-        {'status': 'succeeded', 'control': old_body, 'metrics': {'accuracy': 80.0}, 'paths': {}},
+        {'status': 'succeeded', 'control': old_body, 'metrics': {'accuracy': 80.0}, 'paths': {},
+         'provenance': load_provenance(study)['digest']},
     )
     old_bytes = (old_config.read_bytes(), old_result.read_bytes())
 
@@ -119,7 +121,8 @@ def test_run_study_new_version_replaces_index_and_preserves_old_run(tmp_path: Pa
 
     write_result(
         new_config.parent / 'result.json',
-        {'status': 'succeeded', 'control': new_body, 'metrics': {'accuracy': 20.0}, 'paths': {}},
+        {'status': 'succeeded', 'control': new_body, 'metrics': {'accuracy': 20.0}, 'paths': {},
+         'provenance': load_provenance(study)['digest']},
     )
     complete = process_study(study)
     current = complete['experiments'][0]
