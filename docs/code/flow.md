@@ -412,7 +412,9 @@ freeze开启时，证据读取失败（含include匹配文件消失、权限拒�
 
 `launch` 开始前核对一次。`study.yaml` 写 `freeze: true` 时，`files` 或 `plan` 有任何差异，或来源清单缺失，就退出 2，不启动 Run；prepare 也做同样核对（§5 第 4.1 步），防止直接 `run-one` 绕过。Runner 与 Study process 的检查时机见 §14.0。未启用 freeze 时，launch 对已有清单的变化打印 `provenance: N changed`；没有清单则不作该提示。已有成功 Run 仍须通过下述来源复用保护，包括显式 include-done 的启动前核对。`environment`、`git` 和 `created_at` 只记录，不参与 freeze 比较，不能用 freeze 证明异机环境一致。
 
-重新 make 不自动创建新 version 或重跑成功 Run。展开先在内存中计算候选配置，早于创建目录、activity、加载 recipe 和写 config/index/provenance/jobs 核对旧成功来源。计算来源改变且候选含已有成功时，或成功来源绑定未知时，以 ProvenanceChangedError 拒绝，保全旧业务产物，要求使用新 version；不得将拒绝变成自动重跑。完全不相交的新 Run 可 make，旧目录保留。
+重新 make 不自动创建新 version 或重跑成功 Run。展开先在内存中计算候选配置，早于创建业务目录、activity、加载 recipe 和写 config/index/provenance/jobs 核对旧成功来源。计算来源改变且候选含已有成功时，或成功来源绑定未知时，以 ProvenanceChangedError 拒绝，保全旧业务产物，要求使用新 version；不得将拒绝变成自动重跑。完全不相交的新 Run 可 make，旧目录保留。
+
+make 的配置生成入口先取得本次全部候选 Run 的现有非重入执行锁，再核对来源并加载 recipe；锁覆盖配置、索引与 provenance 发布，任一目标忙时立即拒绝，已经取得的锁统一释放。write_run_configs 同样先取得全部候选锁再写配置。准入可能建立 Run 目录及 `.rpipe.lock`，拒绝不改写已有配置或业务产物；这不是跨 Run 的原子写入事务，也不保护未展开的历史 Run。
 
 provenance 增加可选 declarations（两份声明的原始UTF-8文本，必须与files中的SHA相符）和 compatible_digests（此前已证明同计算来源的完整provenance digest）。Run ID及旧result字节不变，digest仍只计算files/plan。描述、run_description、YAML格式和未入来源清单的普通README可兼容；tags仍参与Run身份。fixed/axes/seeds等展开字段由共同Run的规范配置身份核对，允许同来源扩展seed；recipe、flow及未知Study字段保持执行语义，不能按元数据忽略。provenance.include里的额外文件默认是计算输入，不能只凭.md后缀豁免。库Python仍按现有整个包来源合同保守比较，不猜哪些模块未使用。
 

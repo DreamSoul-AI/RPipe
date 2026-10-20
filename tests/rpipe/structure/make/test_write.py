@@ -211,3 +211,88 @@ def test_new_version_preserves_old_result_under_changed_computation(managed):
     assert second['configs'][0].parent != first['configs'][0].parent
     assert result.read_bytes() == raw
     assert len(plan_jobs(managed, second['configs'], init_gpu=0, num_gpus=0)) == 1
+
+
+@pytest.mark.parametrize('entry', ['expand', 'cli', 'configs'])
+@pytest.mark.parametrize('busy', [True, False], ids=['busy', 'idle'])
+def test_make_preserves_all_run_configs_while_an_expanded_run_is_owned(managed, entry, busy):
+    """Public make/config entry -> busy last Run refuses before publishing any plan bytes."""
+    import contextlib
+    from rpipe.flow import cli
+    from rpipe.structure.artifact.execution import RunLockedError, run_lock
+    from rpipe.structure.make import expand_patches, load_study_yaml, write_run_configs
+
+    _change(managed, 'study.yaml', '[0]', '[0, 1]')
+    configs = expand_study(managed)['configs']
+    with (managed / 'study.yaml').open('a', encoding='utf-8') as out:
+        out.write('run_description: refreshed metadata {seed}\n')
+    for config in configs:
+        with run_lock(config.parent):
+            pass
+    with run_lock(configs[-1].parent) if busy else contextlib.nullcontext():
+        paths = [p for p in managed.rglob('*') if p.is_file() and p.name != '.rpipe.lock']
+        before = {p: p.read_bytes() for p in paths}
+        error = None
+        try:
+            if entry == 'configs':
+                write_run_configs(managed, expand_patches(load_study_yaml(managed)))
+            elif entry == 'cli':
+                cli.main(['make', str(managed), '--num-gpus', '0'])
+            else:
+                expand_study(managed)
+        except RunLockedError as exc:
+            error = exc
+        if busy:
+            assert {p: p.read_bytes() for p in managed.rglob('*')
+                    if p.is_file() and p.name != '.rpipe.lock'} == before
+            assert error is not None
+        else:
+            assert error is None
+            assert all(b'refreshed metadata' in config.read_bytes() for config in configs)
+
+    for config in configs:
+        with run_lock(config.parent):
+            pass
+
+
+@pytest.mark.parametrize('entry', ['expand', 'configs'])
+@pytest.mark.parametrize('writer_failure', [False, True], ids=['publish', 'failure'])
+def test_make_prevents_runner_admission_until_its_writers_finish(managed, monkeypatch, entry, writer_failure):
+    """Make writer -> competing public Runner refuses, including before final provenance publication."""
+    from rpipe.flow import FlowContext, FlowRunner
+    from rpipe.structure.artifact import artifact_layout
+    from rpipe.structure.artifact.execution import RunLockedError, run_lock
+    from rpipe.structure.make import expand_patches, load_study_yaml, write_run_configs
+    import rpipe.structure.make.write as write
+
+    _change(managed, 'study.yaml', '[0]', '[0, 1]')
+    configs = expand_study(managed)['configs']
+    observed = []
+    error = PermissionError('make writer denied')
+    def guard(name, original):
+        def publish(*args, **kwargs):
+            for config in configs:
+                ctx = FlowContext(managed, artifact_layout(managed, config.parent.name), {})
+                with pytest.raises(RunLockedError):
+                    FlowRunner(['collect']).run(ctx)
+                assert not (config.parent / 'execution.json').exists()
+            observed.append(name)
+            if writer_failure and name == ('provenance' if entry == 'expand' else 'config'):
+                raise error
+            return original(*args, **kwargs)
+        return publish
+    for name, attribute in [('config', 'write_config'), ('index', 'write_index'), ('provenance', 'write_provenance')]:
+        monkeypatch.setattr(write, attribute, guard(name, getattr(write, attribute)))
+    def make():
+        return expand_study(managed) if entry == 'expand' else write_run_configs(
+            managed, expand_patches(load_study_yaml(managed)))
+    if writer_failure:
+        with pytest.raises(PermissionError) as caught:
+            make()
+        assert caught.value is error
+    else:
+        make()
+    assert observed[-1] == ('provenance' if entry == 'expand' else 'config')
+    for config in configs:
+        with run_lock(config.parent):
+            pass

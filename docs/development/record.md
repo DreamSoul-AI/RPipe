@@ -5552,3 +5552,16 @@ R3/R5 已在 e7c0bb2 保存全部 phase、最终 collection、逐次 attempt、�
 真实公共 launch 反例在父来源门及成功绑定通过之后、真实 Popen 之前修改独立冻结 asset；两种 study_phases 均覆盖。每个子进程由既有 ProcessTree 持有、等待截止 8 秒，整轮 Windows Job 外守卫 90 秒；原输入、旧成功和旧 token 全部保留。加入受 token 的 environment/context 准入表后，有效闭环红例为 6 failed / 4 passed，初次 ProcessTree 夹具递归错误另存且不计源码反例。最终来源拒绝只启动一个真实子进程，无新 token，无旧成功改写，无 Study process；业务已开始后的失败及 killed rerun 原合同仍覆盖。
 
 最终无 SDK 边界的窄回归为 **356 passed / 178 deselected，32.95 秒**，控制器 **34.5690 秒**、所属树清理确认。选择 cli_retry、freeze_preservation、make/test_schedule，以及 runner 的竞争、死亡恢复、非重入、token 和证据失败范围；明确排除该文件已有的真实 Toy 两步训练，其余未选不是跳过或通过。命令、JUnit、原子执行元数据和真实 child stdout/stderr 位于 `.tmp/r1-gates-followup/admission-final*`；首红、有效 admission-red-valid 和中间绿原件同目录保留，不随 clone。Python 3.10 AST、E9/F63/F7/F82 与 diff 检查通过，未实跑 3.10、GPU、科学训练、校准、PPL、下载或远端 CI；不推送、不更新 Draft、不合并 dev/main，不恢复队列或 Actions。
+
+
+### 299.2 R1 make 写入者准入
+
+有效 CPU 反例在同 Study 的第二个展开 Run 已由现有 run_lock 持有时调用 expand_study、CLI make 与 write_run_configs：三入口仍改写配置，前两者还发布新的 provenance；空闲三控制通过（3 failed / 3 passed）。只改变生成描述、Run ID 不变，不执行科学训练。有效原件在 `.tmp/debt-batch3/make-red-corrected`，无效参数、Windows 锁文件读取及控制器夹具原件另存，不计源码失败。
+
+修复边界为 make/write.py 的两个公共配置生成入口：先取得全部本次展开 Run 的现有非重入锁，再执行既有来源门、recipe 和配置 / 索引 / provenance 写入，函数退出统一释放。后一个目标锁忙时不得先改写前一个配置；不引入新锁格式、来源兼容策略或跨 Study 事务，不声称保护不在当前展开集中的历史 Run。源码净增 10 行，不新增 helper、生产文件或依赖。锁准入可能建立 Run 目录及 .rpipe.lock；锁忙拒绝时，已有业务字节保留。
+
+本批新增十个合同节点：三个入口各有忙 / 空闲控制；两个入口各有正常 / 写入故障注入 PermissionError 控制；写入 config、index 和最终 provenance 时竞争的公共 FlowRunner 均在 execution / logger / phase 前拒绝，异常及后目标竞争之后全部锁可重新获取。单文件 41 passed；最终相关 make、CLI 重试、冻结及 Runner 所有权范围 **458 passed、0 failed / error / skip，35.541 秒**，控制器 **37.5962 秒**。原有真实 Toy 两步训练与其余非相关节点明确未选择，未把未选计通过。
+
+扩展首轮为 454 passed / 4 failed；四项既有 transient_wait child 未指定 PYTHONPATH，独立探针确认解释器导入了原 SD editable 副本，不是隔离树。只补测试运行环境为隔离树 src，断言及生产代码不因这四项变化，完整原件与 import 探针保留在 `.tmp/debt-batch3/related-final`；最终 corrected 环境原件在 `related-final-env`。这些环境错误及此前无效夹具不计新债或源码失败。两层整轮期限分别 60 / 90 秒，真实子进程所属树结束时活动数 0、清理确认；没有访问原树业务资产。
+
+实际冻结来源为父提交 72b4be851587f7c9afd20dcf1215682b9f84d815 加本次 diff；最终 write.py SHA-256 `fee897dd2b53f12dd6b2523c6c06a410453e639186ea68108e3ce5f8304b54a0`，test_write.py 为 `cbfd5e1075c377db8793df32e8064f91b1881fa14ab91d326b5784848df88a66`，113 份源码 / 相关测试 SHA 在最终 command.json 回读一致。JUnit、进程执行元数据与静态 / EOL 核验在 `.tmp/debt-batch3/`，不随 clone；原 EOL 保持，Python 3.10 AST、E9/F63/F7/F82 和 diff 检查通过。未执行完整 core / Flow、真实 Python 3.10、远端 CI、训练、GPU、下载、校准或 PPL；不推送、不合并 main/dev、不恢复队列或 Actions。仍记为 R1 子例，不增加主债项数。

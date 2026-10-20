@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +13,12 @@ from rpipe.structure.make.expand import expand_patches, load_study_yaml
 from rpipe.structure.make.recipe import load_recipe
 
 from rpipe.structure.api.artifact_api import (
+    RUNS_DIRNAME,
     artifact_layout,
     build_index,
     experiment_entries,
     load_config,
+    run_lock,
     write_config,
     write_index,
 )
@@ -45,7 +48,11 @@ def _write_configs(study_dir: Path, runs) -> list[Path]:
 
 
 def write_run_configs(study_dir: Path, patches: list[dict[str, Any]]) -> list[Path]:
-    return _write_configs(study_dir, _run_configs(study_dir, patches))
+    runs = _run_configs(study_dir, patches)
+    with ExitStack() as stack:
+        for run in runs:
+            stack.enter_context(run_lock(study_dir / RUNS_DIRNAME / run.id))
+        return _write_configs(study_dir, runs)
 
 
 def write_study_index(
@@ -73,12 +80,15 @@ def expand_study(study_dir: Path | str) -> dict[str, Any]:
     study = load_study_yaml(study_dir)
     patches = expand_patches(study)
     runs = _run_configs(study_dir, patches)
-    sources = prepare_make_sources(study_dir, study, runs)
-    load_recipe(study_dir, study)
-    ensure_study_layout(study_dir)
-    configs = _write_configs(study_dir, runs)
-    index_file = write_study_index(study_dir, study, configs)
-    provenance_file = write_provenance(study_dir, study, sources=sources)
+    with ExitStack() as stack:
+        for run in runs:
+            stack.enter_context(run_lock(study_dir / RUNS_DIRNAME / run.id))
+        sources = prepare_make_sources(study_dir, study, runs)
+        load_recipe(study_dir, study)
+        ensure_study_layout(study_dir)
+        configs = _write_configs(study_dir, runs)
+        index_file = write_study_index(study_dir, study, configs)
+        provenance_file = write_provenance(study_dir, study, sources=sources)
     return {
         'study_dir': study_dir,
         'index': index_file,
