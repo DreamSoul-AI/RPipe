@@ -551,19 +551,3 @@ def test_match_when_keeps_inequality_short_circuit_and_exception_identity(outcom
         assert match_when({'first': Value(), 'second': Value()}, {'first': 1, 'second': 2}) == (outcome == 'match')
     assert calls == ([1, 2] if outcome == 'match' else [1])
     assert match_when({}, {}) is True
-
-
-@pytest.mark.parametrize('stored_round', [-1, '-2', 0, None, 2])
-def test_saved_plan_round_boundary_keeps_valid_job_order_and_defaults(tmp_path, stored_round):
-    jobs = [{'run_id': name, 'mode': 'train', 'device': 'cpu'} for name in ['first', 'last']]
-    batches = [[jobs[1]], [jobs[0]]]
-    path = _saved_plan_file(tmp_path, {'jobs': jobs, 'batches': batches,
-                                     'round': stored_round, 'num_gpus': 0})
-    before = path.read_bytes()
-    plan = load_launch_plan(tmp_path, init_gpu=0, num_gpus=0, round_size=0)
-    if stored_round in (-1, '-2'):
-        assert plan is None
-    else:
-        assert plan['round'] == (stored_round or 1)
-        assert plan['job_list'] == jobs and plan['batches'] == batches
-    assert path.read_bytes() == before

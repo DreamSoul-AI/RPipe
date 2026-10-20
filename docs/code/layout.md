@@ -47,7 +47,6 @@
 - **config**：**make** 写入 `runs/<id>/`；prepare 只读
 - **result**：summarize / **write** 写入；process 可派生
 - **asset**：文件通道。data / model 文件、checkpoint、AlgorithmTracker 曲线、Logger 文本，落在 `shared/` 或 `runs/<id>/assets/`
-- **execution**：`runs/<id>/execution.json` 保存最近获准执行的 attempt token / PID；由 Runner 持 Run OS 锁原子替换。不是完成状态或历史账本。Run 根 `.rpipe.lock` 是 OS 锁载体，不能替换或按存在性判断忙。
 
 `version` 是 RunConfig 的可选内容字段，只用于区分实际 Run 并参与 `run_id` hash；它不是目录层级或序列化格式版本。timestamp 只是可采用的字段内容之一。
 

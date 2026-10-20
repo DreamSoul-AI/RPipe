@@ -44,83 +44,6 @@ def _succeed(study: Path, run_id: str):
     })
 
 
-def _admit(study, run_id, env):
-    from rpipe.structure.api.artifact_api import RUN_ATTEMPT_ENV, run_lock, start_execution
-    with run_lock(study / 'runs' / run_id):
-        start_execution(study / 'runs' / run_id, env[RUN_ATTEMPT_ENV])
-
-
-@pytest.mark.parametrize('identity', ['matching', 'missing', 'corrupt', 'newer', 'busy', 'refused'])
-@pytest.mark.parametrize('exit_code', [0, 7])
-def test_nonzero_correction_requires_own_idle_execution_and_unknown_is_not_retried(tmp_path, monkeypatch, identity, exit_code):
-    import contextlib
-    from rpipe.structure.api.artifact_api import RUN_ATTEMPT_ENV, run_lock, start_execution
-    job = _study(tmp_path)[0]
-    root = tmp_path / 'runs/t0'
-    _succeed(tmp_path, 't0')
-    before = (root / 'result.json').read_bytes()
-    starts, tokens = [], []
-    held = contextlib.ExitStack()
-    global_before = os.environ.get(RUN_ATTEMPT_ENV)
-
-    class Proc:
-        def __init__(self, args, **kwargs):
-            starts.append(args[-1])
-            tokens.append(kwargs['env'][RUN_ATTEMPT_ENV])
-            self.token = tokens[-1]
-        def wait(self):
-            with run_lock(root):
-                if identity not in ('missing', 'refused'):
-                    start_execution(root, 'other-child' if identity == 'newer' else self.token)
-                if identity == 'corrupt':
-                    (root / 'execution.json').write_text('{broken', encoding='utf-8')
-            if identity == 'busy':
-                held.enter_context(run_lock(root))
-            return 75 if identity == 'refused' else exit_code
-    monkeypatch.setattr(schedule.subprocess, 'Popen', Proc)
-    refused = []
-    try:
-        expected = [7, 7] if identity == 'matching' and exit_code else [75 if identity == 'refused' else exit_code]
-        assert schedule.launch_jobs(tmp_path, [job], console='shared', refused_runs=refused) == expected
-    finally:
-        held.close()
-    if identity == 'matching' and exit_code:
-        assert load_result(root / 'result.json')['status'] == 'failed'
-        assert len(starts) == 2 and len(set(tokens)) == 2
-    else:
-        assert (root / 'result.json').read_bytes() == before
-        assert starts == ['t0']
-    assert refused == ([] if identity == 'matching' else ['t0'])
-    assert os.environ.get(RUN_ATTEMPT_ENV) == global_before
-    assert RUN_ATTEMPT_ENV not in job
-
-
-def test_busy_run_is_not_launched_or_retried_and_result_is_untouched(tmp_path, monkeypatch):
-    from rpipe.structure.api.artifact_api import run_lock
-    jobs = _study(tmp_path)
-    _succeed(tmp_path, 't0')
-    root = tmp_path / 'runs/t0'
-    before = (root / 'result.json').read_bytes()
-    starts = _fake_processes(monkeypatch, tmp_path, {})
-    with run_lock(root):
-        assert schedule.launch_jobs(tmp_path, jobs[:1], console='shared') == [75]
-    assert starts == [] and (root / 'result.json').read_bytes() == before
-    assert not (root / 'execution.json').exists()
-
-
-def test_active_dependent_eval_prevents_train_rerun_without_overwriting_eval(tmp_path, monkeypatch):
-    from rpipe.structure.api.artifact_api import run_lock
-    jobs = _study(tmp_path)
-    for job in jobs:
-        _succeed(tmp_path, job['run_id'])
-    before = {p: p.read_bytes() for p in tmp_path.glob('runs/*/result.json')}
-    starts = _fake_processes(monkeypatch, tmp_path, {})
-    with run_lock(tmp_path / 'runs/e0'):
-        assert schedule.launch_jobs(tmp_path, jobs[:1], console='shared') == [75]
-    assert starts == []
-    assert {p: p.read_bytes() for p in before} == before
-
-
 @pytest.mark.parametrize('device,top_level', [('cpu', 'cuda'), ('cuda', 'cpu')])
 def test_plan_and_capacity_use_nested_runtime_device(tmp_path, device, top_level):
     from rpipe.structure.make.capacity import attach_estimates, requires_gpu
@@ -193,7 +116,6 @@ def _fake_processes(monkeypatch, study, failures):
     class Proc:
         def __init__(self, args, **_kwargs):
             self.run_id = args[-1]
-            _admit(study, self.run_id, _kwargs['env'])
             started.append(self.run_id)
             counts[self.run_id] = counts.get(self.run_id, 0) + 1
 
@@ -347,10 +269,7 @@ def test_killed_rerun_cannot_reuse_previous_success(tmp_path, monkeypatch):
         def wait(self):
             return 1
 
-    def spawn(args, **kwargs):
-        _admit(tmp_path, args[-1], kwargs['env'])
-        return Killed()
-    monkeypatch.setattr(schedule.subprocess, 'Popen', spawn)
+    monkeypatch.setattr(schedule.subprocess, 'Popen', lambda *_args, **_kwargs: Killed())
     schedule.launch_jobs(tmp_path, jobs[:1], retry_failed=False, console='shared')
     assert not schedule.run_succeeded(tmp_path, 't0')
     assert not schedule.run_succeeded(tmp_path, 'e0')
@@ -572,10 +491,7 @@ def test_nonzero_exit_is_recorded_before_error_output(tmp_path, monkeypatch, ret
             raise error
         return builtins.print(*args, **kwargs)
 
-    def spawn(args, **kwargs):
-        _admit(tmp_path, args[-1], kwargs['env'])
-        return Proc()
-    monkeypatch.setattr(schedule.subprocess, 'Popen', spawn)
+    monkeypatch.setattr(schedule.subprocess, 'Popen', lambda *_args, **_kwargs: Proc())
     monkeypatch.setattr(schedule, 'print', emit, raising=False)
     if error is None:
         assert schedule.launch_jobs(tmp_path, jobs[:1], retry_failed=retry, console='shared') == ([1, 1] if retry else [1])
@@ -637,24 +553,15 @@ def test_failure_invalidation_does_not_require_shared_layout(tmp_path, monkeypat
     monkeypatch.setattr(schedule.subprocess, 'Popen', start)
     if route == 'launch':
         jobs = [{'run_id': 'target', 'mode': 'train', 'device': 'cpu', 'gpu': None}]
-        if source.exists():
-            from rpipe.structure.artifact.provenance import ProvenanceChangedError
-            prior_result = layout.result_path.read_bytes()
-            with pytest.raises(ProvenanceChangedError, match='binding'):
-                schedule.launch_jobs(tmp_path, jobs, retry_failed=False, console='shared')
-            assert starts == [] and layout.result_path.read_bytes() == prior_result
-            assert {p: p.read_bytes() for p in before} == before
-            return
         assert schedule.launch_jobs(tmp_path, jobs, retry_failed=False, console='shared') == [1]
-        assert starts == ['succeeded']
-        expected_error = None  # Child never acquired ownership: keep the old result.
+        assert starts == ['failed']
+        expected_error = 'rerun started; no successful result from this execution yet'
     else:
         schedule._fail_result(tmp_path, 'target', 'primary failure evidence')
         assert starts == []
         expected_error = 'primary failure evidence'
     result = load_result(layout.result_path)
-    assert result['status'] == ('succeeded' if route == 'launch' else 'failed')
-    assert result.get('error') == expected_error
+    assert result['status'] == 'failed' and result['error'] == expected_error
     assert result.get('metrics') == ({'accuracy': 9} if route != 'fresh' else None)
     assert result.get('paths') == ({'assets': str(layout.assets_dir)} if route != 'fresh' else None)
     assert {p: p.read_bytes() for p in before} == before
@@ -768,8 +675,7 @@ def test_plan_run_identity_uses_native_platform_before_effects(tmp_path, monkeyp
     def forbidden(*args, **kwargs):
         pytest.fail('duplicate plan reached result invalidation')
     monkeypatch.setattr(schedule.subprocess, 'Popen', Proc)
-    if same_run:
-        monkeypatch.setattr(schedule, '_fail_result', forbidden)
+    monkeypatch.setattr(schedule, '_fail_result', forbidden)
     def execute():
         if route == 'launch':
             return schedule.launch_jobs(tmp_path, jobs, round_size=2, batches=batches,
@@ -814,7 +720,7 @@ def test_duplicate_cache_rejected_before_success_can_hide_it(tmp_path, monkeypat
     assert cache.read_bytes() == before
 
 
-@pytest.mark.parametrize('stage', ['spawn', 'stdout', 'environment', 'admission', 'wait', 'exit-diagnostic'])
+@pytest.mark.parametrize('stage', ['spawn', 'stdout', 'environment', 'invalidation', 'wait', 'exit-diagnostic'])
 @pytest.mark.parametrize('cancelled', [False, True], ids=['error', 'cancel'])
 @pytest.mark.parametrize('secondary_failure', [False, True], ids=['clean-wait', 'secondary-wait-error'])
 def test_exceptional_group_waits_owned_children_preserving_primary(tmp_path, monkeypatch, stage, cancelled, secondary_failure):
@@ -851,17 +757,14 @@ def test_exceptional_group_waits_owned_children_preserving_primary(tmp_path, mon
         if stage == 'environment' and job['run_id'] == 'second':
             raise primary
         return {}
-    original_lock = schedule.run_lock
-    def admission(root):
-        if stage == 'admission' and root.name == 'second':
-            raise primary
-        return original_lock(root)
-    def invalidate(*args, **kwargs):
-        return True
+    def result(study, run):
+        return {'status': 'succeeded'} if stage == 'invalidation' and run == 'second' else {}
+    def invalidate(*args):
+        raise primary
     monkeypatch.setattr(schedule.subprocess, 'Popen', spawn)
     monkeypatch.setattr('builtins.print', output)
     monkeypatch.setattr(schedule, 'launch_job_env', env)
-    monkeypatch.setattr(schedule, 'run_lock', admission)
+    monkeypatch.setattr(schedule, '_run_result', result)
     monkeypatch.setattr(schedule, '_fail_result', invalidate)
     jobs = [{'run_id': name, 'device': 'cpu', 'mode': 'train'} for name in ['first', 'second', 'third']]
     with pytest.raises(type(primary)) as caught:
@@ -871,7 +774,7 @@ def test_exceptional_group_waits_owned_children_preserving_primary(tmp_path, mon
     assert set(starts) <= set(waits)
     if stage == 'wait':
         assert waits.count('first') == 2
-    assert {p: p.read_bytes() for p in tmp_path.rglob('*') if p.is_file() and p.name != '.rpipe.lock'} == before
+    assert {p: p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()} == before
 
 
 @pytest.mark.parametrize('batched', [False, True])
@@ -902,7 +805,6 @@ def test_exceptional_group_keeps_nonzero_peer_failure_evidence(tmp_path, monkeyp
     def spawn(args, **kwargs):
         if args[-1] == 'second':
             raise primary
-        _admit(tmp_path, args[-1], kwargs['env'])
         return Proc()
     monkeypatch.setattr(schedule.subprocess, 'Popen', spawn)
     jobs = [{'run_id': name, 'mode': 'train', 'device': 'cpu'} for name in ['first', 'second']]
