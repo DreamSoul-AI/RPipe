@@ -8,7 +8,7 @@
 
 旧索引 B-135 / B-136 已关闭，修复与双侧验收见 [record.md §235](record.md)。本次未重复关闭 Issue，也不把索引纠正计为新增偿还。
 
-2026-10-20 的 R1–R5 技术债修复位于独立 Draft 分支，尚未集成，执行和验证边界见 [record.md §299](record.md)。旧条目的历史状态保留在对应 Git 提交及开发记录中。 R1 的 make 配置写入者补充及 458 项相关回归见 [record.md §299.2](record.md#2992-r1-make-写入者准入)；该补充尚未集成，不重开旧已关闭项。R1 未选中 stale eval 锁忙时的纠错拒绝传播及 264 项窄回归见 [record.md §299.4](record.md#2994-r1-未选中-stale-eval-的纠错拒绝传播)，同属此 Draft 的未集成补充。
+2026-10-20 的 R1–R5 技术债修复位于独立 Draft 分支，尚未集成，执行和验证边界见 [record.md §299](record.md)。旧条目的历史状态保留在对应 Git 提交及开发记录中。 R1 的 make 配置写入者补充及 458 项相关回归见 [record.md §299.2](record.md#2992-r1-make-写入者准入)；该补充尚未集成，不重开旧已关闭项。R1 未选中 stale eval 锁忙时的纠错拒绝传播及 264 项窄回归见 [record.md §299.4](record.md#2994-r1-未选中-stale-eval-的纠错拒绝传播)，同属此 Draft 的未集成补充。R3 的 xfail 阶段分类补充及 85 项测试设施窄回归见 [record.md §299.5](record.md#2995-r3-已知失败的阶段证据与报告分类)，仍未集成，不另增主债项。
 
 B133–B134/#182/#183已随[PR184](https://github.com/DreamSoul-AI/RPipe/pull/184)最终head及实际dev28f3dde所有实际CI验收关闭，主题本地+remote已清；详[record§226–229](record.md)。
 

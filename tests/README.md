@@ -44,7 +44,7 @@ python tests/run.py --all
 
 每次运行写入 `.tmp/test-results/<run_id>/manifest.json`、`events.jsonl` 和 `report.md`。
 
-事件保存 setup/call/teardown，以每次 setup 区分同一节点的尝试。最终筛选后的节点清单写入 manifest。报告按用例和尝试合并阶段：缺少 teardown 记 incomplete，完整尝试中任何阶段失败均覆盖 call 通过；未开始的选中节点记 not_run。跳过原因及所有失败诊断保留，数值型用例的 call 测量不会被成功清理覆盖。会话退出状态写入原 manifest。
+事件保存 setup/call/teardown，以每次 setup 区分同一节点的尝试。最终筛选后的节点清单写入 manifest。报告按用例和尝试合并阶段：缺少 teardown 记 incomplete，完整尝试中任何阶段失败均覆盖 call 通过；未开始的选中节点记 not_run。跳过原因及所有失败诊断保留，数值型用例的 call 测量不会被成功清理覆盖。xfail 与普通 skipped 分列，xpass 保持独立；完整尝试中的普通 failed 优先，其后任何阶段的 xfail 覆盖 call 通过，已知失败不被成功清理或普通跳过掩盖。仅保留 pytest 原退出码，不在报告层另定 xfail 阻断策略。会话退出状态写入原 manifest。
 
 统一入口默认整轮期限为 1800 秒（与现有 CPU CI 作业上限一致），可用 `--timeout <秒>` 指定有限正数。正常退出、超时或中断时均收尾本入口拥有的进程，防止主 pytest 已退出而 worker 继续持有输出管道。Windows 使用私有 Job Object：子进程先挂起，归属 Job 后恢复，禁止 breakaway；Linux 使用独立进程组与 /proc 活跃观测，等待时以 waitid/WNOWAIT 保留组长身份至收尾后再 reap，收尾范围为该组（主动另建会话的后代不在组内）。仅支持 Windows 与具备 /proc、waitid/WNOWAIT 的 Linux；其他平台在启动子进程前明确拒绝，不把组长僵尸误当仍活跃的 worker。清理后的实际退出码、活动进程数与确认状态保存到该轮 execution.json；清理未确认时保留错误，不声称资源已释放。整轮期限触发后清理另有有限的 10 秒阶段期限。私有实现见 [_process_tree.py](_process_tree.py)，不依赖模型或额外包。直接 `python -m pytest` 的期限仍由外层负责。
 

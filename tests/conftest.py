@@ -242,7 +242,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
 
 def _status(report: pytest.TestReport, result_type: str | None) -> str:
     if report.skipped:
-        return 'skipped'
+        return 'xfail' if getattr(report, 'wasxfail', False) else 'skipped'
     if report.passed:
         if getattr(report, 'wasxfail', False):
             return 'xpass'
@@ -291,6 +291,8 @@ def _write_report(out_dir: Path, run_id: str, exitstatus: int | None) -> None:
             incomplete.append(key)
         elif any(event['status'] == 'failed' for event in phases.values()):
             status = 'failed'
+        elif any(event['status'] == 'xfail' for event in phases.values()):
+            status = 'xfail'
         else:
             result = phases.get('call') or phases.get('setup') or phases.get('teardown')
             if phases.get('teardown', {}).get('status') == 'skipped':
