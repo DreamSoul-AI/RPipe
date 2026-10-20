@@ -5593,3 +5593,14 @@ R3/R5 已在 e7c0bb2 保存全部 phase、最终 collection、逐次 attempt、�
 8031556 独立审查与随后静态复核同时发现：pytest 的 wasxfail 身份由属性存在表示，无 reason 的合法 xfail / xpass 会设为空字符串。首轮 7 例均给非空 reason，85 passed 仅属于该中间版本，不能作为完整分类合同的最终验收。8031556 未推送，保留原历史，不 amend 或删除其首红 / 中间绿 / delivery。
 
 在 8031556 上追加真实公共入口的 reasonless call / setup / teardown xfail 和 nonstrict xpass，四支首红均直接指向该身份判断，**4 failed**，控制器 **2.5345 秒**，所属树清理确认；原件与精确当时源码 / 测试副本为 `.tmp/debt-batch7/reasonless-red`。此补充同属 R3，不增主债项。只将 _status 内三处 wasxfail 判别统一为 hasattr，与 pytest 自身规则一致；普通 failed 优先、各阶段汇总、native 退出策略及原事件保全保持。补齐后的最终同范围回归 **89 passed、0 failed / error / skip，22.464 秒**，控制器 **23.0180 秒**；11 个实际公共入口参数（含 4 个 reasonless）全部执行，报告重建保持原事件 / manifest，普通失败覆盖 xfail 及原退出控制均通过。原件 `.tmp/debt-batch7/reasonless-green` / `reasonless-audit.json` 保留当前 8 输入 SHA、整轮和各子进程截止与 owned=0 清理确认。当前 tests/conftest.py 实测 SHA-256 `763b771e86eb9fe725bd9443faba5667b4b9a2abbcd6a5940fb5608fc2f06349`，test_manifest_bootstrap.py 实测 SHA-256 `d29fb56015233148db68a229feb85da74c552dd7ee5b23b25217310da38aeebe`；精确替换核对、Python 3.10 AST、E9/F63/F7/F82 与 diff 均通过，原 EOL 保持。未重复完整 core / Flow，未执行 Torch、GPU、科学训练或下载，未实跑 Python 3.10 或新 head 远端 CI；未推送 / 合并。临时原件不随 Git clone 提供。
+
+
+### 299.6 R1/R2 缓存计划与实际 Run 配置一致性
+
+下游第九批提出同根反例后，上游独立核验 `load_launch_plan`：仅对可选 job.config 指针的存在文件校验，而子进程按实际 runs/<run_id>/config.yaml 读取。真实公共 `rpipe launch --mode eval` 遇到显式 mode=eval、实际 mode=train 时，外来 eval 文件、缺失路径及省略 config 三种指针均放行并实际进入 train CPU payload，六支包括 include_done 两种取值；既有来源门没有替代缓存 metadata 合同。实际 nested system.config.device 与保存 device 不符也有三支放行。有效首红 **9 failed / 5 passed，JUnit 7.380 秒，控制器 9.2303 秒**，14 个永久控制位于 test_cached_plan_identity.py。初轮手写 Run 未绑定成功 provenance，两个正常 eval 控制被既有 R2 正确拒绝，整轮 11 failed / 3 passed 仅为无效夹具；原件及精确输入 SHA 恢复副本保留，不计有效源码反例。
+
+最小修复是在原 job.config 校验之后增加七行：实际 Run config 存在时，经同一 _job_fields 核对 job 显式非空的 mode / device；不匹配返回原 None 重建请求。保留原指针校验、成功过滤、_job_fields 读失败语义及异常边界，不强制 config 指针身份；省略可选 metadata 的 legacy job 和没有实际 config 的虚拟计划保持，不把字段推断策略扩成本批需求。来源、result、Run ID、执行锁、token、模式筛选及研究算法不改。
+
+新 14 例直接绿后，最终相关 schedule / make / scripts 与新公共入口范围为 **320 passed、0 failed / error / skip，JUnit 11.154 秒，控制器 13.0183 秒**。错误缓存在现有 make 重建边界以 sentinel 23 截止，没有 payload；原 config / result / execution / process / index / provenance / cache 字节保全。合法 train 不误发到 eval，合法 eval 只进入已声明的轻量 CPU 观测，原 legacy / empty 控制同轮通过。原生 parser、scheduler、Runner、OS 锁及结果写入真实，科学阶段替换为无计算观测；重建 sentinel 仅证明拒绝交界，不冒称完成重新 make 或真实训练。
+
+原件 `.tmp/debt-batch9/identity-red-valid` / `identity-green` / `identity-related`，无效夹具 `identity-red` 单列；110 份实际源码 / 相关测试输入 SHA 前后相同，十个公共 CLI 各 8 秒、launcher 60 秒和外层 90 秒守卫，所有所属活动数 0、清理确认。schedule.py SHA-256 `7d90ef999852a3ad3a78b013ee0d305a8462b15d1b58b48d3d691b6642788aa5`，新测试 `d9a91b3312f16cd1da95acfcb79695cc9d3d600c6132c407fc53fd56a568f6e5`；七行精确逆替换等同父源码，原 EOL、Python 3.10 AST、E9/F63/F7/F82 检查通过。未重复完整 core / Flow 或已绿 xfail；未实跑 Python 3.10、Torch/GPU、研究训练、下载或新 head 远端 CI；普通本地提交，不推送、不合并或恢复队列。本项沿 R1/R2 子例登记，不增主债项。

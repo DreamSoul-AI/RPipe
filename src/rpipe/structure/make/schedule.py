@@ -210,6 +210,13 @@ def load_launch_plan(
             mode, device = _job_fields(Path(str(job['config'])))
             if mode != job_mode(job) or device != str(job.get('device') or 'cuda').lower():
                 return None
+        config_path = study_dir / 'runs' / str(job['run_id']) / 'config.yaml'
+        if config_path.is_file():
+            mode, device = _job_fields(config_path)
+            if job.get('mode') and mode != job_mode(job):
+                return None
+            if job.get('device') and device != str(job['device']).lower():
+                return None
 
     def _keep(rows: list) -> list[dict[str, Any]]:
         if include_done:

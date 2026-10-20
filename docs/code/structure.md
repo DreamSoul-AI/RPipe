@@ -1241,7 +1241,7 @@ Study 编排清单。`rpipe.structure.artifact.index`，**不是** Flow 的 writ
 
 调度的 `run_succeeded` 是保守成功查询：旧结果缺失、坏 JSON、非 object 根（CorruptArtifactError）或无法解析的嵌套（RecursionError）沿现有空 mapping 返回 False，不让单个不可用记录中断其余计划过滤。严格 `load_result / decode_result` 仍报原错，合法成功与 sibling 新鲜度、include_done、调用方路径校验及普通 RuntimeError 传播保持；sibling匹配及调度内存依赖key/lookup/失效比较均用当前平台Path组件身份，metadata与父ID保持index原字符串，POSIX不同大小写组件独立；不扩大旧成功保留或改变重试策略。
 
-复用已有 jobs.json 时，存在的 config 所声明的 mode / 实际 device 必须与保存计划一致；不一致返回重建请求，不继续沿用错误 CPU / CUDA 分配。旧计划的显存与估时不会自动升级，使用新估算需重新 make；正式实测仍用新的 version，不能重写旧验收基线。
+复用已有 jobs.json 时，原 job.config 指向的存在文件继续校验 mode / 实际 device；同时，实际 runs/<run_id>/config.yaml 存在时，必须与 job 显式非空的 mode / device 一致，不一致返回原有重建请求，不能用外来、缺失或省略的 config 指针绕过实际 Run 核对。省略可选 metadata 的 legacy job 保持原语义，不增加必填字段或强制指针路径身份；实际 config 不存在时也不新增读取要求。旧计划的显存与估时不会自动升级，使用新估算需重新 make；正式实测仍用新的 version，不能重写旧验收基线。
 
 CPU job 的旧计划若仍有 gpu 绑定须重新 make；直接调度 CPU job 也不应用残留 gpu 标签，不覆盖父环境的 GPU 可见性，启动文案使用 CPU。CUDA job 的显式 GPU 分配保持原行为。
 
