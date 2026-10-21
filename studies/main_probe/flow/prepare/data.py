@@ -13,11 +13,11 @@ from ...structure.algorithm.paired import (
 
 def prepare(workspace: Path, source_data: Path, pair: tuple[str, str]) -> dict[str, Any]:
     """Reference immutable raw / processed inputs and check CPU parity."""
-    from rpipe.structure.api.artifact_api import link_input, reference_tree
+    from rpipe.structure.artifacts import link_input, reference_tree
     bootstrap()
     import numpy as np
     import torch
-    head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+    head = subprocess.check_output(['git', '-c', 'safe.directory=' + str(ROOT), 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     source_before = source_manifest()
     workspace.mkdir(parents=True, exist_ok=False)
     (workspace / 'original').mkdir()

@@ -51,7 +51,7 @@ jobs:
       - name: Read back optional TensorBoard events (CPU, offline)
         run: >-
           python tests/run.py --all --cost-class c1 --
-          tests/rpipe/flow/process/test_curves.py -k tensorboard_real_event_roundtrip
+          tests/rpipe/flow/test_exports.py -k tensorboard_real_event_roundtrip
 
   unit-gate:
     name: Unit tests

@@ -48,14 +48,14 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
+namespaces = false
 include = ["rpipe*"]
 exclude = ["examples*", "output*", "data*", "asset*", "build*", "dist*", "tests*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-q --tb=short --strict-markers --basetemp=.tmp/pytest"
-cache_dir = ".tmp/pytest-cache"
+addopts = "-q --tb=short --strict-markers"
 filterwarnings = [
   "ignore::DeprecationWarning",
 ]
@@ -82,6 +82,10 @@ markers = [
   "module_cli: flow.cli",
   "module_runner: flow runner / execute",
   "module_process: flow process / collect",
+  "module_plan: pure declaration planning",
+  "module_execution: execution ownership and lifecycle",
+  "module_readout: read-only evidence and aggregation",
+  "module_payload: selected scientific payload lifecycle",
   "runtime: runtime budget",
   "memory: memory budget",
   "gpu: requires a real GPU",

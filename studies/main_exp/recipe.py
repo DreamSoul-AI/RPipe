@@ -1,7 +1,6 @@
 """Register historical builders; explicit preflight/calibrate commands never run on import."""
 from __future__ import annotations
 
-from rpipe.structure.api.artifact_api import shared_paths
 
 import copy
 import hashlib
@@ -34,6 +33,23 @@ bootstrap, install, Observation = _structure.bootstrap, _structure.install, _str
 _observed_dicts = _structure._observed_dicts
 
 
+def source_manifest() -> dict[str, str]:
+    from rpipe.api import source_digest
+    return {'source_digest': source_digest(STUDY)}
+
+
+def capture_environment() -> dict[str, str]:
+    from importlib.metadata import version
+    return {'python': sys.version, **{name: version(name) for name in ('torch', 'numpy')}}
+
+
+def external_root(value: Path | str) -> Path:
+    root = Path(value).resolve()
+    if root.is_relative_to(REPO) or REPO.is_relative_to(root):
+        raise ValueError('run root must be separate from the source checkout')
+    return root
+
+
 def register(ctx: Any) -> None:
     """RPipe prepare hook (``study.yaml`` ``recipe``): runs in every Run's process."""
     os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
@@ -45,21 +61,20 @@ def register(ctx: Any) -> None:
         if checkpoints.is_dir() and any(checkpoints.iterdir()):
             raise RuntimeError(f'{ctx.run_id}: interrupted training has checkpoints; preserve it and use a new '
                                'version for a fresh continuous run')
-    report = json.loads((STUDY / 'docs' / 'PREFLIGHT.json').read_text(encoding='utf-8'))
+    report = json.loads((ctx.study_root / 'summary' / 'PREFLIGHT.json').read_text(encoding='utf-8'))
     expected = {(d, m) for d in DATA_NAMES for m in MODEL_NAMES}
     if report.get('passed') is not True or {(r['data'], r['model']) for r in report.get('runs', [])} != expected:
         raise RuntimeError('the same-device original/native preflight must pass before launch')
+    if report.get('device') != str(ctx.config['system'].get('device', 'cpu')):
+        raise RuntimeError('Run device differs from the same-device preflight')
     if (report.get('environment') or {}).get('torch') != torch.__version__:
         raise RuntimeError('Torch environment changed after preflight')
-    from rpipe.structure.api.artifact_api import source_files
-    from rpipe.structure.api.make_api import load_study_yaml
-
-    if report.get('source_hashes') != source_files(ctx.study_dir, load_study_yaml(ctx.study_dir)):
+    if report.get('source_hashes') != source_manifest():
         raise RuntimeError('main_exp preflight sources changed; rerun preflight before launch')
     for flag in ('cudnn_allow_tf32', 'matmul_allow_tf32'):
         if ctx.config['system'].get(flag) is not False or report.get('controls', {}).get(flag) is not False:
             raise RuntimeError(f'main_exp requires {flag}=false in both Run and preflight')
-    install(ctx.shared_data_dir, seed=ctx.seed)
+    install(ctx.shared_data_dir, seed=ctx.seed, archive_root=ctx.assets_dir / 'source-4ccb28d')
 
 
 def _rng_state() -> dict[str, Any]:
@@ -123,32 +138,32 @@ def preflight(data_root: Path | str, output_dir: Path | str, *, steps: int = 200
     A new output directory is required so prior evidence cannot be overwritten.
     This probe verifies a prefix, never claims historical long-curve reproduction.
     """
-    from rpipe.structure.api.artifact_api import atomic_write_text
+    from rpipe.structure.artifacts import atomic_write_text
 
     bootstrap()
     os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
     import torch
-    from rpipe.structure.api.algorithm_api import AlgorithmConfig
-    from rpipe.structure.api.algorithm_api import TrainAlgorithm
-    from rpipe.structure.api.algorithm_api import AlgorithmTracker
-    from rpipe.structure.api.data_api import DataConfig
-    from rpipe.structure.api.data_api import DataFactory
-    from rpipe.structure.api.model_api import ModelConfig
-    from rpipe.structure.api.model_api import ModelFactory
-    from rpipe.structure.api.system_api import SystemConfig
-    from rpipe.structure.api.system_api import SystemFactory
-    from rpipe.structure.api.system_api import apply_runtime
+    from rpipe.structure.contracts import AlgorithmConfig
+    from rpipe.payloads.train import TrainAlgorithm
+    from rpipe.payloads.tracker import AlgorithmTracker
+    from rpipe.structure.contracts import DataConfig
+    from rpipe.payloads.data import DataFactory
+    from rpipe.structure.contracts import ModelConfig
+    from rpipe.payloads.models import ModelFactory
+    from rpipe.structure.contracts import SystemConfig
+    from rpipe.payloads.checkpoints import SystemFactory
+    from rpipe.payloads.runtime import apply_runtime
 
     mapping = algorithm_config(steps)
-    archive = install(data_root, seed)
     output = Path(output_dir).resolve()
     output.mkdir(parents=True, exist_ok=False)
+    archive = install(data_root, seed, archive_root=output / 'source-4ccb28d')
     system_config = SystemConfig.from_mapping({'device': device, 'deterministic': True,
                                               'cudnn_benchmark': False, 'cudnn_deterministic': True,
                                               'cudnn_allow_tf32': False, 'matmul_allow_tf32': False})
     pairs = list(combinations or [(d, m) for d in DATA_NAMES for m in MODEL_NAMES])
     result: dict[str, Any] = {'historical_commit': COMMIT, 'current_commit': subprocess.check_output(
-        ['git', 'rev-parse', 'HEAD'], cwd=REPO, text=True).strip(),
+        ['git', '-c', 'safe.directory=' + str(REPO), 'rev-parse', 'HEAD'], cwd=REPO, text=True).strip(),
         'steps': steps, 'sampler_steps': HORIZON, 'seed': seed, 'device': device,
         'torch': torch.__version__, 'controls': {'deterministic': True, 'benchmark': False,
         'CUBLAS_WORKSPACE_CONFIG': os.environ['CUBLAS_WORKSPACE_CONFIG'],
@@ -296,7 +311,7 @@ def preflight(data_root: Path | str, output_dir: Path | str, *, steps: int = 200
 
 
 def main(argv: list[str] | None = None) -> int:
-    """``preflight``: same-device 600-step gate written to ``docs/PREFLIGHT.json``."""
+    """``preflight``: same-device 600-step gate written to the explicit research version summary."""
     import argparse
     import uuid
     from datetime import datetime, timezone
@@ -314,22 +329,25 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description=main.__doc__)
     parser.add_argument('command', choices=['preflight'])
-    parser.parse_args(argv)
+    parser.add_argument('--run-root', type=Path, required=True)
+    parser.add_argument('--version', default='main-exp-rpipe-refactor-20261021')
+    args = parser.parse_args(arguments)
+    run_root = external_root(args.run_root)
     bootstrap()
-    from rpipe.structure.api.artifact_api import atomic_write_text
-    from rpipe.structure.api.artifact_api import capture_environment, source_files
-    from rpipe.structure.api.make_api import load_study_yaml
+    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.api import plan
 
-    study = load_study_yaml(STUDY)
-    before = source_files(STUDY, study)
+    specs = plan(STUDY, run_root=run_root, version=args.version)
+    before = source_manifest()
     stamp = datetime.now(timezone.utc).strftime('%Y%m%d')
-    output = REPO / '.tmp' / f'historical-preflight-{stamp}-{uuid.uuid4().hex[:8]}'
-    report = preflight(data_root=shared_paths(STUDY)['data'], output_dir=output, steps=600, device='cuda')
-    if before != source_files(STUDY, study):
+    output = specs[0].study_root / 'validation' / f'preflight-{stamp}-{uuid.uuid4().hex[:8]}'
+    report = preflight(data_root=run_root / 'shared' / 'data', output_dir=output, steps=600, device='cuda')
+    if before != source_manifest():
         raise RuntimeError('source/configuration changed during preflight; retained output is not a valid launch gate')
     report.update(source_hashes=before, output_dir=str(output), environment=capture_environment())
-    atomic_write_text(STUDY / 'docs' / 'PREFLIGHT.json', json.dumps(report, indent=2, ensure_ascii=False))
+    atomic_write_text(specs[0].study_root / 'summary' / 'PREFLIGHT.json', json.dumps(report, indent=2, ensure_ascii=False))
     return 0 if report.get('passed') else 1
+
 
 
 if __name__ == '__main__':

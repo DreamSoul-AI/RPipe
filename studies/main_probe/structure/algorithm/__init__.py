@@ -3,9 +3,9 @@ from . import paired
 
 
 def register(ctx, pair):
-    from rpipe.structure.api.algorithm_api import Algorithm
-    from rpipe.structure.api.algorithm_api import AlgorithmRegistry
-    from rpipe.structure.api.data_api import DataRegistry
+    from rpipe.payloads.algorithm import Algorithm
+    from rpipe.payloads.algorithm import AlgorithmRegistry
+    from rpipe.payloads.data import DataRegistry
 
     engine = paired
     workspace = ctx.assets_dir / 'probe'

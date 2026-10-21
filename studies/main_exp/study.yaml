@@ -5,7 +5,7 @@ recipe: recipe.py
 flow: {study_phases: true, prepare_shared: false}
 freeze: true
 provenance:
-  include: [runtime-requirements.txt, docs/TARGET.md, docs/REFERENCE_CURVES.json, docs/EXPECTED_DATA.json]
+  include: [runtime-requirements.txt, docs/REFERENCE_CURVES.json, docs/EXPECTED_DATA.json]
 experiment:
   name: main_exp
 axes:
