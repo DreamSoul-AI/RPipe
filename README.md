@@ -27,7 +27,7 @@ rpipe status studies/_template --run-root <external-run-root>
 rpipe process studies/_template --run-root <external-run-root>
 ```
 
-默认每Run独立科学子进程，启动前核源码摘要、配置和自己的train依赖。任意外部data.path/stats_path引用的内容漂移未纳入通用身份保证，原有显式checksum/pin校验继续保留。已有成功不原地重跑，换显式version；未确认停止保持unknown/busy。内存硬限制及同进程注入载荷的硬超时不受支持，启动前拒绝；Windows带recipe/数据worker的硬超时也拒绝。没有自动GPU分配或旧队列恢复。
+默认每Run独立科学子进程，启动前核源码摘要、配置和自己的train依赖。任意外部data.path/stats_path引用的内容漂移未纳入通用身份保证，原有显式checksum/pin校验继续保留。已有成功不原地重跑，换显式version；未确认停止保持unknown/busy。内存硬限制及同进程注入载荷的硬超时不受支持，启动前拒绝；Windows带recipe/数据worker的硬超时也拒绝。没有自动GPU分配或旧队列恢复。status/report当前展示正式result与busy，未发布结果时显示missing；失败、取消、unknown的原始事实保存在attempts/<uuid>/outcome.json，不按mtime或UUID猜哪次是最新。
 
 旧 `structure.api/*` 等内部导入已退役，调用方改用 `rpipe.api`、纯 `structure.contracts` 或明确 `payloads` 科学模块。旧Study内运行目录不会自动迁移/补签；目录对照须明确 `compare --legacy`，其Tensor/轨迹比较保留但来源标为未验证。旧GPU调度/阶段裁剪/隐式cache迁移参数不再接受；先按当前声明和显式根重新计划。精确API与兼容表见代码结构设计。
 
