@@ -22,7 +22,8 @@ def read_run(spec: RunSpec) -> dict[str, Any]:
         raise SourceMismatch(f'invalid result for {spec.id}: {exc}') from exc
     if result.get('identity') != identity(spec):
         raise SourceMismatch(f'result identity differs: {spec.id}')
-    if (result.get('status') not in {'succeeded', 'failed', 'cancelled', 'unknown'}
+    if (not isinstance(result.get('status'), str)
+            or result['status'] not in {'succeeded', 'failed', 'cancelled', 'unknown'}
             or result.get('quality') is not None and not isinstance(result['quality'], bool)
             or not isinstance(result.get('evidence_complete'), bool)):
         return {**result, 'status': 'unknown', 'quality': None,
