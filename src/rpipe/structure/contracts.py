@@ -407,6 +407,7 @@ class RunSpec:
             if name == 'train_id' and value is None:
                 continue
             if (not isinstance(value, str) or not value or value in {'.', '..'}
+                    or value != value.strip() or PureWindowsPath(value).is_reserved()
                     or PureWindowsPath(value).drive or value[-1] in {' ', '.'}
                     or any(c in value for c in '/\\\x00:*?"<>|')
                     or any(ord(c) < 32 for c in value)):
