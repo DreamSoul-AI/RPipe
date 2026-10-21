@@ -93,10 +93,14 @@ def main(argv=None) -> int:
             value = {'data': str(args.run_root.resolve() / 'shared' / 'data'),
                      'model': str(args.run_root.resolve() / 'shared' / 'model')}
         elif args.command == 'data':
+            from rpipe.structure.artifacts import validate_source
+            validate_source(specs[0])
             from rpipe.payloads.data_profile import profile_study
             value = profile_study(args.study_dir, shared_data_dir=args.run_root / 'shared' / 'data',
                                   profiles_dir=specs[0].study_root / 'shared' / 'data', download=args.download)
         elif args.command == 'tensorboard':
+            if args.out.resolve().is_relative_to(args.study_dir.resolve()) or args.study_dir.resolve().is_relative_to(args.out.resolve()):
+                raise ValueError('export must be separate from source Study')
             from .exports import export_tensorboard
             value = export_tensorboard(specs[0].study_root, args.out)
         else:

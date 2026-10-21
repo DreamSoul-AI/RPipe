@@ -59,7 +59,12 @@ def identity(spec: RunSpec) -> dict[str, str]:
 
 
 def validate_source(spec: RunSpec) -> None:
-    for path in (spec.run_dir, spec.assets_dir, spec.assets_dir / 'logs', spec.assets_dir / 'checkpoints',
+    for path in (spec.study_root, spec.study_root / 'summary', spec.study_root / 'summary' / 'figures',
+                 spec.study_root / 'summary' / 'process.json', spec.study_root / 'index.json',
+                 spec.study_root / '.planning', spec.study_root / '.planning' / '.rpipe.lock',
+                 spec.study_root / 'shared' / 'data', spec.run_root / 'shared' / 'data',
+                 spec.run_root / 'shared' / 'model',
+                 spec.run_dir, spec.assets_dir, spec.assets_dir / 'logs', spec.assets_dir / 'checkpoints',
                  spec.assets_dir / 'tracker', spec.run_dir / 'attempts', spec.run_dir / '.execution',
                  spec.run_dir / 'config.yaml', spec.result_path):
         contained(path, spec.run_root)
