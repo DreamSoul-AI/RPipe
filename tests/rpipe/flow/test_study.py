@@ -12,6 +12,29 @@ pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.cost(cost_class='c1'), pytest.mark.result_type('categorical', detail='summary')]
 
 
+@pytest.mark.parametrize('package', [False, True])
+def test_phase_and_relative_helpers_leave_source_tree_unchanged(tmp_path, monkeypatch, package):
+    monkeypatch.setattr(sys, 'dont_write_bytecode', False)
+    flow = tmp_path / 'flow'
+    flow.mkdir()
+    (flow / '__init__.py').write_text('from .helper import VALUE\n', encoding='utf-8')
+    (flow / 'helper.py').write_text('VALUE = 7\n', encoding='utf-8')
+    phase = flow / 'prepare.py'
+    relative = '.'
+    if package:
+        (flow / 'prepare').mkdir()
+        phase = flow / 'prepare' / '__init__.py'
+        relative = '..'
+    phase.write_text(
+        f'from {relative}helper import VALUE\ndef run(ctx):\n    ctx.state["value"] = VALUE\n',
+        encoding='utf-8')
+    before = {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
+    ctx = SimpleNamespace(state={})
+    assert run_study_phase(tmp_path, 'prepare', ctx, {'flow': {'study_phases': True}})
+    assert ctx.state['value'] == 7
+    assert {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()} == before
+
+
 def test_relative_helpers_are_isolated_between_studies(tmp_path):
     before = set(sys.modules)
     ctx = SimpleNamespace(state={})

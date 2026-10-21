@@ -169,5 +169,3 @@ def test_reference_collision_never_owns_or_deletes_peer(tmp_path, monkeypatch, s
     with pytest.raises(FileExistsError):
         shared.link_input(source, target)
     assert {p: p.read_bytes() for p in before} == before
-
-

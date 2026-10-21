@@ -89,7 +89,13 @@ _recipe_import_lock = RLock()
 
 _site_roots = tuple((Path(path) for path in [*site.getsitepackages(), site.getusersitepackages()]))
 
-class _RecipeLoader(importlib.machinery.SourceFileLoader):
+class _StudySourceLoader(importlib.machinery.SourceFileLoader):
+
+    def get_code(self, fullname):
+        # Study sources are inputs; never read or write a bytecode cache beside them.
+        return self.source_to_code(self.get_data(self.path), self.path)
+
+class _RecipeLoader(_StudySourceLoader):
 
     def exec_module(self, module):
         package = sys.modules[module.__name__.partition('.')[0]]
@@ -99,14 +105,16 @@ class _RecipeLoader(importlib.machinery.SourceFileLoader):
 class _RecipeFinder(importlib.abc.MetaPathFinder):
 
     def find_spec(self, fullname, path, target=None):
-        if not fullname.startswith('_rpipe_recipe_'):
+        if not fullname.startswith(('_rpipe_recipe_', '_rpipe_study_')):
             return None
         package = sys.modules.get(fullname.partition('.')[0])
-        if package is None or not getattr(package, '_recipe_namespace', False):
+        if package is None or not (getattr(package, '_recipe_namespace', False)
+                                   or getattr(package, '_study_namespace', False)):
             return None
         spec = importlib.machinery.PathFinder.find_spec(fullname, path)
         if spec is not None and isinstance(spec.loader, importlib.machinery.SourceFileLoader):
-            spec.loader = _RecipeLoader(fullname, spec.origin)
+            loader = _RecipeLoader if getattr(package, '_recipe_namespace', False) else _StudySourceLoader
+            spec.loader = loader(fullname, spec.origin)
         return spec
 
 def _recipe_namespace(root: Path) -> str:
@@ -194,7 +202,7 @@ def load_recipe(study_dir: Path | str, study: dict[str, Any]) -> ModuleType | No
     with _recipe_import_lock:
         package = _recipe_package(root, path.parent)
         name = package.__name__ + '.<recipe>'
-        spec = importlib.util.spec_from_file_location(name, path)
+        spec = importlib.util.spec_from_file_location(name, path, loader=_RecipeLoader(name, str(path)))
         if spec is None or spec.loader is None:
             raise ImportError(f'cannot load recipe: {path}')
         module = importlib.util.module_from_spec(spec)
@@ -237,10 +245,13 @@ def run_study_phase(study_dir: Path | str, phase: str, ctx: Any, study: dict[str
     path = single if single.is_file() else root / 'flow' / phase / '__init__.py'
     if not path.is_file():
         return False
+    if not any(isinstance(finder, _RecipeFinder) for finder in sys.meta_path):
+        sys.meta_path.insert(0, _RecipeFinder())
     name = f'_rpipe_study_{uuid4().hex}'
     package = ModuleType(name)
     package.__path__ = [str(root)]
     package.__package__ = name
+    package._study_namespace = True
     sys.modules[name] = package
     try:
         module = import_module(f'{name}.flow.{phase}')

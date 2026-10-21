@@ -29,6 +29,3 @@ def test_rebind_train_steps_uses_remaining_prefix():
     assert torch.equal(rest[1], full[1])
     data.rebind_train_steps(step=4, num_steps=4, step_period=1)
     assert len(data._loaders['train']) == 0
-
-
-

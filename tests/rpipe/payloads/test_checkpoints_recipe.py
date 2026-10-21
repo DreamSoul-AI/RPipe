@@ -120,4 +120,3 @@ def test_recipe_checkpoint_state_keeps_legacy_and_relocated_imports(tmp_path, mo
             sys.modules.update(original_modules)
     assert {path.relative_to(input_root).as_posix(): path.read_bytes()
             for path in input_root.rglob('*') if path.is_file()} == before
-

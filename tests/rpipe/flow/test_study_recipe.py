@@ -31,6 +31,19 @@ def _recipe(root, helper, value, package, at_register, fail=False):
     (root / 'recipe.py').write_text(prefix + 'def register(ctx):\n' + body, encoding='utf-8')
 
 
+def test_recipe_and_relative_helpers_leave_source_tree_unchanged(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, 'dont_write_bytecode', False)
+    (tmp_path / 'helper.py').write_text('VALUE = 7\n', encoding='utf-8')
+    (tmp_path / 'recipe.py').write_text(
+        'from .helper import VALUE\ndef register(ctx):\n    ctx.observed.append(VALUE)\n',
+        encoding='utf-8')
+    before = {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
+    observed = []
+    assert apply_recipe(tmp_path, {'recipe': 'recipe.py'}, SimpleNamespace(observed=observed))
+    assert observed == [7]
+    assert {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()} == before
+
+
 @pytest.mark.parametrize('package', [False, True], ids=['module', 'package'])
 @pytest.mark.parametrize('at_register', [False, True], ids=['import-on-load', 'import-on-register'])
 @pytest.mark.parametrize('first_failure', [False, True], ids=['first-success', 'first-error'])
