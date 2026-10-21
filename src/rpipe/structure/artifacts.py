@@ -59,7 +59,10 @@ def identity(spec: RunSpec) -> dict[str, str]:
 
 
 def validate_source(spec: RunSpec) -> None:
-    contained(spec.run_dir, spec.run_root)
+    for path in (spec.run_dir, spec.assets_dir, spec.assets_dir / 'logs', spec.assets_dir / 'checkpoints',
+                 spec.assets_dir / 'tracker', spec.run_dir / 'attempts', spec.run_dir / '.execution',
+                 spec.run_dir / 'config.yaml', spec.result_path):
+        contained(path, spec.run_root)
     if source_digest(spec.source_dir) != spec.source_digest:
         raise SourceMismatch('source changed after planning')
 
