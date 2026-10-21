@@ -112,5 +112,7 @@ def main(argv=None) -> int:
         print(json.dumps(value, default=str))
         return 0
     except (ImportError, OSError, ValueError, RuntimeError) as exc:
+        if args.command == 'compare' and isinstance(exc, RuntimeError):
+            raise  # Malformed comparison inputs are ValueError; program failures must remain visible.
         print(f'{type(exc).__name__}: {exc}', file=sys.stderr)
         return 1
