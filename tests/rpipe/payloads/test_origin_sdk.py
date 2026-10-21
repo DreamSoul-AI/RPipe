@@ -3,6 +3,7 @@ import hashlib
 import io
 import socket
 import sys
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -21,7 +22,9 @@ pytestmark = [
 @pytest.fixture
 def dataset_cache(monkeypatch, tmp_path):
     datasets = pytest.importorskip('datasets')
-    monkeypatch.setattr(datasets.config, 'HF_DATASETS_CACHE', tmp_path / 'datasets-cache')
+    cache = tmp_path.parent / ('dsc-' + uuid.uuid4().hex[:8])
+    monkeypatch.setattr(datasets.config, 'HF_DATASETS_CACHE', cache)
+    return cache
 
 
 @pytest.fixture
@@ -313,7 +316,7 @@ def test_actual_dataset_streaming_preserves_views_state_and_pickle(monkeypatch, 
                                 for value in range(index * 2, index * 2 + 2)), encoding='utf-8')
         paths.append(str(path))
     result = origin.load_hf_dataset('json', data_files=paths, split='train', streaming=True,
-                                    cache_dir=str(tmp_path / 'datasets-cache'))
+                                    cache_dir=str(dataset_cache))
     assert isinstance(result, datasets.IterableDataset)
     assert list(result) == [{'value': n} for n in range(4)]
     assert transfers._download_origin.get() is None

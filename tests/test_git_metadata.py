@@ -1,10 +1,15 @@
 """Local test manifests identify ordinary, packed and linked Git checkouts."""
 import shutil
 import subprocess
+import importlib.util
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import conftest as records
+
+_spec = importlib.util.spec_from_file_location('rpipe_test_recorder', Path(__file__).with_name('conftest.py'))
+records = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(records)
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.cost(cost_class='c2'),
