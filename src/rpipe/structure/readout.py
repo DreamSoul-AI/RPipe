@@ -74,7 +74,7 @@ def aggregate(specs) -> dict[str, Any]:
         for name in names:
             values = [r[name] for r in metric_rows if _finite(r.get(name))]
             if values:
-                mean = sum(values) / len(values)
+                mean = statistics.fmean(values)
                 metrics[name] = {'mean': mean, 'std': statistics.stdev(values) if len(values) > 1 else 0.0,
                                  'n': len(values), 'complete': len(values) == len(rows)}
         summaries[key] = {'metrics': metrics, 'complete': all(r.get('status') == 'succeeded'
