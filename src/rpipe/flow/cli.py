@@ -111,6 +111,6 @@ def main(argv=None) -> int:
                 write_learning_curves(specs[0].study_root, load_index(specs[0].study_root))
         print(json.dumps(value, default=str))
         return 0
-    except (OSError, ValueError, RuntimeError) as exc:
+    except (ImportError, OSError, ValueError, RuntimeError) as exc:
         print(f'{type(exc).__name__}: {exc}', file=sys.stderr)
         return 1

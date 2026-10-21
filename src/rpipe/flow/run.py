@@ -49,6 +49,8 @@ class ProcessPayload:
         self.spec, self.budget = spec, budget
         self.handles = []
         self.response = None
+        self.response_verified = False
+        self.child = None
         self.nonce = uuid.uuid4().hex
         self.may_have_descendants = True
         if budget.memory_bytes is not None:
@@ -91,6 +93,7 @@ class ProcessPayload:
         options = {'start_new_session': True} if os.name != 'nt' else {}
         child = subprocess.Popen([sys.executable, '-m', 'rpipe', '_worker', str(self.request), str(self.output)],
                                  cwd=ctx.study_dir, env=env, stdout=handle, stderr=subprocess.STDOUT, **options)
+        self.child = child
         ctx.register_process(child)
         deadline = time.monotonic() + self.budget.timeout_seconds if self.budget.timeout_seconds else None
         while child.poll() is None:
@@ -124,6 +127,7 @@ class ProcessPayload:
         self.response = read_json(self.output)
         if self.response.get('request') != self.nonce or self.response.get('identity') != identity(ctx.spec):
             raise AdmissionError('worker response belongs to a different request or source/configuration')
+        self.response_verified = True
         ctx.state['cleanup_error_records'] = list(self.response.get('cleanup_errors', []))
         ctx.state['unknown_resources'] = bool(self.response.get('unknown_resources'))
         if child.returncode != 0 or self.response.get('error'):
@@ -133,6 +137,22 @@ class ProcessPayload:
         return self.response['result']
 
     def close(self, ctx):
+        child = self.child
+        if child is not None:
+            # A dead root worker does not prove its children stopped.
+            if os.name != 'nt':
+                try:
+                    os.killpg(child.pid, 0)
+                except ProcessLookupError:
+                    pass
+                except OSError as exc:
+                    ctx.state['unknown_resources'] = True
+                    ctx.state.setdefault('cleanup_error_records', []).append(error_record(exc))
+                else:
+                    ctx.state['unknown_resources'] = True
+            elif self.may_have_descendants and (child.poll() is None or not self.response_verified
+                                               or child.returncode != 0 or self.response.get('error')):
+                ctx.state['unknown_resources'] = True
         for handle in self.handles:
             handle.close()
 
