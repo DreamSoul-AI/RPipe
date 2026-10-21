@@ -99,6 +99,7 @@ def expand(study: dict, base: dict, *, source_dir: Path | str, run_root: Path | 
         body = s.to_config()
         body.pop('id', None)
         body.pop('description', None)
+        body.pop('tags', None)
         body['algorithm'].pop('mode', None)
         return body
     trains = [s for s in specs if s.config.get('algorithm', {}).get('mode') == 'train']
