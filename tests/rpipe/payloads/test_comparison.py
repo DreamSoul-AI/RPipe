@@ -75,7 +75,10 @@ def test_cli_compare_exit_codes_and_json(tmp_path: Path, capsys):
     body = json.loads(out.read_text(encoding='utf-8'))
     assert body['items']['metrics']['passed'] is False
     assert cli.main(['compare', '--legacy', str(a), str(tmp_path / 'missing')]) == 1
-    assert 'FAIL  metrics' in capsys.readouterr().out
+    observed = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert observed[0]['passed'] is True
+    assert observed[1]['items']['metrics']['passed'] is False
+    assert all(row['verified'] is False for row in observed)
 
 
 @pytest.mark.parametrize('kind', ['integer', 'integer-tensor', 'complex-tensor'])
@@ -355,7 +358,9 @@ def test_compare_nonfinite_evidence_keeps_value_identity(tmp_path, capsys, kind,
     output = tmp_path / 'compare.json'
     assert cli.main(['compare', '--legacy', str(a), str(b), f'--rtol={rtol}', '--out', str(output)]) == (0 if passed else 1)
     assert json.loads(output.read_text())['passed'] is passed
-    assert capsys.readouterr().out.splitlines()[-2:] == [('passed' if passed else 'failed'), str(output)]
+    observed = json.loads(capsys.readouterr().out)
+    assert observed['passed'] is passed
+    assert observed['legacy'] is True and observed['verified'] is False
     assert {p: p.read_bytes() for p in before} == before
 
 

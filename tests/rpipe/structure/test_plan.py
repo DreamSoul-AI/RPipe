@@ -46,3 +46,20 @@ def test_plan_rejects_runtime_output_inside_source(source_study):
     with pytest.raises((TypeError, ValueError)):
         plan(source_study, run_root=source_study / 'runs')
     assert not (source_study / 'runs').exists()
+
+
+def test_train_only_display_tags_do_not_break_same_seed_eval_pair(source_study, run_root):
+    from rpipe.api import plan
+
+    with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
+        stream.write('axes: {algorithm.mode: [train, eval]}\n'
+                     'tags:\n  - when: {algorithm.mode: train}\n    tags: [baseline]\n')
+    specs = plan(source_study, run_root=run_root)
+    trains = {spec.seed: spec for spec in specs if spec.config['algorithm']['mode'] == 'train'}
+    evaluations = [spec for spec in specs if spec.config['algorithm']['mode'] == 'eval']
+    assert len(evaluations) == len(trains) == 2
+    for evaluation in evaluations:
+        assert evaluation.train_id == trains[evaluation.seed].id
+        assert 'baseline' in trains[evaluation.seed].config['tags']
+        assert 'baseline' not in evaluation.config.get('tags', ())
+    assert not run_root.exists()

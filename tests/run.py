@@ -1,4 +1,4 @@
-"""Unified non-interactive test entry (TESTING.md 附录：RPipe)."""
+"""Unified non-interactive test entry for the architecture test contracts."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ def _expr(parts: list[str]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description='Run RPipe tests with TESTING.md filters.')
+    parser = argparse.ArgumentParser(description='Run RPipe architecture contract tests with filters.')
     parser.add_argument('--level', choices=('unit', 'integration', 'e2e'))
     parser.add_argument('--type', dest='test_type', choices=('location', 'content', 'physical'))
     parser.add_argument('--priority', choices=('p1', 'p2', 'p3'))

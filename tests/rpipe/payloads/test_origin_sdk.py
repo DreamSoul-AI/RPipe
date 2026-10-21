@@ -60,6 +60,8 @@ def sdk_download(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, 'modelscope', SimpleNamespace(snapshot_download=unavailable))
     monkeypatch.setattr(HfApi, 'list_repo_tree', lambda *a, **k: [
         RepoFile(path='config.json', size=len(payload), oid=oid)])
+    monkeypatch.setattr(HfApi, 'repo_info', lambda *a, **k: SimpleNamespace(
+        sha=commit, siblings=[SimpleNamespace(rfilename='config.json')]))
     if hasattr(_http, '_GLOBAL_CLIENT'):
         client = httpx.Client(transport=httpx.MockTransport(transport), follow_redirects=True)
         monkeypatch.setattr(_http, '_GLOBAL_CLIENT', client)
@@ -93,8 +95,6 @@ def sdk_download(monkeypatch, tmp_path):
         client.mount('http://', Adapter())
         client.event_hooks = client.hooks
         monkeypatch.setattr(_http, '_get_session_from_cache', lambda **kwargs: client)
-        monkeypatch.setattr(HfApi, 'repo_info', lambda *a, **k: SimpleNamespace(
-            sha=commit, siblings=[SimpleNamespace(rfilename='config.json')]))
     with client:
 
         def run():

@@ -82,7 +82,8 @@ def test_native_profile_output_is_external_and_explicit_stats_resolve_from_sourc
 
     monkeypatch.setattr(DataFactory, 'build', build)
     payload = NativePayload()
-    ctx = PayloadContext(spec=spec, cancellation=Cancellation())
+    from rpipe.structure.artifacts import ArtifactLayout
+    ctx = PayloadContext(spec=spec, cancellation=Cancellation(), layout=ArtifactLayout(spec))
     try:
         payload.prepare(ctx)
         data_config, assets, profile = calls[0]

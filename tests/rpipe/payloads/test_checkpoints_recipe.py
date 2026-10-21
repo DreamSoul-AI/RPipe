@@ -60,7 +60,7 @@ def test_recipe_checkpoint_state_keeps_legacy_and_relocated_imports(tmp_path, mo
     spec.loader.exec_module(legacy_module)
     legacy = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}),
                                  tmp_path / 'legacy-inputs' / 'assets')
-    request.addfinalizer(legacy.close)
+    request.addfinalizer(legacy.logger.close)
     import torch
     bundle = legacy.save_checkpoint({'model': {'_extra_state': legacy_module.State(7),
                                                 'tensor': torch.tensor([1, 2])},
@@ -81,7 +81,8 @@ def test_recipe_checkpoint_state_keeps_legacy_and_relocated_imports(tmp_path, mo
 
     def prepared(study):
         spec = plan(study, run_root=tmp_path / 'outputs')[0]
-        ctx = PayloadContext(spec=spec, cancellation=Cancellation())
+        from rpipe.structure.artifacts import ArtifactLayout
+        ctx = PayloadContext(spec=spec, cancellation=Cancellation(), layout=ArtifactLayout(spec))
         configure(ctx)
         payload = NativePayload()
         request.addfinalizer(lambda: payload.close(ctx))

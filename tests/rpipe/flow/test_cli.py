@@ -30,8 +30,11 @@ def test_cli_legacy_compare_is_readonly_and_unverified(tmp_path, file_bytes, cap
         directory.mkdir()
         (directory / 'result.json').write_text('{"status":"succeeded"}', encoding='utf-8')
     before = file_bytes(tmp_path)
-    assert main(['compare', str(tmp_path / 'left'), str(tmp_path / 'right'), '--legacy']) == 0
-    assert '"verified": false' in capsys.readouterr().out
+    assert main(['compare', str(tmp_path / 'left'), str(tmp_path / 'right'), '--legacy']) == 1
+    import json
+    observed = json.loads(capsys.readouterr().out)
+    assert observed['passed'] is False
+    assert observed['verified'] is False and observed['evidence_complete'] is False
     assert file_bytes(tmp_path) == before
 
 

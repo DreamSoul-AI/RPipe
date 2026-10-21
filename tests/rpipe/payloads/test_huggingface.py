@@ -33,7 +33,7 @@ def test_hf_two_step_training_publishes_own_best_for_independent_eval(tensor_stu
     try:
         best = system.load_checkpoint('best')
     finally:
-        system.close()
+        system.logger.close()
     assert best is not None
     evaluated = run(evaluate, payload=HuggingFacePayload())
     assert evaluated.status == 'succeeded', evaluated.error

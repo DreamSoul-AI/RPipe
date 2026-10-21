@@ -1,4 +1,4 @@
-"""TESTING.md: require level, objective, priority, cost, and result type."""
+"""Architecture test contracts: require level, objective, priority, cost, and result type."""
 
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         else:
             kept.append(item)
     if errors:
-        raise pytest.UsageError('TESTING.md marker contract:\n' + '\n'.join(errors))
+        raise pytest.UsageError('Architecture marker contract:\n' + '\n'.join(errors))
     if deselected:
         config.hook.pytest_deselected(items=deselected)
         items[:] = kept
