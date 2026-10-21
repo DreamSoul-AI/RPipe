@@ -47,7 +47,6 @@ def test_svhn_mat_train_checkpoint_eval(tmp_path, monkeypatch, request):
     assert targets.tolist() == [0, 1, 2, 3]
     model = model_api.build(ModelConfig(name='linear'), tmp_path, data_meta=data.meta)
     system = system_api.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path / 'assets')
-    request.addfinalizer(system.logger.close)
     request.addfinalizer(data.close)
     train = algorithm_api.build(AlgorithmConfig(
         mode='train', config={'num_steps': 1, 'eval_period': 1, 'save_best': True},

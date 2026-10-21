@@ -19,6 +19,12 @@ pytestmark = [
 
 
 @pytest.fixture
+def dataset_cache(monkeypatch, tmp_path):
+    datasets = pytest.importorskip('datasets')
+    monkeypatch.setattr(datasets.config, 'HF_DATASETS_CACHE', tmp_path / 'datasets-cache')
+
+
+@pytest.fixture
 def sdk_download(monkeypatch, tmp_path):
     httpx = pytest.importorskip('httpx')
     pytest.importorskip('huggingface_hub')
@@ -292,7 +298,7 @@ def test_dataset_helper_guards_eager_and_deferred_requests(monkeypatch, tmp_path
     assert calls == []
 
 
-def test_actual_dataset_streaming_preserves_views_state_and_pickle(monkeypatch, tmp_path):
+def test_actual_dataset_streaming_preserves_views_state_and_pickle(monkeypatch, tmp_path, dataset_cache):
     import pickle
     datasets = pytest.importorskip('datasets')
     from huggingface_hub import constants
@@ -306,7 +312,8 @@ def test_actual_dataset_streaming_preserves_views_state_and_pickle(monkeypatch, 
         path.write_text(''.join('{"value":%d}\n' % value
                                 for value in range(index * 2, index * 2 + 2)), encoding='utf-8')
         paths.append(str(path))
-    result = origin.load_hf_dataset('json', data_files=paths, split='train', streaming=True)
+    result = origin.load_hf_dataset('json', data_files=paths, split='train', streaming=True,
+                                    cache_dir=str(tmp_path / 'datasets-cache'))
     assert isinstance(result, datasets.IterableDataset)
     assert list(result) == [{'value': n} for n in range(4)]
     assert transfers._download_origin.get() is None
@@ -324,7 +331,7 @@ def test_actual_dataset_streaming_preserves_views_state_and_pickle(monkeypatch, 
     assert transfers._download_origin.get() is None
 
 
-def test_actual_dataset_deferred_generator_refuses_transfer(monkeypatch, tmp_path):
+def test_actual_dataset_deferred_generator_refuses_transfer(monkeypatch, tmp_path, dataset_cache):
     datasets = pytest.importorskip('datasets')
     requests = pytest.importorskip('requests')
     from huggingface_hub import constants
@@ -527,7 +534,7 @@ def _image_rows(url, shape):
 
 
 @pytest.fixture
-def actual_image_case(monkeypatch):
+def actual_image_case(monkeypatch, dataset_cache):
     datasets = pytest.importorskip('datasets')
     requests = pytest.importorskip('requests')
     from PIL import Image
@@ -691,7 +698,7 @@ def test_domestic_sdk_worker_keeps_guard_after_parent_scope_returns(monkeypatch)
 @pytest.mark.parametrize('kind', ['Audio', 'Video', 'Pdf'])
 @pytest.mark.parametrize('streaming', [False, True])
 @pytest.mark.parametrize('host,allowed', [('hf-mirror.com', True), ('huggingface.co', False)])
-def test_actual_media_feature_keeps_deferred_file_guard(monkeypatch, kind, streaming, host, allowed):
+def test_actual_media_feature_keeps_deferred_file_guard(monkeypatch, kind, streaming, host, allowed, dataset_cache):
     import importlib
     datasets = pytest.importorskip('datasets')
     requests = pytest.importorskip('requests')

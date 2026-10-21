@@ -30,10 +30,7 @@ def test_hf_two_step_training_publishes_own_best_for_independent_eval(tensor_stu
     assert outcome.status == 'succeeded', outcome.error
     assert read_run(train)['execute']['steps'] == 2
     system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), train.assets_dir)
-    try:
-        best = system.load_checkpoint('best')
-    finally:
-        system.logger.close()
+    best = system.load_checkpoint('best')
     assert best is not None
     evaluated = run(evaluate, payload=HuggingFacePayload())
     assert evaluated.status == 'succeeded', evaluated.error

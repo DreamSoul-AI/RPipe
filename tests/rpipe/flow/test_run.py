@@ -26,11 +26,8 @@ def test_native_public_run_trains_two_updates_then_independently_evaluates_own_b
     trained = read_run(train)
     assert trained['execute']['steps'] == 2
     system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), train.assets_dir)
-    try:
-        best = system.load_checkpoint('best')
-        latest = system.load_checkpoint('latest')
-    finally:
-        system.logger.close()
+    best = system.load_checkpoint('best')
+    latest = system.load_checkpoint('latest')
     assert best is not None and latest['step'] == 2
     assert set(('model', 'optimizer', 'scheduler', 'training_state')) <= set(latest)
     assert run(evaluate).status == 'succeeded'
