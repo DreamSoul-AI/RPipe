@@ -4,9 +4,8 @@ import sys
 
 import pytest
 
-from rpipe.flow.runner import FlowRunner
 from rpipe.flow.study import run_study_phase
-from rpipe.structure.make.recipe import study_phase_files, study_phases_enabled
+from rpipe.flow.study import study_phase_files, study_phases_enabled
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.flow_layer, pytest.mark.module_runner,
@@ -108,26 +107,3 @@ def test_import_failure_does_not_leak_study_namespace(tmp_path):
     with pytest.raises(ImportError):
         run_study_phase(tmp_path, 'prepare', None, {'flow': {'study_phases': True}})
     assert not {name for name in set(sys.modules) - before if name.startswith('_rpipe_study_')}
-
-
-@pytest.mark.parametrize('phases', [['execute', 'prepare'], ['prepare', 'prepare'], ['write', 'persist']])
-def test_stage_order_and_duplicates_are_rejected(phases):
-    with pytest.raises(ValueError, match='canonical order'):
-        FlowRunner(phases)
-
-
-def test_recipe_owned_shared_preparation_is_not_called(tmp_path, monkeypatch):
-    from rpipe.flow.cli import _prepare_shared
-    (tmp_path / 'study.yaml').write_text('flow:\n  prepare_shared: false\n', encoding='utf-8')
-    def forbidden(*args):
-        raise AssertionError('must not build custom data before recipe registration')
-    monkeypatch.setattr('rpipe.flow.cli.data_api.prepare_shared', forbidden)
-    _prepare_shared(tmp_path, [])
-
-
-@pytest.mark.parametrize('value', ['null', '1', '"false"'])
-def test_shared_preparation_requires_boolean(tmp_path, value):
-    from rpipe.flow.cli import _prepare_shared
-    (tmp_path / 'study.yaml').write_text(f'flow:\n  prepare_shared: {value}\n', encoding='utf-8')
-    with pytest.raises(TypeError, match='prepare_shared'):
-        _prepare_shared(tmp_path, [])

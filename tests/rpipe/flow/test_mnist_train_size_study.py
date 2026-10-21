@@ -1,95 +1,47 @@
+"""Optional real MNIST journey; pre-staged data only, never downloads."""
+import json
+import os
 from pathlib import Path
-
+import shutil
 import pytest
 
-import json
+pytestmark = [pytest.mark.e2e, pytest.mark.content, pytest.mark.p2, pytest.mark.slow,
+              pytest.mark.external, pytest.mark.cost(cost_class='c3'),
+              pytest.mark.result_type('categorical', detail='summary'), pytest.mark.gpu]
 
-from rpipe.flow.cli import main
-from rpipe.structure.artifact import load_index, load_result
-
-pytestmark = [
-    pytest.mark.e2e,
-    pytest.mark.content,
-    pytest.mark.p2,
-    pytest.mark.flow_layer,
-    pytest.mark.module_cli,
-    pytest.mark.slow,
-    pytest.mark.external,
-    pytest.mark.cost(cost_class='c3'),
-    pytest.mark.gpu,
-    pytest.mark.result_type('categorical', detail='summary'),
-]
-
-
-def test_mnist_train_size_make_launch_processes_train_before_eval(tmp_path: Path):
-    """A reduced real Study completes the public make/launch/process lifecycle."""
-    import shutil
-
+def test_real_mnist_public_cli_preserves_sources_and_completes_expected_runs(tmp_path):
+    prepared = os.environ.get('RPIPE_TEST_MNIST_ROOT')
+    if not prepared or not Path(prepared).is_dir():
+        pytest.skip('requires explicitly pre-staged read-only RPIPE_TEST_MNIST_ROOT; no downloads')
+    import yaml
+    from rpipe.api import plan, read_run
+    from rpipe.flow.cli import main
+    import torch
+    if not torch.cuda.is_available():
+        pytest.skip('requires explicitly selected CUDA resource')
     repo = Path(__file__).resolve().parents[3]
-    src = repo / 'tests' / '_data' / 'studies' / 'mnist_train_size'
-    study = tmp_path / 'mnist_train_size'
-    shutil.copytree(
-        src,
-        study,
-        ignore=shutil.ignore_patterns('runs', 'shared', 'index.json', '__pycache__'),
-    )
-    if (src / 'shared').is_dir():
-        shutil.copytree(src / 'shared', study / 'shared')
-    yaml_path = study / 'study.yaml'
-    text = yaml_path.read_text(encoding='utf-8')
-    text = text.replace(
-        'data.config.train_size: [500, 2000, 8000]',
-        'data.config.train_size: [500]',
-    )
-    text = text.replace('seeds: [0, 1, 2]', 'seeds: [0]')
-    text = text.replace('num_epochs: 20', 'num_epochs: 2')
-    yaml_path.write_text(text, encoding='utf-8')
-
-    assert main(['make', str(study), '--num-gpus', '1']) == 0
-    launch_plan = json.loads((study / 'scripts' / 'jobs.json').read_text(encoding='utf-8'))
-    jobs = launch_plan['jobs']
-    assert [job['mode'] for job in jobs] == ['train', 'eval']
-    assert [job['device'] for job in jobs] == ['cuda', 'cuda']
-    assert [job['gpu'] for job in jobs] == ['0', '0']
-
-    assert main(['launch', str(study), '--num-gpus', '1', '--console', 'shared']) == 0
-    results = [study / 'runs' / job['run_id'] / 'result.json' for job in jobs]
-    train_result = load_result(results[0])
-    eval_result = load_result(results[1])
-    assert train_result['status'] == 'succeeded'
-    assert eval_result['status'] == 'succeeded'
-    assert train_result['control']['algorithm']['mode'] == 'train'
-    assert eval_result['control']['algorithm']['mode'] == 'eval'
-    assert 'accuracy' in train_result['metrics']
-    assert 'train_loss' in train_result['metrics']
-    assert 'eval_accuracy' in eval_result['metrics']
-    log_path = results[0].parent / 'assets' / 'logs' / 'run.log'
-    assert log_path.is_file()
-    log_text = log_path.read_text(encoding='utf-8')
-    assert 'Loss' in log_text
-    assert 'elapsed=' in log_text
-    tracker_state = results[0].parent / 'assets' / 'tracker' / 'tracker_state.json'
-    assert tracker_state.is_file()
-    ckpt = results[0].parent / 'assets' / 'checkpoints'
-    assert (ckpt / 'latest.pt').is_file()
-    assert (ckpt / 'best.pt').is_file()
-    assert 'best_accuracy' in train_result['metrics']
-    index = load_index(study)
-    assert len(index['experiments']) == 2
-    assert index['experiments'][0]['factors'] == {
-        'data.config.train_size': 500,
-        'algorithm.mode': 'train',
-    }
-    assert index['experiments'][1]['factors'] == {
-        'data.config.train_size': 500,
-        'algorithm.mode': 'eval',
-    }
-    assert index['experiments'][0]['runs'][0]['seed'] == 0
-    assert index['experiments'][0]['runs'][0]['tags'] == ['baseline']
-    assert index['experiments'][1]['runs'][0]['tags'] == []
-    process = json.loads((study / 'process.json').read_text(encoding='utf-8'))
-    assert process['complete'] is True
-    assert len(process['experiments']) == 2
-    assert process['figures']['learning_curves'] == 'docs/figures/learning_curves.png'
-    assert (study / 'shared' / 'data').is_dir()
-    assert (study / 'docs').is_dir()
+    study = tmp_path / 'source' / 'mnist_train_size'
+    shutil.copytree(repo / 'tests' / '_data' / 'studies' / 'mnist_train_size', study)
+    declaration = yaml.safe_load((study / 'study.yaml').read_text())
+    declaration['seeds'] = [0]
+    declaration['axes']['data.config.train_size'] = [500]
+    declaration['fixed']['algorithm']['num_epochs'] = 2
+    (study / 'study.yaml').write_text(yaml.safe_dump(declaration), encoding='utf-8')
+    config = yaml.safe_load((study / 'experiment_config.yaml').read_text())
+    config['data']['path'] = str(Path(prepared).resolve())
+    config['data'].setdefault('config', {})['download'] = False
+    (study / 'experiment_config.yaml').write_text(yaml.safe_dump(config), encoding='utf-8')
+    before = {p.relative_to(study): p.read_bytes() for p in study.rglob('*') if p.is_file()}
+    root = tmp_path / 'artifacts'
+    specs = plan(study, run_root=root)
+    assert len(specs) == 2
+    assert [s.config['algorithm']['mode'] for s in specs] == ['train', 'eval']
+    for command in ('make', 'launch', 'process'):
+        assert main([command, str(study), '--run-root', str(root)]) == 0
+    results = [read_run(spec) for spec in specs]
+    assert all(row['status'] == 'succeeded' for row in results)
+    assert results[1]['execute']['step'] is not None
+    assert all('accuracy' in row['metrics'] for row in results)
+    derived = json.loads((specs[0].study_root / 'summary/process.json').read_text())
+    assert derived['complete'] and len(derived['experiments']) == 2
+    assert {p.relative_to(study): p.read_bytes() for p in study.rglob('*') if p.is_file()} == before

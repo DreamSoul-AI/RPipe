@@ -9,14 +9,14 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, RandomSampler
 
-from rpipe.structure.algorithm.config import AlgorithmConfig
-from rpipe.structure.algorithm.tracker import AlgorithmTracker
-from rpipe.structure.algorithm.metric import MetricBundle
-from rpipe.structure.algorithm.train import TrainAlgorithm
-from rpipe.structure.data.factory import Data
-from rpipe.structure.system.config import SystemConfig
-from rpipe.structure.system.factory import SystemFactory
-from rpipe.structure.system.runtime import apply_runtime
+from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.payloads.tracker import AlgorithmTracker
+from rpipe.payloads.metrics import MetricBundle
+from rpipe.payloads.train import TrainAlgorithm
+from rpipe.payloads.data import Data
+from rpipe.structure.contracts import SystemConfig
+from rpipe.payloads.checkpoints import SystemFactory
+from rpipe.payloads.runtime import apply_runtime
 
 root, action, unit, device, period, stop, eval_period, interrupt_step = sys.argv[1:]
 tail_epoch = unit == 'epoch-tail'

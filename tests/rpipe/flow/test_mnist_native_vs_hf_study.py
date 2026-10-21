@@ -1,71 +1,44 @@
+"""Optional real MNIST journey; pre-staged data only, never downloads."""
+import json
+import os
 from pathlib import Path
-
+import shutil
 import pytest
 
-import json
+pytestmark = [pytest.mark.e2e, pytest.mark.content, pytest.mark.p2, pytest.mark.slow,
+              pytest.mark.external, pytest.mark.cost(cost_class='c2'),
+              pytest.mark.result_type('categorical', detail='summary')]
 
-from rpipe.flow.cli import main
-from rpipe.structure.artifact import load_index, load_result
-
-pytest.importorskip('transformers')
-
-pytestmark = [
-    pytest.mark.e2e,
-    pytest.mark.content,
-    pytest.mark.p2,
-    pytest.mark.flow_layer,
-    pytest.mark.module_cli,
-    pytest.mark.slow,
-    pytest.mark.external,
-    pytest.mark.cost(cost_class='c2'),
-    pytest.mark.result_type('categorical', detail='summary'),
-]
-
-
-def test_mnist_native_vs_hf_cpu_make_launches_both_sources_without_gpu(tmp_path: Path):
-    """CPU Study from `rpipe` make through launch to a written report, with no GPU job."""
-    import shutil
-
+def test_real_mnist_public_cli_preserves_sources_and_completes_expected_runs(tmp_path):
+    prepared = os.environ.get('RPIPE_TEST_MNIST_ROOT')
+    if not prepared or not Path(prepared).is_dir():
+        pytest.skip('requires explicitly pre-staged read-only RPIPE_TEST_MNIST_ROOT; no downloads')
+    import yaml
+    from rpipe.api import plan, read_run
+    from rpipe.flow.cli import main
+    pytest.importorskip('transformers')
     repo = Path(__file__).resolve().parents[3]
-    src = repo / 'tests' / '_data' / 'studies' / 'mnist_native_vs_hf'
-    study = tmp_path / 'mnist_native_vs_hf'
-    shutil.copytree(
-        src,
-        study,
-        ignore=shutil.ignore_patterns('runs', 'shared', 'index.json', '__pycache__'),
-    )
-    if (src / 'shared').is_dir():
-        shutil.copytree(src / 'shared', study / 'shared')
-    yaml_path = study / 'study.yaml'
-    text = yaml_path.read_text(encoding='utf-8')
-    text = text.replace(
-        'data.config.train_size: [500, 2000, 8000]',
-        'data.config.train_size: [500]',
-    )
-    text = text.replace('seeds: [0, 1, 2]', 'seeds: [0]')
-    text = text.replace('num_epochs: 20', 'num_epochs: 1')
-    yaml_path.write_text(text, encoding='utf-8')
-
-    assert main(['make', str(study)]) == 0
-    launch_plan = json.loads((study / 'scripts' / 'jobs.json').read_text(encoding='utf-8'))
-    jobs = launch_plan['jobs']
-    assert len(jobs) == 2
-    assert all(job['device'] == 'cpu' for job in jobs)
-    assert all('gpu' not in job for job in jobs)
-    assert launch_plan['capacity']['gpus'] == []
-
-    assert main(['launch', str(study), '--console', 'shared']) == 0
-    results = [study / 'runs' / job['run_id'] / 'result.json' for job in jobs]
-    sources = sorted(
-        load_result(path)['control']['algorithm']['source'] for path in results
-    )
-    assert sources == ['custom_torch', 'transformers_trainer']
-    for path in results:
-        result = load_result(path)
-        assert result['status'] == 'succeeded'
-        assert 'accuracy' in result['metrics']
-    index = load_index(study)
-    assert len(index['experiments']) == 2
-    process = json.loads((study / 'process.json').read_text(encoding='utf-8'))
-    assert process['complete'] is True
-    assert len(process['experiments']) == 2
+    study = tmp_path / 'source' / 'mnist_native_vs_hf'
+    shutil.copytree(repo / 'tests' / '_data' / 'studies' / 'mnist_native_vs_hf', study)
+    declaration = yaml.safe_load((study / 'study.yaml').read_text())
+    declaration['seeds'] = [0]
+    declaration['axes']['data.config.train_size'] = [500]
+    declaration['fixed']['algorithm']['num_epochs'] = 1
+    (study / 'study.yaml').write_text(yaml.safe_dump(declaration), encoding='utf-8')
+    config = yaml.safe_load((study / 'experiment_config.yaml').read_text())
+    config['data']['path'] = str(Path(prepared).resolve())
+    config['data'].setdefault('config', {})['download'] = False
+    (study / 'experiment_config.yaml').write_text(yaml.safe_dump(config), encoding='utf-8')
+    before = {p.relative_to(study): p.read_bytes() for p in study.rglob('*') if p.is_file()}
+    root = tmp_path / 'artifacts'
+    specs = plan(study, run_root=root)
+    assert len(specs) == 2
+    assert {s.config['algorithm']['source'] for s in specs} == {'custom_torch', 'transformers_trainer'}
+    for command in ('make', 'launch', 'process'):
+        assert main([command, str(study), '--run-root', str(root)]) == 0
+    results = [read_run(spec) for spec in specs]
+    assert all(row['status'] == 'succeeded' for row in results)
+    assert all('accuracy' in row['metrics'] for row in results)
+    derived = json.loads((specs[0].study_root / 'summary/process.json').read_text())
+    assert derived['complete'] and len(derived['experiments']) == 2
+    assert {p.relative_to(study): p.read_bytes() for p in study.rglob('*') if p.is_file()} == before

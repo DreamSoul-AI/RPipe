@@ -19,7 +19,7 @@ def test_manifest_git_sha_handles_real_git_layouts(tmp_path, monkeypatch, layout
     hooks.mkdir()
     def git(*args):
         return subprocess.check_output(
-            ['git', '-c', f'core.hooksPath={hooks}', '-c', 'commit.gpgsign=false',
+            ['git', '-c', f'safe.directory={repo}', '-c', f'core.hooksPath={hooks}', '-c', 'commit.gpgsign=false',
              '-c', 'user.name=metadata-test', '-c', 'user.email=metadata@example.invalid', *args],
             cwd=repo if repo.exists() else tmp_path, text=True, stderr=subprocess.PIPE).strip()
     git('init', '--quiet', str(repo))
