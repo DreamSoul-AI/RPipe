@@ -15,7 +15,7 @@ pytestmark = [pytest.mark.content, pytest.mark.p1,
 def test_native_public_run_trains_two_updates_then_independently_evaluates_own_best(
         tensor_study, run_root, file_bytes):
     from rpipe.api import make, plan, process, read_run, run
-    from rpipe.payloads.checkpoints import SystemFactory
+    from rpipe.structure.system.factory import SystemFactory
     from rpipe.structure.contracts import SystemConfig
 
     before = file_bytes(tensor_study)

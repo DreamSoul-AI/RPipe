@@ -26,7 +26,7 @@ import tarfile
 import urllib.request
 from urllib.parse import urlsplit
 
-from rpipe.payloads.origin import domestic_endpoint
+from rpipe.structure.system.origin import domestic_endpoint
 
 
 STUDY = Path(__file__).resolve().parents[1]

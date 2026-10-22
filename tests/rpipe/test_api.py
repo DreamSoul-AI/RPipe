@@ -24,7 +24,10 @@ sys.meta_path.insert(0, RejectBackend())
 from rpipe.api import plan
 specs = plan(sys.argv[1], run_root=sys.argv[2])
 assert len(specs) == 2
-assert not any(name.startswith('rpipe.payloads.') for name in sys.modules)
+scientific = ('rpipe.structure.data', 'rpipe.structure.model', 'rpipe.structure.algorithm',
+              'rpipe.structure.system', 'rpipe.flow.native', 'rpipe.flow.huggingface')
+assert not any(name == prefix or name.startswith(prefix + '.')
+               for name in sys.modules for prefix in scientific)
 ''', encoding='utf-8')
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
     env['PYTHONPATH'] = str(Path(__file__).resolve().parents[2] / 'src')

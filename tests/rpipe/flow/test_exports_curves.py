@@ -5,7 +5,7 @@ import pytest
 
 from rpipe.flow.exports import _history
 from rpipe.structure.readout import load_curve_series, summarize_curve_series
-from rpipe.payloads.tracker import AlgorithmTracker
+from rpipe.structure.algorithm.tracker import AlgorithmTracker
 
 pytestmark = [
     pytest.mark.unit,

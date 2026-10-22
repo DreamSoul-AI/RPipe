@@ -2,7 +2,7 @@
 
 RPipe（Research Pipeline）是研究项目的代码与执行模板，用声明组织比较因素和seed，把一次Run的有效配置、执行事实、结果与跨seed分析连接起来。Python包名为 `rpipe`，中文名为“研究流水线”。
 
-项目仓库：[DreamSoul-AI/RPipe](https://github.com/DreamSoul-AI/RPipe)。MIT许可见 [LICENSE.md](LICENSE.md)。本代码试验从已审文档提交 `538a2b9defb91da0e4806c9708b8114979cb067b` 派生，源码包版本仍为0.4.1。旧文档Draft保持独立；本分支落地职责拆分，尚不表示dev已集成。
+项目仓库：[DreamSoul-AI/RPipe](https://github.com/DreamSoul-AI/RPipe)。MIT许可见 [LICENSE.md](LICENSE.md)。源码包版本仍为0.4.1；本修复分支从dev的 `8a19c9a8018e1bdc196345aba0f2aba39710fd66` 派生，恢复structure/flow两柱边界，保持Draft等待审查。
 
 ## 阅读入口
 
@@ -15,6 +15,8 @@ RPipe（Research Pipeline）是研究项目的代码与执行模板，用声明�
 | 项目研究问题、Study实验设计、数据/模型/算法/指标和停止条件 | [研究流水线 研究计划](<docs/研究流水线 研究计划.md>) |
 
 历史债务分支只作参考，不是本轮基线。旧逐事文档、报告、JSON和图片已归并或清理，Git历史中的结果只支持其固定提交和条件，不能当作新分支验收。进度维护在PR与提交说明，不继续增加报告文件。
+
+改版前完整文档见[固定版本docs](https://github.com/DreamSoul-AI/RPipe/tree/ed0d50be4328af3480b54de31243bf507901d033/docs)：包含概念、structure、flow、layout、测试、CI/CD、研究和发布等33份正文。按用户要求已原样恢复一套独立本地快照，连同当时README、AGENTS共35个文件，来源与字节校验清单随快照保存；交付链接见本次PR。历史正文保持原样，旧CLI和运行目录不作为当前使用合同。
 
 ## 当前使用边界
 
@@ -29,7 +31,7 @@ rpipe process studies/_template --run-root <external-run-root>
 
 默认每Run独立科学子进程，启动前核源码摘要、配置和自己的train依赖。任意外部data.path/stats_path引用的内容漂移未纳入通用身份保证，原有显式checksum/pin校验继续保留。已有成功不原地重跑，换显式version；未确认停止保持unknown/busy。内存硬限制及同进程注入载荷的硬超时不受支持，启动前拒绝；Windows带recipe/数据worker的硬超时也拒绝。没有自动GPU分配或旧队列恢复。status/report当前展示正式result与busy，未发布结果时显示missing；失败、取消、unknown的原始事实保存在attempts/<uuid>/outcome.json，不按mtime或UUID猜哪次是最新。
 
-旧 `structure.api/*` 等内部导入已退役，调用方改用 `rpipe.api`、纯 `structure.contracts` 或明确 `payloads` 科学模块。旧Study内运行目录不会自动迁移/补签；目录对照须明确 `compare --legacy`，其Tensor/轨迹比较保留但来源标为未验证。旧GPU调度/阶段裁剪/隐式cache迁移参数不再接受；先按当前声明和显式根重新计划。精确API与兼容表见代码结构设计。
+库内实现只分两柱：`structure/`提供配置、产物、读取及data/model/algorithm/system组件，`flow/`组织默认六阶段、原生/HF组装和所属进程。旧 `structure.api/*` 等内部导入不自动恢复；调用方改用 `rpipe.api`、纯 `structure.contracts` 或明确structure领域模块。公开`run(..., payload=...)`参数保持调用兼容，不代表第三个源码层。旧Study内运行目录不会自动迁移/补签；目录对照须明确 `compare --legacy`，其Tensor/轨迹比较保留但来源标为未验证。旧GPU调度/阶段裁剪/隐式cache迁移参数不再接受；先按当前声明和显式根重新计划。精确API与兼容表见代码结构设计。
 
 本轮验证以PR中固定HEAD的CPU合同、有限原生/HF数值和离线构建记录为准；没有运行MNIST/CIFAR正式矩阵、GPU、性能或历史长曲线验收。
 

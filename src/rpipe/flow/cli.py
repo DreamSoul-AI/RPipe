@@ -95,7 +95,7 @@ def main(argv=None) -> int:
         elif args.command == 'data':
             from rpipe.structure.artifacts import validate_source
             validate_source(specs[0])
-            from rpipe.payloads.data_profile import profile_study
+            from rpipe.structure.data.profile import profile_study
             value = profile_study(args.study_dir, shared_data_dir=args.run_root / 'shared' / 'data',
                                   profiles_dir=specs[0].study_root / 'shared' / 'data', download=args.download)
         elif args.command == 'tensorboard':

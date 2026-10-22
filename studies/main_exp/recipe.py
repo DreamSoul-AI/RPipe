@@ -144,15 +144,15 @@ def preflight(data_root: Path | str, output_dir: Path | str, *, steps: int = 200
     os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
     import torch
     from rpipe.structure.contracts import AlgorithmConfig
-    from rpipe.payloads.train import TrainAlgorithm
-    from rpipe.payloads.tracker import AlgorithmTracker
+    from rpipe.structure.algorithm.train import TrainAlgorithm
+    from rpipe.structure.algorithm.tracker import AlgorithmTracker
     from rpipe.structure.contracts import DataConfig
-    from rpipe.payloads.data import DataFactory
+    from rpipe.structure.data.factory import DataFactory
     from rpipe.structure.contracts import ModelConfig
-    from rpipe.payloads.models import ModelFactory
+    from rpipe.structure.model.factory import ModelFactory
     from rpipe.structure.contracts import SystemConfig
-    from rpipe.payloads.checkpoints import SystemFactory
-    from rpipe.payloads.runtime import apply_runtime
+    from rpipe.structure.system.factory import SystemFactory
+    from rpipe.structure.system.runtime import apply_runtime
 
     mapping = algorithm_config(steps)
     output = Path(output_dir).resolve()

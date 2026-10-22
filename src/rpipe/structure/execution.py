@@ -4,11 +4,44 @@ from __future__ import annotations
 import subprocess
 import traceback
 import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 from .contracts import AdmissionError, Budget, Cancellation, RunOutcome, RunSpec, SourceMismatch
 from .artifacts import ArtifactLayout, Ownership, identity, read_json, write_config, write_json, validate_source, validate_train
-from .payload import PayloadContext, validate_payload
+
+
+@dataclass
+class RunContext:
+    spec: RunSpec
+    cancellation: Cancellation
+    layout: Any
+    state: dict[str, Any] = field(default_factory=dict)
+    control: Any = None
+    processes: list[subprocess.Popen] = field(default_factory=list)
+
+    def __post_init__(self):
+        self.config = self.spec.to_config()
+
+    @property
+    def study_dir(self) -> Path:
+        return self.spec.source_dir
+
+    @property
+    def scope(self) -> str:
+        return 'run'
+
+    def register_process(self, process: subprocess.Popen) -> None:
+        if not isinstance(process, subprocess.Popen):
+            raise AdmissionError('only a process handle created by this execution may be registered')
+        self.processes.append(process)
+
+
+def _validate_run(payload: Any) -> None:
+    for name in ('prepare', 'execute', 'collect', 'close'):
+        if not callable(getattr(payload, name, None)):
+            raise AdmissionError(f'payload must provide {name}(ctx)')
 
 
 def error_record(exc: BaseException) -> dict[str, Any]:
@@ -28,7 +61,7 @@ def execute(spec: RunSpec, payload: Any, *, budget: Budget | None = None,
             pipeline: Callable | None = None, configure: Callable | None = None) -> RunOutcome:
     budget = budget or Budget()
     budget.validate()
-    validate_payload(payload)
+    _validate_run(payload)
     if budget.memory_bytes is not None:
         raise AdmissionError('this backend cannot enforce a hard memory limit')
     if budget.timeout_seconds is not None:
@@ -44,7 +77,7 @@ def execute(spec: RunSpec, payload: Any, *, budget: Budget | None = None,
     validate_train(spec)
     owner = Ownership(spec)
     owner.acquire()
-    ctx = PayloadContext(spec, cancellation, ArtifactLayout(spec))
+    ctx = RunContext(spec, cancellation, ArtifactLayout(spec))
     ctx.state['budget'] = budget
     attempt = uuid.uuid4().hex
     ctx.state['attempt'] = attempt
