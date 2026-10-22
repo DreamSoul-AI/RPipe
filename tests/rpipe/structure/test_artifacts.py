@@ -55,7 +55,6 @@ def test_truncated_result_is_rejected_without_repair(source_study, run_root, pay
 
 def test_atomic_publish_failure_does_not_report_scientific_success_or_remove_peer(
         source_study, run_root, payload_factory, monkeypatch):
-    import os
     from pathlib import Path
 
     from rpipe.api import plan, run
@@ -64,15 +63,18 @@ def test_atomic_publish_failure_does_not_report_scientific_success_or_remove_pee
     run_root.mkdir()
     peer = run_root / 'peer.dat'
     peer.write_bytes(b'other owner data')
-    replace = os.replace
+    replace = Path.replace
+    failed_publications = []
 
     def fail_selected(source, destination, *args, **kwargs):
         if Path(destination) == spec.result_path:
+            failed_publications.append(destination)
             raise OSError('result storage unavailable')
         return replace(source, destination, *args, **kwargs)
 
-    monkeypatch.setattr(os, 'replace', fail_selected)
+    monkeypatch.setattr(Path, 'replace', fail_selected)
     outcome = run(spec, payload=payload_factory())
+    assert failed_publications == [spec.result_path]
     assert outcome.status == 'failed'
     assert outcome.evidence_complete is False
     assert 'result storage unavailable' in str(outcome.error)
