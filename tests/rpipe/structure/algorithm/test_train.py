@@ -378,10 +378,14 @@ def test_train_final_flush_cannot_replace_primary_failure(tmp_path, monkeypatch,
     assert not list(tracker.state_path.parent.glob('*.tmp'))
     assert caught.value is primary
     if log_mode == 'available':
+        import json
         text = log_path.read_text(encoding='utf-8')
-        assert 'tracker final flush failed' in text
-        assert ('PermissionError' if secondary_kind == 'publication' else 'TypeError') in text
-        assert 'original iterator failure' in text
+        record = json.loads(text.splitlines()[-1])
+        assert record['message'] == 'tracker final flush failed'
+        assert record['exception_type'] == ('PermissionError' if secondary_kind == 'publication' else 'TypeError')
+        assert primary_type.__name__ in record['traceback']
+        assert record['exception_message'] == '[redacted]'
+        assert 'original iterator failure' not in text
 
 
 @pytest.mark.parametrize('secondary_kind', ['publication', 'serialization'])

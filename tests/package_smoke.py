@@ -110,8 +110,13 @@ axes:
             raise RuntimeError(f'invalid Run status/source: {row["id"]}')
         if (run_dir / 'config.yaml').read_bytes() != config_before[row['id']]:
             raise RuntimeError('launch mutated a generated config')
-        if not (run_dir / 'assets/logs/run.log').is_file() or not (run_dir / 'assets/tracker/scalars.jsonl').is_file():
+        log = run_dir / 'assets/logs/events.jsonl'
+        if not log.is_file() or not (run_dir / 'assets/tracker/scalars.jsonl').is_file():
             raise RuntimeError('Run log/tracker missing')
+        records = [json.loads(line) for line in log.read_text(encoding='utf-8').splitlines()]
+        if not records or any(record.get('task_id') != row['id'] or record.get('attempt') != body['attempt']
+                              or type(record.get('pid')) is not int for record in records):
+            raise RuntimeError('Run structured log identity missing or mismatched')
         result_before[row['id']] = (run_dir / 'result.json').read_bytes()
     aggregate = json.loads(command([sys.executable, '-m', 'rpipe', 'process', str(study), '--run-root', str(run_root)]))
     if not aggregate['complete'] or len(aggregate['experiments']) != 2:
