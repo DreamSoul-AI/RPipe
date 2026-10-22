@@ -5,7 +5,7 @@ from ..api import COMMIT, SOURCE, MODEL_NAMES
 
 
 def register(archive, *, seed):
-    from rpipe.structure.api.model_api import Model, ModelRegistry
+    from rpipe.payloads.models import Model, ModelRegistry
 
     register_seed = int(seed)
 

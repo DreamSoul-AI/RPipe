@@ -1,9 +1,0 @@
-{
-  "scope": "Temporary observation helper, not library/Study computational source",
-  "failure": "psutil.disk_io_counters returned None; prior helper called _asdict unguarded",
-  "when": "Before any of the 34 native Run executions/checkpoints started; empty resource JSONL and startup-only log preserved locally.",
-  "scientific_runs_unchanged": true,
-  "fix": "Record unavailable host disk counter as null; continue per-process I/O observations.",
-  "baseline_source_unchanged": true,
-  "local_failure_archive": ".tmp\\v030-20261013\\recovery-observer-before-start-failure"
-}

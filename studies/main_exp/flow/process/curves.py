@@ -110,8 +110,10 @@ def close(left, right):
     return finite(left) and finite(right) and abs(left - right) <= TOLERANCE
 
 
-def inspect_run(study, entry, data, model, mode, seed):
+def inspect_run(study, entry, data, model, mode, seed, *, expected_source=None):
     root = study / 'runs' / str(entry['run_dir'])
+    if not root.resolve().is_relative_to((study / 'runs').resolve()):
+        raise ValueError('Run path escapes the explicit Study version')
     result_path = root / 'result.json'
     result = read_json(result_path) if result_path.is_file() else {}
     trajectory = read_tracker(root)
@@ -136,6 +138,11 @@ def inspect_run(study, entry, data, model, mode, seed):
         if any(r.get('step') != (index + 1) * 240 for index, r in enumerate(trajectory['rows'])):
             errors.append('train/test internal batch counts differ from 200+40 per evaluation')
     if row['status'] == 'succeeded':
+        if expected_source is not None:
+            identity = result.get('identity') or {}
+            if (identity.get('id') != entry['id'] or identity.get('source_digest') != expected_source
+                    or identity.get('version') != study.name):
+                errors.append('result does not match the current source and research version identity')
         if not log:
             errors.append('succeeded result has no run.log')
         if len(trajectory['start_markers']) != 1:
@@ -186,6 +193,8 @@ def threshold_gate(observed, expected, limit):
 
 
 def compare(study, reference, *, partial=False):
+    from rpipe.api import source_digest
+    expected_source = source_digest(STUDY)
     contract = reference['acceptance_contract']
     report = {'schema': 'rpipe.historical_curve_comparison.v1',
               'recorded_at_utc': datetime.now(timezone.utc).isoformat(),
@@ -214,7 +223,7 @@ def compare(study, reference, *, partial=False):
                 report['errors'].append(f'duplicate/unsupported run factors: {key}')
                 continue
             try:
-                row = inspect_run(study, entry, data, model, mode, seed)
+                row = inspect_run(study, entry, data, model, mode, seed, expected_source=expected_source)
             except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
                 row = {'id': entry.get('id'), 'data': data, 'model': model, 'mode': mode, 'seed': seed,
                        'status': 'unreadable', 'points': 0, 'optimizer_steps': [], 'accuracy_pct': [],
@@ -326,7 +335,7 @@ def plot_report(report, reference, destination):
     import matplotlib.pyplot as plt
     import uuid
 
-    from rpipe.structure.api.artifact_api import atomic_replace
+    from rpipe.structure.artifacts import atomic_replace
 
     tmp = destination.with_name(f'{uuid.uuid4().hex}.tmp')
     owned = False
@@ -394,16 +403,19 @@ def plot_report(report, reference, destination):
 
 
 def main(argv=None):
-    from rpipe.structure.api.artifact_api import atomic_write_text
+    from rpipe.structure.artifacts import atomic_write_text
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--study', type=Path, default=STUDY)
+    parser.add_argument('--study-root', type=Path, required=True, help='Explicit research version output root')
     parser.add_argument('--reference', type=Path, default=STUDY / 'docs' / 'REFERENCE_CURVES.json')
-    parser.add_argument('--output', type=Path, help='Output directory (default: <study>/docs)')
+    parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--partial', action='store_true')
     args = parser.parse_args(argv)
-    study = args.study.resolve()
-    output = args.output.resolve() if args.output else study / 'docs'
+    study = args.study_root.resolve()
+    output = args.output.resolve()
+    checkout = STUDY.parents[1]
+    if output.is_relative_to(checkout) or checkout.is_relative_to(output):
+        parser.error('output must be separate from the source checkout')
     reference = read_json(args.reference)
     report = compare(study, reference, partial=args.partial)
     report['reference_file_sha256'] = sha256(args.reference)

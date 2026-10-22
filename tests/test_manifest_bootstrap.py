@@ -28,6 +28,8 @@ def test_native_test_entry_keeps_optional_corrupt_metadata(tmp_path, head, ci_sh
         "pytest.mark.cost(cost_class='c1'),pytest.mark.result_type('categorical',detail='summary')]\n"
         "def test_executes():\n    Path('EXECUTED').write_text('ok')\n", encoding='utf-8')
     env = os.environ.copy()
+    results = tmp_path.with_name(tmp_path.name + '-evidence')
+    env['RPIPE_TEST_RESULTS_ROOT'] = str(results)
     env.pop('GITHUB_SHA', None)
     if ci_sha is not None:
         env['GITHUB_SHA'] = ci_sha
@@ -37,7 +39,7 @@ def test_native_test_entry_keeps_optional_corrupt_metadata(tmp_path, head, ci_sh
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=30)
     assert child.returncode == 0, child.stdout
     assert (tmp_path / 'EXECUTED').read_text() == 'ok'
-    manifests = list((tmp_path / '.tmp/test-results').glob('*/manifest.json'))
+    manifests = list(results.glob('*/manifest.json'))
     assert len(manifests) == 1
     assert json.loads(manifests[0].read_text())['git_sha'] == ci_sha
     events = [json.loads(line) for line in (manifests[0].parent / 'events.jsonl').read_text().splitlines()]
@@ -69,6 +71,8 @@ def test_native_failure_evidence_preserves_unicode_and_peer(tmp_path, kind, when
     code += "def test_02_peer():\n    Path('EXECUTED_PEER').write_text('ok')\n"
     (tmp_path / 'tests/test_minimal.py').write_text(code, encoding='utf-8')
     env = os.environ.copy()
+    results = tmp_path.with_name(tmp_path.name + '-evidence')
+    env['RPIPE_TEST_RESULTS_ROOT'] = str(results)
     env.pop('GITHUB_SHA', None)
     env.update(PYTHONIOENCODING='utf-8:backslashreplace', CUDA_VISIBLE_DEVICES='', MPLBACKEND='Agg')
     child = subprocess.run(
@@ -79,11 +83,11 @@ def test_native_failure_evidence_preserves_unicode_and_peer(tmp_path, kind, when
     assert child.returncode == 1, child.stdout
     assert 'INTERNALERROR' not in child.stdout
     assert (tmp_path / 'EXECUTED_PEER').read_text() == 'ok'
-    manifests = list((tmp_path / '.tmp/test-results').glob('*/manifest.json'))
+    manifests = list(results.glob('*/manifest.json'))
     assert len(manifests) == 1
     raw = (manifests[0].parent / 'events.jsonl').read_bytes()
     events = [json.loads(line) for line in raw.decode('utf-8').splitlines()]
-    assert [event['status'] for event in events] == ['failed', 'passed']
+    assert [event['status'] for event in events] == ['error' if when == 'setup' else 'failed', 'passed']
     assert events[0]['failure']['when'] == when
     assert text in events[0]['failure']['longrepr']
     assert '正常诊断🙂 '.encode('utf-8') in raw

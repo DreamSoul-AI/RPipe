@@ -1,4 +1,4 @@
-"""Unified non-interactive test entry (TESTING.md 附录：RPipe)."""
+"""Unified non-interactive test entry for the architecture test contracts."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ def _expr(parts: list[str]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description='Run RPipe tests with TESTING.md filters.')
+    parser = argparse.ArgumentParser(description='Run RPipe architecture contract tests with filters.')
     parser.add_argument('--level', choices=('unit', 'integration', 'e2e'))
     parser.add_argument('--type', dest='test_type', choices=('location', 'content', 'physical'))
     parser.add_argument('--priority', choices=('p1', 'p2', 'p3'))
@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
         help='unit c1 and c2, exclude slow/external/gpu',
     )
     parser.add_argument('--all', action='store_true', help='run every collected test')
+    parser.add_argument('--results-root', help='external directory for test evidence')
     parser.add_argument('pytest_args', nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
 
@@ -75,7 +76,10 @@ def main(argv: list[str] | None = None) -> int:
     print(subprocess.list2cmdline(cmd), flush=True)
     # Preserve environment and diagnostics when an embedding process captures
     # this launcher; implicit handle/environment inheritance can be lost there.
-    return subprocess.call(cmd, env=dict(os.environ), stdout=sys.stdout, stderr=sys.stderr)
+    env = dict(os.environ)
+    if args.results_root:
+        env['RPIPE_TEST_RESULTS_ROOT'] = args.results_root
+    return subprocess.call(cmd, env=env, stdout=sys.stdout, stderr=sys.stderr)
 
 
 if __name__ == '__main__':

@@ -1,7 +1,6 @@
 """Fresh-process checkpoint precision diagnosis; reuse native EvalAlgorithm."""
 from __future__ import annotations
 
-from rpipe.structure.api.artifact_api import shared_paths
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -16,30 +15,32 @@ import uuid
 
 def main(recipe, argv):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--run-root', type=Path, required=True)
     parser.add_argument('--checkpoint', type=Path, required=True)
     parser.add_argument('--worker', action='store_true')
     parser.add_argument('--tf32', action='store_true')
     parser.add_argument('--output', type=Path)
     parser.add_argument('--profile', action='store_true')
     args = parser.parse_args(argv)
+    args.run_root = recipe.external_root(args.run_root)
     if args.worker and args.output is None:
         parser.error('--worker requires --output')
+    if args.output is not None:
+        args.output = recipe.external_root(args.output)
     if not args.checkpoint.is_file():
         parser.error('an existing checkpoint is required; do not replace it with retraining')
     recipe.bootstrap()
     if args.worker:
         return _worker(recipe, args)
     ident = 'precision-' + time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8]
-    root = recipe.STUDY / 'shared/validation' / ident
+    root = args.run_root / 'validation' / ident
     root.mkdir(parents=True, exist_ok=False)
     report = {'measurement_id': ident, 'checkpoint_sha256': hashlib.sha256(args.checkpoint.read_bytes()).hexdigest(),
               'complete': False, 'status': 'running', 'expected_groups': 4,
               'checkpoint_local_only': str(args.checkpoint.resolve()), 'groups': [],
               'scope': 'same checkpoint/full test; FP32 supported gate, TF32 diagnostic not a replacement baseline'}
-    from rpipe.structure.api.artifact_api import source_files
-    from rpipe.structure.api.make_api import load_study_yaml
-    from rpipe.structure.api.artifact_api import atomic_write_text
-    original = source_files(recipe.STUDY, load_study_yaml(recipe.STUDY))
+    from rpipe.structure.artifacts import atomic_write_text
+    original = recipe.source_manifest()
     report['source_hashes'] = original
     for tf32 in (False, True):
         for concurrency in (1, 3):
@@ -48,7 +49,7 @@ def main(recipe, argv):
                 output = root / f'{tf32}-{concurrency}-{index}'
                 output.mkdir()
                 command = [sys.executable, '-B', str(Path(recipe.__file__)), 'diagnose-precision',
-                           '--worker', '--checkpoint', str(args.checkpoint.resolve()), '--output', str(output)]
+                           '--run-root', str(args.run_root), '--worker', '--checkpoint', str(args.checkpoint.resolve()), '--output', str(output)]
                 if tf32:
                     command.append('--tf32')
                 if index == 0:
@@ -62,11 +63,11 @@ def main(recipe, argv):
                 group['runs'] = list(pool.map(execute, range(8)))
             group['execution_passed'] = all(row['exit_code'] == 0 and row.get('samples') == 10000 for row in group['runs'])
             report['groups'].append(group)
-            atomic_write_text(recipe.STUDY / 'docs/speed_measurements' / (ident + '.json'), json.dumps(report, indent=2))
+            atomic_write_text(root / 'REPORT.json', json.dumps(report, indent=2))
             print(json.dumps({'group': [tf32, concurrency], 'execution_passed': group['execution_passed'],
                               'correct': [r.get('correct_samples') for r in group['runs']]}, ensure_ascii=False), flush=True)
     fp32 = [row for group in report['groups'] if not group['tf32'] for row in group['runs']]
-    report['source_unchanged'] = original == source_files(recipe.STUDY, load_study_yaml(recipe.STUDY))
+    report['source_unchanged'] = original == recipe.source_manifest()
     report['fp32_passed'] = report['source_unchanged'] and all(group['execution_passed'] for group in report['groups']) and all(
         row['correct_samples'] == row['checkpoint_correct_samples'] and row['prediction_sha256'] == fp32[0]['prediction_sha256']
         and row['input_sha256'] == fp32[0]['input_sha256'] and row['model_sha256'] == fp32[0]['model_sha256'] for row in fp32)
@@ -74,28 +75,28 @@ def main(recipe, argv):
     report['fp32_passed'] &= report['checkpoint_unchanged']
     report['complete'] = True
     report['status'] = 'passed' if report['fp32_passed'] else 'failed'
-    atomic_write_text(recipe.STUDY / 'docs/speed_measurements' / (ident + '.json'), json.dumps(report, indent=2))
+    atomic_write_text(root / 'REPORT.json', json.dumps(report, indent=2))
     return 0 if report['fp32_passed'] else 1
 
 
 def _worker(recipe, args):
-    from rpipe.structure.api.artifact_api import atomic_write_text
+    from rpipe.structure.artifacts import atomic_write_text
 
     import torch
-    from rpipe.structure.api.algorithm_api import AlgorithmConfig
-    from rpipe.structure.api.algorithm_api import EvalAlgorithm
-    from rpipe.structure.api.algorithm_api import MetricBundle
-    from rpipe.structure.api.algorithm_api import AlgorithmTracker
-    from rpipe.structure.api.data_api import DataConfig
-    from rpipe.structure.api.data_api import DataFactory
-    from rpipe.structure.api.model_api import ModelConfig
-    from rpipe.structure.api.model_api import ModelFactory
-    from rpipe.structure.api.system_api import SystemConfig
-    from rpipe.structure.api.system_api import SystemFactory
-    from rpipe.structure.api.system_api import apply_runtime
+    from rpipe.structure.contracts import AlgorithmConfig
+    from rpipe.payloads.evaluation import EvalAlgorithm
+    from rpipe.payloads.metrics import MetricBundle
+    from rpipe.payloads.tracker import AlgorithmTracker
+    from rpipe.structure.contracts import DataConfig
+    from rpipe.payloads.data import DataFactory
+    from rpipe.structure.contracts import ModelConfig
+    from rpipe.payloads.models import ModelFactory
+    from rpipe.structure.contracts import SystemConfig
+    from rpipe.payloads.checkpoints import SystemFactory
+    from rpipe.payloads.runtime import apply_runtime
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
-    recipe.install(shared_paths(recipe.STUDY)['data'], 0)
+    recipe.install(args.run_root / 'shared' / 'data', 0, archive_root=args.output / 'source-4ccb28d')
     config = SystemConfig.from_mapping({'device': 'cuda', 'deterministic': True, 'cudnn_deterministic': True,
         'cudnn_benchmark': False, 'cudnn_allow_tf32': args.tf32, 'matmul_allow_tf32': False})
     runtime = apply_runtime(0, config)

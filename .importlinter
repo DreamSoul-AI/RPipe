@@ -1,0 +1,46 @@
+[importlinter]
+root_package = rpipe
+
+[importlinter:contract:mechanisms-do-not-know-flow]
+name = Mechanisms and scientific payloads do not depend on assembly
+type = forbidden
+source_modules =
+    rpipe.structure
+    rpipe.payloads
+forbidden_modules =
+    rpipe.flow
+    rpipe.api
+
+[importlinter:contract:pure-contracts]
+name = Configuration contracts have no implementation dependency
+type = forbidden
+source_modules =
+    rpipe.structure.contracts
+forbidden_modules =
+    rpipe.structure.plan
+    rpipe.structure.execution
+    rpipe.structure.artifacts
+    rpipe.structure.payload
+    rpipe.structure.readout
+    rpipe.payloads
+
+[importlinter:contract:pure-plan-and-payload]
+name = Pure planning and payload contracts only depend on contracts
+type = forbidden
+source_modules =
+    rpipe.structure.plan
+    rpipe.structure.payload
+forbidden_modules =
+    rpipe.structure.execution
+    rpipe.structure.artifacts
+    rpipe.structure.readout
+    rpipe.payloads
+
+[importlinter:contract:readonly-does-not-execute]
+name = Readout does not acquire execution or scientific payloads
+type = forbidden
+source_modules =
+    rpipe.structure.readout
+forbidden_modules =
+    rpipe.structure.execution
+    rpipe.payloads
