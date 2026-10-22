@@ -58,12 +58,11 @@ class Model:
         self.meta = meta
 
     def to_result_snapshot(self) -> dict[str, Any]:
-        out = {
+        return {
             'name': self.name,
             'source': self.source,
             **{k: v for k, v in self.meta.items() if k != 'module'},
         }
-        return out
 
 
 class ModelRegistry:
