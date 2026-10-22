@@ -137,3 +137,95 @@ def test_report_rebuilds_from_disk_and_lists_missing_results(tmp_path):
     report = (tmp_path / 'report.md').read_text(encoding='utf-8')
     assert '| measured | 1 |' in report
     assert '未取得完整结果：1' in report and '`missing`' in report
+
+
+def test_disk_report_counts_attempts_once_per_case_and_blocks_required_skip(tmp_path):
+    (tmp_path / 'manifest.json').write_text(json.dumps({
+        'run_id': 'retry', 'plan_id': 'core', 'selected': ['flaky', 'skip'],
+        'required': ['flaky', 'skip', 'not_collected'],
+    }))
+    events = [
+        {'test_id': 'flaky', 'attempt': 1, 'status': 'failed', 'duration_ms': 4},
+        {'test_id': 'flaky', 'attempt': 2, 'status': 'passed', 'duration_ms': 6},
+        {'test_id': 'skip', 'attempt': 2, 'status': 'skipped', 'duration_ms': 1},
+    ]
+    (tmp_path / 'events.jsonl').write_text(''.join(json.dumps(e) + '\n' for e in events))
+    summary = records.write_report(tmp_path, 0)
+    assert summary['case_count'] == 2 and summary['attempt_count'] == 3
+    assert summary['flaky'] == ['flaky']
+    assert summary['missing_required'] == ['not_collected']
+    assert summary['blocking'] is True and summary['actual_wall_time_ms'] == 11
+    assert summary['required_incomplete'] == ['not_collected', 'skip']
+    report = (tmp_path / 'report.md').read_text(encoding='utf-8')
+    assert 'plan_id: `core`' in report and 'flaky' in report
+
+
+def test_disk_report_survives_interrupted_last_json_line_without_losing_done_case(tmp_path):
+    (tmp_path / 'manifest.json').write_text(json.dumps({
+        'run_id': 'partial', 'selected': ['done', 'active'], 'required': ['done', 'active'],
+    }))
+    (tmp_path / 'events.jsonl').write_text(
+        json.dumps({'test_id': 'done', 'attempt': 1, 'status': 'passed'}) + '\n{"test_id":')
+    summary = records.write_report(tmp_path, 2)
+    assert summary['case_count'] == 1
+    assert summary['missing_required'] == ['active']
+    assert summary['evidence_errors'] and summary['blocking'] is True
+
+
+def test_manifest_replace_retries_only_transient_windows_sharing_error(tmp_path, monkeypatch):
+    path = tmp_path / 'manifest.json'
+    path.write_text('{"old":true}')
+    native, attempts = Path.replace, []
+    def transient(staging, target):
+        attempts.append(target)
+        if len(attempts) < 3:
+            error = PermissionError('Windows transient sharing violation')
+            error.winerror = 32
+            raise error
+        return native(staging, target)
+    monkeypatch.setattr(Path, 'replace', transient)
+    records.save_json(path, {'new': True})
+    assert len(attempts) == 3 and json.loads(path.read_text()) == {'new': True}
+
+
+def test_event_append_after_interruption_preserves_complete_events_and_damaged_tail(tmp_path):
+    path = tmp_path / 'events.jsonl'
+    first = {'test_id': 'done', 'attempt': 1, 'status': 'passed'}
+    second = {'test_id': 'active', 'attempt': 1, 'status': 'timeout'}
+    path.write_bytes((json.dumps(first) + '\n{"cut":').encode() + b'\xe4')
+    records.append_event(path, second)
+    events, errors = records._entry.read_events(tmp_path)
+    assert events == [first, second] and len(errors) == 1
+    assert b'{"cut":\xe4' in path.read_bytes()
+
+
+@pytest.mark.parametrize('outcome,wasxfail,status', [
+    ('skipped', False, 'skipped'), ('skipped', True, 'xfail'), ('passed', True, 'xpass'),
+])
+def test_skip_xfail_xpass_are_separate_states_without_normal_quality_verdict(tmp_path, request, outcome, wasxfail, status):
+    item = SimpleNamespace(config=SimpleNamespace(_rpipe_results_dir=tmp_path, _rpipe_run_id='states'),
+                           nodeid='synthetic::state', location=('synthetic.py', 0, 'state'),
+                           iter_markers=request.node.iter_markers)
+    report = SimpleNamespace(when='call', duration=.1, failed=False, passed=outcome == 'passed',
+                             skipped=outcome == 'skipped', start=0, wasxfail=wasxfail, longrepr='expected condition')
+    _record(item, report)
+    _finish(item, 0)
+    event = json.loads((tmp_path / 'events.jsonl').read_text())
+    assert event['status'] == status and event['verdict'] is None
+
+
+@pytest.mark.parametrize('numeric', [False, True])
+def test_failed_collection_or_threshold_preserves_the_measurement(tmp_path, request, numeric):
+    marks = [mark for mark in request.node.iter_markers() if mark.name != 'result_type']
+    marks.append(pytest.mark.result_type('numeric' if numeric else 'categorical', detail='metrics').mark)
+    metrics = [{'name': 'observed', 'value': 7, 'unit': 'count'}]
+    item = SimpleNamespace(config=SimpleNamespace(_rpipe_results_dir=tmp_path, _rpipe_run_id='failed-value'),
+                           nodeid='synthetic::value', location=('synthetic.py', 0, 'value'),
+                           iter_markers=lambda name=None: (mark for mark in marks if name is None or mark.name == name),
+                           user_properties=[('metrics', metrics)])
+    _record(item, SimpleNamespace(when='call', duration=.1, failed=True, passed=False, skipped=False,
+                                  start=0, longrepr='collection failed' if numeric else '7 > threshold 5'))
+    _finish(item, 0)
+    event = json.loads((tmp_path / 'events.jsonl').read_text())
+    assert event['metrics'] == metrics
+    assert (event['status'], event['verdict']) == (('error', None) if numeric else ('failed', 'fail'))

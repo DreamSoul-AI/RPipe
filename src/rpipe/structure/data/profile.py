@@ -8,7 +8,8 @@ standardize recipe.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from itertools import chain
+from typing import Any, Iterable
 
 import yaml
 
@@ -20,7 +21,7 @@ from rpipe.structure.system.origin import normalize_origin
 STATS_NAME = 'stats.yaml'
 
 
-def summarize_batches(batches: list[tuple[Any, Any]]) -> dict[str, Any]:
+def summarize_batches(batches: Iterable[tuple[Any, Any]]) -> dict[str, Any]:
     """Channel mean / std / min / max and class counts over NCHW batches in 0–1."""
     import torch
 
@@ -75,12 +76,17 @@ def summarize_batches(batches: list[tuple[Any, Any]]) -> dict[str, Any]:
     }
 
 
-def load_stats(path: Path | str) -> dict[str, Any] | None:
+def load_stats(path: Path | str, *, required: bool = False) -> dict[str, Any] | None:
     file = Path(path)
     if not file.is_file():
+        if required:
+            raise FileNotFoundError('declared normalization statistics are missing')
         return None
     body = yaml.safe_load(_read_text(file)) or {}
-    if not isinstance(body, dict) or not body.get('mean') or not body.get('std'):
+    if (not isinstance(body, dict) or any(not isinstance(body.get(key), (list, tuple))
+                                        or not body[key] for key in ('mean', 'std'))):
+        if required:
+            raise ValueError('declared statistics require nonempty mean and std arrays')
         return None
     return body
 
@@ -109,32 +115,45 @@ def profile_study(study_dir: Path | str, *, shared_data_dir: Path | str,
             shared,
             origin=origin,
         )
-        splits = {}
-        for split in ('train', 'test'):
-            batches = [(images, targets) for images, targets in _iter_pairs(data, split)]
-            if batches:
+        primary = None
+        try:
+            splits = {}
+            for split in ('train', 'test'):
+                batches = iter(_iter_pairs(data, split))
+                first = next(batches, None)
+                if first is None:
+                    continue
+                batches = chain((first,), batches)
+                del first
                 splits[split] = summarize_batches(batches)
-        if 'train' not in splits:
-            raise RuntimeError(f'{name}: train split is empty')
-        train_pixel = splits['train']['pixel']
-        body = {
-            'name': name,
-            'summary': _summary_line(name, splits),
-            'mean': list(train_pixel['mean']),
-            'std': list(train_pixel['std']),
-            'splits': splits,
-        }
-        path = folder / STATS_NAME
-        atomic_write_text(path, yaml.safe_dump(body, sort_keys=False, allow_unicode=True))
-        written.append(path)
+            if 'train' not in splits:
+                raise RuntimeError(f'{name}: train split is empty')
+            train_pixel = splits['train']['pixel']
+            body = {'name': name, 'summary': _summary_line(name, splits),
+                    'mean': list(train_pixel['mean']), 'std': list(train_pixel['std']),
+                    'splits': splits}
+            path = folder / STATS_NAME
+            atomic_write_text(path, yaml.safe_dump(body, sort_keys=False, allow_unicode=True))
+            written.append(path)
+        except BaseException as exc:
+            primary = exc
+            raise
+        finally:
+            close = getattr(data, 'close', None)
+            if callable(close):
+                try:
+                    close()
+                except BaseException as cleanup:
+                    if primary is None:
+                        raise
+                    primary.cleanup_errors = (*getattr(primary, 'cleanup_errors', ()), cleanup)
+                    if callable(getattr(primary, 'add_note', None)):
+                        primary.add_note('data profile cleanup also failed: ' + type(cleanup).__name__)
     return written
 
 
 def _iter_pairs(data: Any, split: str):
-    loader = getattr(data, '_loaders', {}).get(split)
-    if loader is None:
-        return
-    for batch in loader:
+    for batch in data.iter_batches(split):
         if isinstance(batch, (tuple, list)) and len(batch) >= 2:
             yield batch[0], batch[1]
 

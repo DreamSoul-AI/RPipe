@@ -83,3 +83,17 @@ def test_launch_unknown_owner_stops_new_dispatch(source_study, run_root, monkeyp
     monkeypatch.setattr(api, 'run', unresolved)
     assert [outcome.status for outcome in api.launch(specs)] == ['unknown']
     assert calls == [specs[0].id]
+
+
+def test_launch_preserves_explicit_retry_choice(source_study, run_root, monkeypatch):
+    from rpipe import api
+    from rpipe.structure.contracts import RunOutcome
+
+    specs = api.plan(source_study, run_root=run_root)
+    calls = []
+    def execute(spec, **kwargs):
+        calls.append(kwargs['retry'])
+        return RunOutcome('failed')
+    monkeypatch.setattr(api, 'run', execute)
+    api.launch(specs, retry=True)
+    assert calls == [True, True]

@@ -64,3 +64,107 @@ def test_data_names_keep_string_conversion_first_occurrence_and_input(study, exp
 def test_data_names_still_rejects_missing_names():
     with pytest.raises(ValueError, match='study.yaml has no data.name'):
         _data_names({'axes': {'data.name': ()}, 'fixed': {'data': {'name': 0}}})
+
+
+def test_profile_consumes_batches_incrementally_and_closes_its_data(tmp_path, monkeypatch):
+    import weakref
+    import torch
+    from rpipe.structure.data import profile
+
+    refs = []
+
+    def batches():
+        for index in range(5):
+            assert sum(ref() is not None for ref in refs) <= 2, 'profiling retained prior batches'
+            images = torch.full((2, 1, 2, 2), index / 4)
+            refs.append(weakref.ref(images))
+            yield images, torch.tensor([0, 1])
+
+    class OwnedData:
+        _loaders = {'train': batches()}
+        closed = False
+
+        def iter_batches(self, split):
+            return iter(self._loaders.get(split, ()))
+
+        def close(self):
+            self.closed = True
+
+    data = OwnedData()
+    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: data)
+    source = tmp_path / 'source'
+    source.mkdir()
+    (source / 'study.yaml').write_text('fixed: {data: {name: Tiny}}\n', encoding='utf-8')
+    paths = profile.profile_study(source, shared_data_dir=tmp_path / 'raw', profiles_dir=tmp_path / 'profiles')
+    assert data.closed
+    assert len(paths) == 1
+    import yaml
+    body = yaml.safe_load(paths[0].read_text(encoding='utf-8'))
+    assert body['splits']['train']['count'] == 10
+    assert body['mean'] == [0.5]
+
+
+def test_profile_keeps_primary_error_when_owned_data_close_also_fails(tmp_path, monkeypatch):
+    import torch
+    from rpipe.structure.data import profile
+
+    class BrokenData:
+        _loaders = {'train': [(torch.zeros(2), torch.zeros(2))]}
+
+        def iter_batches(self, split):
+            return iter(self._loaders.get(split, ()))
+
+        def close(self):
+            raise OSError('secondary close')
+
+    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: BrokenData())
+    source = tmp_path / 'source'
+    source.mkdir()
+    (source / 'study.yaml').write_text('fixed: {data: {name: Tiny}}\n', encoding='utf-8')
+    with pytest.raises(ValueError, match='NCHW') as caught:
+        profile.profile_study(source, shared_data_dir=tmp_path / 'raw', profiles_dir=tmp_path / 'profiles')
+    assert isinstance(caught.value.cleanup_errors[0], OSError)
+    assert not (tmp_path / 'profiles' / 'Tiny' / 'stats.yaml').exists()
+
+
+@pytest.mark.parametrize('body', ['mean: [0.1]\nstd: [0]\n',
+                                 'mean: [.nan]\nstd: [0.2]\n',
+                                 'mean: [0.1, 0.2]\nstd: [0.3]\n'])
+def test_explicit_normalization_stats_must_be_valid_and_never_silently_fallback(tmp_path, body):
+    path = tmp_path / 'stats.yaml'
+    path.write_text(body, encoding='utf-8')
+    with pytest.raises(ValueError):
+        _with_recorded_stats({'mean': (0.5,), 'std': (0.5,)}, path, required=True)
+
+
+def test_missing_explicit_normalization_stats_is_not_a_builtin_fallback(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        _with_recorded_stats({'mean': (0.5,), 'std': (0.5,)}, tmp_path / 'missing.yaml', required=True)
+
+
+def test_profile_registers_iterator_with_its_data_owner_before_failure(tmp_path, monkeypatch):
+    import torch
+    from rpipe.structure.data import profile
+    from rpipe.structure.data.factory import Data
+
+    class Batches:
+        closed = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return torch.zeros(2), torch.zeros(2)
+
+        def close(self):
+            self.closed = True
+
+    batches = Batches()
+    data = Data(name='Tiny', source='test', loaders={'train': batches}, meta={})
+    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: data)
+    source = tmp_path / 'source'
+    source.mkdir()
+    (source / 'study.yaml').write_text('fixed: {data: {name: Tiny}}\n', encoding='utf-8')
+    with pytest.raises(ValueError, match='NCHW'):
+        profile.profile_study(source, shared_data_dir=tmp_path / 'raw', profiles_dir=tmp_path / 'profiles')
+    assert batches.closed

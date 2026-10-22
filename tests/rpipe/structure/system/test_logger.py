@@ -1,426 +1,270 @@
-import re
+"""Bounded diagnostic records cannot change scientific success or its first error."""
 import contextlib
 import io
+import json
 import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import time
 
 import pytest
-
-pytestmark = [
-    pytest.mark.unit,
-    pytest.mark.content,
-    pytest.mark.p1,
-    pytest.mark.structure_layer,
-    pytest.mark.module_system,
-    pytest.mark.cost(cost_class='c1'),
-    pytest.mark.result_type('categorical', detail='summary'),
-]
-
-from pathlib import Path
 
 from rpipe.structure.algorithm.tracker import AlgorithmTracker
 from rpipe.structure.system.logger import Logger
 
-_HEADER = re.compile(
-    r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2} '
-    r'(INFO |WARN |ERROR) '
-)
+pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
+              pytest.mark.structure_layer, pytest.mark.module_system,
+              pytest.mark.cost(cost_class='c1'),
+              pytest.mark.result_type('categorical', detail='summary')]
 
 
-def test_logger_writes_timestamp_level_and_run_id(tmp_path: Path, capsys):
-    assets = tmp_path / 'runs' / 'abc123' / 'assets'
-    logger = Logger(assets)
-    logger.info('start phases=prepare')
-    captured = capsys.readouterr().out
-    assert _HEADER.match(captured)
-    assert ' INFO  abc123 [flow] start phases=prepare' in captured
-    text = (assets / 'logs' / 'run.log').read_text(encoding='utf-8')
-    assert text == captured
+def records(path):
+    return [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines()]
 
 
-def test_logger_report_uses_metric_tags(tmp_path: Path, capsys):
-    tracker = AlgorithmTracker(tmp_path)
-    tracker.append('train', n=1, values={'Loss': 0.5, 'Accuracy': 0.25})
+def test_jsonl_identity_and_all_five_levels(tmp_path, capsys):
+    logger = Logger(tmp_path / 'runs' / 'abc123' / 'assets', logger='rpipe.test',
+                    runtime_id='runtime-a', request_id='request-a', attempt_id='attempt-a',
+                    workflow_id='study-a', debug=True)
+    logger.bind(phase='execute')
+    for level in ('debug', 'info', 'warning', 'error', 'critical'):
+        getattr(logger, level)('known event', event='test.observed')
+    rows = records(logger.path)
+    assert [row['level'] for row in rows] == ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+    assert logger.path.name == 'events.jsonl'
+    assert logger.path.read_text(encoding='utf-8') == capsys.readouterr().out
+    for row in rows:
+        assert re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z', row['timestamp'])
+        assert row['pid'] == os.getpid() and row['process_name']
+        assert row['app_name'] == 'rpipe' and row['app_version']
+        assert row['logger'] == 'rpipe.test' and row['task_id'] == 'abc123'
+        assert row['runtime_id'] == 'runtime-a' and row['request_id'] == 'request-a'
+        assert row['attempt_id'] == 'attempt-a' and row['workflow_id'] == 'study-a'
+        assert row['phase'] == 'execute'
+
+
+def test_default_debug_and_unknown_context_are_omitted(tmp_path):
+    logger = Logger(tmp_path, request_id=None)
+    logger.debug('not enabled')
+    logger.info('static context')
+    row, = records(logger.path)
+    assert 'request_id' not in row and 'task_id' not in row and row['level'] == 'INFO'
+
+
+def test_privacy_and_controls_are_handled_before_either_sink(tmp_path, capsys):
     logger = Logger(tmp_path)
-    logger.report(tracker, 'train', extra={'epoch': 1, 'elapsed': '0:00:01', 'eta': '0:00:09'})
-    text = (tmp_path / 'logs' / 'run.log').read_text(encoding='utf-8')
-    assert _HEADER.match(text)
-    assert ' - [epoch] 1 [split] train [metric] Accuracy=0.2500 Loss=0.5000 [time] elapsed=0:00:01 eta=0:00:09' in text
-    assert capsys.readouterr().out == text
+    logger.info('token=TEST_SECRET path=C:\\private\\person.txt email=person@example.test\n'
+                '\x1b[31m\r\u2028phase=execute', event='test.observed',
+                token='OTHER_SECRET', request_id='x' * 1000)
+    text = logger.path.read_text(encoding='utf-8')
+    assert text == capsys.readouterr().out and len(text.splitlines()) == 1
+    for secret in ('TEST_SECRET', 'OTHER_SECRET', 'person.txt', 'person@example.test'):
+        assert secret not in text
+    assert '\x1b' not in text and '\u2028' not in text
+    row, = records(logger.path)
+    assert 'token' not in row and 'request_id' not in row
+    assert 'request_id' in row['truncated_fields']
 
 
-def test_logger_exception_writes_traceback_on_each_line(tmp_path: Path, capsys):
-    assets = tmp_path / 'runs' / 'deadbeef' / 'assets'
-    logger = Logger(assets)
+@pytest.mark.parametrize('control', ['\n', '\r\n', '\x1b', '\x85', '\u2028', '\u202e'])
+def test_external_controls_cannot_make_or_reorder_a_display_record(tmp_path, capsys, control):
+    logger = Logger(tmp_path)
+    logger.info('first' + control + 'second', event='test.observed')
+    text = logger.path.read_text(encoding='utf-8')
+    assert len(text.splitlines()) == 1
+    assert control not in text[:-1] and text == capsys.readouterr().out
+    assert 'first' in records(logger.path)[0]['message'] and 'second' in records(logger.path)[0]['message']
 
+
+def test_exception_retains_location_and_chain_without_private_text(tmp_path, capsys):
+    logger = Logger(tmp_path)
     def inner():
-        raise ValueError('nope')
-
+        raise ValueError('token=TEST_SECRET user input PRIVATE_BODY C:\\private\\person.txt')
     try:
-        inner()
-    except ValueError as exc:
-        logger.exception('phase=execute status=failed', exc)
+        try:
+            inner()
+        except ValueError as error:
+            raise RuntimeError('password=OTHER_SECRET') from error
+    except RuntimeError as error:
+        logger.exception('scientific worker failed', error)
+    text = logger.path.read_text(encoding='utf-8')
+    assert text == capsys.readouterr().out
+    row, = records(logger.path)
+    assert row['level'] == 'ERROR' and row['exception_type'] == 'RuntimeError'
+    assert 'inner' in row['traceback'] and 'ValueError' in text
+    for secret in ('TEST_SECRET', 'OTHER_SECRET', 'PRIVATE_BODY', 'person.txt', str(tmp_path)):
+        assert secret not in text
 
-    text = (assets / 'logs' / 'run.log').read_text(encoding='utf-8')
-    out = capsys.readouterr().out
-    for blob in (text, out):
-        assert ' ERROR deadbeef [error] phase=execute status=failed ValueError: nope' in blob
-        assert ' ERROR deadbeef [error] Traceback (most recent call last):' in blob
-        assert 'ValueError: nope' in blob
-        assert 'inner' in blob
+
+@pytest.mark.parametrize('failure', ['closed', 'pipe', 'programming'])
+def test_stdout_failure_keeps_file_and_reports_gap(tmp_path, failure):
+    logger = Logger(tmp_path)
+    if failure == 'closed':
+        sink = io.StringIO()
+        sink.close()
+    elif failure == 'pipe':
+        reader, writer = os.pipe()
+        os.close(reader)
+        sink = os.fdopen(writer, 'w', encoding='utf-8', buffering=1)
+    else:
+        class Sink:
+            def write(self, value):
+                raise RuntimeError('PRIVATE_STDOUT_FAILURE')
+            def flush(self):
+                pass
+        sink = Sink()
+    with contextlib.redirect_stdout(sink):
+        logger.info('science still running', event='task.started')
+    if failure == 'pipe':
+        with contextlib.suppress(OSError):
+            sink.close()
+        sink.buffer.close()
+    rows = records(logger.path)
+    assert rows[0]['event'] == 'task.started'
+    fault = next(row for row in rows if row['event'] == 'logging.sink_failed')
+    assert fault['sink'] == 'stdout' and fault['drop_reason'] == 'delivery_unconfirmed'
+    assert 'dropped_count' not in fault
+    assert not logger.diagnostics_complete and 'PRIVATE_STDOUT_FAILURE' not in str(rows)
 
 
-def test_logger_report_after_save_reset_uses_segment(tmp_path: Path, capsys):
+@pytest.mark.parametrize('stage', ['open', 'write', 'flush', 'close'])
+def test_file_failure_keeps_stdout_and_scientific_error(
+        tmp_path, monkeypatch, capsys, stream_close_fault, stage):
+    logger = Logger(tmp_path)
+    before = logger.path.read_bytes()
+    if stage == 'open':
+        original = Path.open
+        def opening(path, mode='r', *args, **kwargs):
+            if path == logger.path and mode == 'ab':
+                raise PermissionError('PRIVATE_FILE_FAILURE')
+            return original(path, mode, *args, **kwargs)
+        monkeypatch.setattr(Path, 'open', opening)
+    else:
+        stream_close_fault(lambda path, mode: path == logger.path and mode == 'ab',
+                           None if stage == 'close' else OSError('PRIVATE_FILE_FAILURE'),
+                           OSError('PRIVATE_FILE_FAILURE') if stage == 'close' else None,
+                           phase='write' if stage == 'close' else stage)
+    logger.exception('scientific worker failed', ValueError('PRIVATE_PRIMARY'))
+    out = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert out[0]['exception_type'] == 'ValueError'
+    assert any(row['event'] == 'logging.sink_failed' and row['sink'] == 'file' for row in out)
+    assert not logger.diagnostics_complete
+    assert 'PRIVATE_FILE_FAILURE' not in str(out) and 'PRIVATE_PRIMARY' not in str(out)
+    assert logger.path.read_bytes().startswith(before)
+
+
+def test_records_files_and_first_failure_remain_bounded(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(Logger, 'MAX_FILE_BYTES', 20_000)
+    logger = Logger(tmp_path)
+    logger.exception('first scientific failure', ValueError('private arbitrary exception'))
+    for _ in range(100):
+        logger.info('界' * 10_000, event='test.observed')
+    logger.info('task finished', event='task.succeeded')
+    files = list(logger.path.parent.glob('events*.jsonl'))
+    assert len(files) <= 5
+    assert all(path.stat().st_size <= logger.MAX_FILE_BYTES for path in files)
+    assert all(len(line) + 1 <= logger.MAX_RECORD_BYTES for path in files
+               for line in path.read_bytes().splitlines())
+    all_rows = [row for path in files for row in records(path)]
+    assert any(row['event'] == 'logging.records_dropped' for row in all_rows)
+    assert any(row['event'] == 'task.succeeded' for row in all_rows)
+    assert any(row.get('exception_type') == 'ValueError' for row in all_rows)
+    assert any('message' in row.get('truncated_fields', []) for row in all_rows)
+    capsys.readouterr()
+
+
+def test_retention_only_removes_owned_logs(tmp_path):
+    logger = Logger(tmp_path)
+    logger.info('old event')
+    peer = logger.path.parent / 'user-data.jsonl'
+    peer.write_bytes(b'private user input')
+    old = time.time() - logger.RETENTION_SECONDS - 1
+    os.utime(logger.path, (old, old))
+    os.utime(peer, (old, old))
+    logger.close()
+    assert not logger.path.exists() and peer.read_bytes() == b'private user input'
+
+
+def test_report_keeps_diagnostic_metrics_without_arbitrary_extra(tmp_path, capsys):
     tracker = AlgorithmTracker(tmp_path)
     tracker.append('test', n=10, values={'Loss': 0.5, 'Accuracy': 0.8})
     tracker.save('test')
     tracker.reset('test')
-    Logger(tmp_path).report(tracker, 'test')
-    text = capsys.readouterr().out
-    assert '[split] test [metric] Accuracy=0.8000 Loss=0.5000' in text
-
-
-def test_logger_constructor_preserves_evidence_arriving_before_open(tmp_path, monkeypatch):
-    from rpipe.structure import artifacts as kinds
-
-    target = tmp_path / kinds.RUN_LOG
-    native = Path.open
-    arrivals = []
-
-    def arriving(path, mode='r', *args, **kwargs):
-        if path == target and mode in ('w', 'a') and not arrivals:
-            arrivals.append(True)
-            with native(path, 'wb') as stream:
-                stream.write(b'prior error evidence\n')
-        return native(path, mode, *args, **kwargs)
-
-    monkeypatch.setattr(Path, 'open', arriving)
-    Logger(tmp_path)
-    assert arrivals == [True]
-    assert target.read_bytes() == b'prior error evidence\n'
-
-
-def test_logger_constructor_still_rejects_directory(tmp_path):
-    from rpipe.structure import artifacts as kinds
-
-    target = tmp_path / kinds.RUN_LOG
-    target.mkdir(parents=True)
-    with pytest.raises(OSError):
-        Logger(tmp_path)
-
-
-def test_logger_constructor_does_not_reopen_existing_evidence(tmp_path, monkeypatch):
-    from rpipe.structure import artifacts as kinds
-
-    target = tmp_path / kinds.RUN_LOG
-    target.parent.mkdir(parents=True)
-    target.write_bytes(b'existing diagnostic bytes\n')
-    native = Path.open
-
-    def no_reopen(path, *args, **kwargs):
-        if path == target:
-            raise PermissionError('existing evidence must not be reopened by initialization')
-        return native(path, *args, **kwargs)
-
-    with monkeypatch.context() as context:
-        context.setattr(Path, 'open', no_reopen)
-        Logger(tmp_path)
-    assert target.read_bytes() == b'existing diagnostic bytes\n'
-
-
-@pytest.mark.parametrize('phase', ['write', 'flush'])
-@pytest.mark.parametrize('outcome', ['error', 'cancel', 'normal', 'programming'])
-def test_logger_stream_close_preserves_write_or_flush_failure(tmp_path, stream_close_fault, phase, outcome):
-    import errno
     logger = Logger(tmp_path)
-    logger.path.write_bytes(b'old log evidence\n')
-    peer = tmp_path / 'peer.log'
-    peer.write_bytes(b'peer evidence')
-    primary = KeyboardInterrupt('cancel log') if outcome == 'cancel' else None if outcome == 'normal' else OSError(errno.ENOSPC, 'log IO')
-    secondary = RuntimeError('unexpected close error') if outcome == 'programming' else OSError(errno.EIO, 'close IO')
-    expected = secondary if outcome in ('normal', 'programming') else primary
-    handles, calls = stream_close_fault(lambda path, mode: path == logger.path and mode == 'a', primary, secondary, phase=phase)
-    with pytest.raises(type(expected)) as caught:
-        logger.info('new log event')
-    assert caught.value is expected
-    assert len(handles) == 1 and handles[0].closed and calls.count('close') == 1
-    assert logger.path.read_bytes().startswith(b'old log evidence\n')
-    assert peer.read_bytes() == b'peer evidence'
-    assert calls[0] == 'write' and (phase != 'flush' or 'flush' in calls)
+    logger.report(tracker, 'test', {'epoch': 1, 'lr': 0.1, 'step': 2,
+                                  'note': 'PRIVATE_BODY', 'elapsed': '0:00:01'})
+    row, = records(logger.path)
+    assert '[split] test [metric] Accuracy=0.8000 Loss=0.5000' in row['message']
+    assert 'lr=0.1 step=2' in row['message'] and 'PRIVATE_BODY' not in str(row)
+    assert row['event'] == 'metrics.reported'
+    assert logger.state_dict() == {'path': str(logger.path)}
+    logger.load_state_dict({'path': '/must/not/be/read'})
+    assert capsys.readouterr().out
 
 
-@pytest.mark.parametrize('reopen', [False, True], ids=['same-logger', 'reopened-logger'])
-@pytest.mark.parametrize('tail', ['ascii-cut', 'utf8-cut', 'lf', 'crlf', 'cr', 'empty'])
-def test_logger_keeps_interrupted_tail_separate_from_next_record(tmp_path, capsys, reopen, tail):
-    import os
-    logger = Logger(tmp_path)
-    header = b'2001-01-01T00:00:00.000+00:00 INFO  - [flow] interrupted '
-    prefixes = {'ascii-cut': header, 'utf8-cut': header + b'\xe4',
-                'lf': header + b'\n', 'crlf': header + b'\r\n', 'cr': header + b'\r', 'empty': b''}
-    before = prefixes[tail]
-    logger.path.write_bytes(before)
-    if reopen:
-        logger = Logger(tmp_path)
-    assert logger.path.read_bytes() == before
-    peer = tmp_path / 'peer.bin'
-    peer.write_bytes(b'peer')
-    logger.error('current failure')
-    emitted = capsys.readouterr().out
-    assert _HEADER.match(emitted)
-    separator = os.linesep.encode() if tail.endswith('cut') else b''
-    assert logger.path.read_bytes() == before + separator + emitted.replace('\n', os.linesep).encode()
-    assert peer.read_bytes() == b'peer'
-
-
-@pytest.mark.parametrize('error_type', [PermissionError, FileNotFoundError])
-def test_optional_log_tail_inspection_keeps_append_only_access(tmp_path, monkeypatch, capsys, error_type):
-    import os
-    logger = Logger(tmp_path)
-    before = b'existing record\n'
-    logger.path.write_bytes(before)
-    native = Path.open
-
-    def append_only(path, *args, **kwargs):
-        if path == logger.path and args and args[0] == 'rb':
-            raise error_type('tail unavailable')
-        return native(path, *args, **kwargs)
-
-    with monkeypatch.context() as patch:
-        patch.setattr(Path, 'open', append_only)
-        logger.error('still appendable')
-    emitted = capsys.readouterr().out
-    assert logger.path.read_bytes() == before + emitted.replace('\n', os.linesep).encode()
-
-
-@pytest.mark.parametrize('kind,separator', [
-    ('info', '\n'), ('warning', '\n'), ('error', '\n'),
-    ('exception-context', '\n'), ('exception-value', '\n'), ('report', '\n'),
-    ('info', '\r\n'), ('info', '\u2028'),
-])
-def test_multiline_logger_body_keeps_complete_record_identity(tmp_path, capsys, kind, separator):
-    logger = Logger(tmp_path)
-    message = 'first body line' + separator + '[error] continuation body text'
-    if kind == 'exception-context':
-        logger.exception(message, ValueError('original failure'))
-    elif kind == 'exception-value':
-        logger.exception('context', ValueError(message))
-    elif kind == 'report':
-        logger.report(AlgorithmTracker(tmp_path / 'tracker'), 'train', {'epoch': 1, 'detail': message})
-    else:
-        getattr(logger, kind)(message)
-    text = logger.path.read_text(encoding='utf-8')
-    assert text == capsys.readouterr().out
-    lines = text.splitlines()
-    assert lines and all(_HEADER.match(line) for line in lines)
-    event = {'info': 'flow', 'warning': 'warn', 'error': 'error',
-             'exception-context': 'error', 'exception-value': 'error', 'report': 'epoch'}[kind]
-    assert all(f' - [{event}]' in line for line in lines)
-    assert 'first body line' in text and 'continuation body text' in text
-
-
-@pytest.mark.parametrize('message', ['', 'ordinary single line'])
-def test_single_line_logger_format_stays_unchanged(tmp_path, capsys, message):
-    logger = Logger(tmp_path)
-    logger.info(message)
-    text = logger.path.read_text(encoding='utf-8')
-    assert text == capsys.readouterr().out
-    assert len(text.splitlines()) == 1
-    assert text.endswith((' - [flow] ' + message).rstrip() + '\n')
-
-
-def test_logger_formats_message_object_only_once(tmp_path, capsys):
-    class Message:
-        calls = 0
-
-        def __format__(self, spec):
-            assert spec == ''
-            self.calls += 1
-            return 'existing f-string conversion'
-
-    message = Message()
-    logger = Logger(tmp_path)
-    logger.info(message)
-    assert message.calls == 1
-    assert logger.path.read_text(encoding='utf-8') == capsys.readouterr().out
-
-
-@contextlib.contextmanager
-def _native_logger_stdout(kind):
-    reader, writer = os.pipe()
-    raw = os.fdopen(writer, 'wb', buffering=0)
-    stream = io.TextIOWrapper(raw, encoding='utf-8', write_through=True, newline='\n')
-    errors, captured = [], []
-    class Sink:
-        def write(self, text):
-            try:
-                return stream.write(text)
-            except (OSError, ValueError) as error:
-                errors.append(error)
-                raise
-        def flush(self):
-            try:
-                return stream.flush()
-            except (OSError, ValueError) as error:
-                errors.append(error)
-                raise
-    try:
-        if kind == 'pipe':
-            os.close(reader)
-            reader = None
-        elif kind == 'closed':
-            stream.close()
-        yield Sink(), errors, captured
-    finally:
-        try:
-            stream.close()
-        except (OSError, ValueError):
-            raw.close()
-        if reader is not None:
-            try:
-                captured.append(os.read(reader, 65536).decode('utf-8'))
-            finally:
-                os.close(reader)
-
-
-def _emit_sink_probe(logger, kind):
-    if kind == 'exception':
-        def inner():
-            raise RuntimeError('original diagnostic cause')
-        try:
-            inner()
-        except RuntimeError as error:
-            logger.exception('diagnostic context', error)
-        return ['diagnostic context', 'Traceback (most recent call last):', 'RuntimeError: original diagnostic cause']
-    if kind == 'report':
-        logger.report(None, 'train', {'epoch': 1, 'note': 'first report\nlast report'})
-        return ['first report', 'last report']
-    text = 'first record\nlast record' if kind == 'multiline' else 'single diagnostic'
-    method = logger.info if kind in ('info', 'multiline') else getattr(logger, kind)
-    method(text)
-    return ['first record', 'last record'] if kind == 'multiline' else ['single diagnostic']
-
-
-@pytest.mark.parametrize('kind', ['info', 'multiline', 'warning', 'error', 'exception', 'report'])
-@pytest.mark.parametrize('sink_kind', ['open', 'pipe', 'closed'])
-def test_logger_native_stdout_refusal_still_persists_complete_records(tmp_path, kind, sink_kind):
-    logger = Logger(tmp_path / 'runs/owner/assets')
-    prefix = b'preserved old log\n'
-    logger.path.write_bytes(prefix)
-    peer = tmp_path / 'peer.bin'
-    peer.write_bytes(b'peer evidence')
-    expected = {'exception': ['diagnostic context', 'Traceback (most recent call last):', 'RuntimeError: original diagnostic cause'],
-                'multiline': ['first record', 'last record'], 'report': ['first report', 'last report']}.get(kind, ['single diagnostic'])
-    with _native_logger_stdout(sink_kind) as (sink, errors, captured):
-        with contextlib.redirect_stdout(sink):
-            if sink_kind == 'open':
-                _emit_sink_probe(logger, kind)
-            else:
-                with pytest.raises((OSError, ValueError)) as caught:
-                    _emit_sink_probe(logger, kind)
-                assert caught.value is errors[0]
-    text = logger.path.read_text(encoding='utf-8')
-    assert all(value in text for value in expected)
-    assert logger.path.read_bytes().startswith(prefix)
-    assert peer.read_bytes() == b'peer evidence'
-    if sink_kind == 'open':
-        assert not errors
-        assert logger.path.read_bytes() == prefix + captured[0].replace('\n', os.linesep).encode('utf-8')
-
-
-@pytest.mark.parametrize('kind', ['multiline', 'exception'])
-@pytest.mark.parametrize('phase', ['open', 'write', 'flush', 'close'])
-def test_logger_disk_refusal_still_emits_complete_stdout(tmp_path, monkeypatch, stream_close_fault, kind, phase):
-    logger = Logger(tmp_path / 'runs/owner/assets')
-    logger.path.write_bytes(b'preserved old log\n')
-    peer = tmp_path / 'peer.bin'
-    peer.write_bytes(b'peer evidence')
-    primary = PermissionError('disk sink refused')
-    handles = []
-    if phase == 'open':
-        native = Path.open
-        def denied(path, mode='r', *args, **kwargs):
-            if path == logger.path and mode == 'a':
-                raise primary
-            return native(path, mode, *args, **kwargs)
-        monkeypatch.setattr(Path, 'open', denied)
-    else:
-        handles, _ = stream_close_fault(lambda path, mode: path == logger.path and mode == 'a',
-                                        None if phase == 'close' else primary,
-                                        primary if phase == 'close' else None,
-                                        phase='write' if phase == 'close' else phase)
-    sink = io.StringIO()
-    with contextlib.redirect_stdout(sink):
-        with pytest.raises(PermissionError) as caught:
-            _emit_sink_probe(logger, kind)
-    assert caught.value is primary
-    expected = ['first record', 'last record'] if kind == 'multiline' else ['diagnostic context', 'Traceback (most recent call last):', 'RuntimeError: original diagnostic cause']
-    assert all(value in sink.getvalue() for value in expected)
-    assert all(handle.closed for handle in handles)
-    assert logger.path.read_bytes().startswith(b'preserved old log\n')
-    assert peer.read_bytes() == b'peer evidence'
-
-
-def test_logger_dual_refusal_preserves_first_io_and_closes_owned_files(tmp_path, stream_close_fault):
-    logger = Logger(tmp_path)
-    logger.path.write_bytes(b'old log\n')
-    disk_error = PermissionError('disk second')
-    handles, calls = stream_close_fault(lambda path, mode: path == logger.path and mode == 'a', disk_error, None)
-    with _native_logger_stdout('pipe') as (sink, errors, _):
-        with contextlib.redirect_stdout(sink):
-            with pytest.raises(OSError) as caught:
-                _emit_sink_probe(logger, 'multiline')
-        assert caught.value is errors[0]
-    assert len(handles) == 2 and all(handle.closed for handle in handles)
-    assert calls.count('close') == 2
-    assert logger.path.read_bytes().startswith(b'old log\n')
-
-
-def test_logger_non_io_stdout_bug_remains_strict(tmp_path):
+def test_busy_cross_process_log_lock_never_waits_for_scientific_owner(tmp_path):
+    from rpipe.structure.artifacts import cache_lock
     logger = Logger(tmp_path)
     before = logger.path.read_bytes()
-    error = RuntimeError('unexpected stdout implementation bug')
-    class Broken:
-        def write(self, value):
-            raise error
-        def flush(self):
-            pass
-    with contextlib.redirect_stdout(Broken()):
-        with pytest.raises(RuntimeError) as caught:
-            _emit_sink_probe(logger, 'multiline')
-    assert caught.value is error
+    script = ('import sys; from rpipe.structure.system.logger import Logger; '
+              'Logger(sys.argv[1]).info("scientific work continues",event="task.started")')
+    env = {**os.environ, 'PYTHONPATH': str(Path(__file__).resolve().parents[4] / 'src')}
+    with cache_lock(logger.path.parent, timeout=0):
+        child = subprocess.run([sys.executable, '-B', '-c', script, str(tmp_path)],
+                               env=env, capture_output=True, text=True, timeout=10)
+    assert child.returncode == 0, child.stderr
+    rows = [json.loads(line) for line in child.stdout.splitlines()]
+    assert any(row['event'] == 'logging.sink_failed' and row['sink'] == 'file' for row in rows)
     assert logger.path.read_bytes() == before
+    logger.info('owner released')
+    assert records(logger.path)[-1]['message'] == 'owner released'
 
 
-def test_optional_log_tail_exit_never_swallows_cancellation(tmp_path, reader_exit_case, reader_close_fault, capsys):
-    from rpipe.structure.system.logger import Logger
-    case = reader_exit_case
-    logger = Logger(tmp_path / 'assets')
-    payload = b'previous complete record\n'
-    logger.path.write_bytes(payload)
-    peer = tmp_path / 'peer'
-    peer.write_bytes(b'peer untouched')
-    expected = case.expected if case.kind in ('cancel', 'body-programming', 'close-programming') else None
-    with reader_close_fault(logger.path, case, 'rb') as (handles, closes):
-        if expected is not None:
-            with pytest.raises(type(expected)) as caught:
-                logger.info('new synthetic record')
-            assert caught.value is expected
-        else:
-            logger.info('new synthetic record')
-    assert len(handles) == len(closes) == 1 and handles[0].closed
-    after = logger.path.read_bytes()
-    assert after.startswith(payload) and peer.read_bytes() == b'peer untouched'
-    assert (b'new synthetic record' in after) is (expected is None)
-    assert 'new synthetic record' in capsys.readouterr().out
-
-
-@pytest.mark.parametrize('elapsed,eta,expected', [
-    ('a', 'b', '[time] elapsed=a eta=b'),
-    (0, '', '[time] elapsed=0 eta='),
-    (None, False, '[time] eta=False'),
-])
-def test_report_time_fields_keep_fixed_order_and_non_none_values(tmp_path, monkeypatch, elapsed, eta, expected):
+def test_explicit_factory_logger_injection_does_not_create_another_sink(tmp_path, monkeypatch):
+    import rpipe.structure.system.factory as factory
+    from rpipe.structure.contracts import SystemConfig
     logger = Logger(tmp_path)
-    rows = []
-    monkeypatch.setattr(logger, '_emit', lambda *row: rows.append(row))
-    logger.report(None, 'test', extra={'eta': eta, 'elapsed': elapsed})
-    assert rows == [('INFO', 'split', '[split] test ' + expected)]
+    def unexpected(*args, **kwargs):
+        raise AssertionError('must reuse the execution logger')
+    monkeypatch.setattr(factory, 'Logger', unexpected)
+    assert factory.SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path,
+                                       logger=logger).logger is logger
+
+
+def test_sink_recovery_reports_gap_once_without_forgetting_incomplete_evidence(tmp_path, monkeypatch, capsys):
+    logger = Logger(tmp_path)
+    write = logger._write_file
+    monkeypatch.setattr(logger, '_write_file', lambda record: (_ for _ in ()).throw(OSError('private')))
+    logger.info('first delivery')
+    monkeypatch.setattr(logger, '_write_file', write)
+    logger.info('second delivery')
+    logger.info('third delivery')
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert sum(row['event'] == 'logging.sink_failed' for row in rows) == 1
+    assert sum(row['event'] == 'logging.recovered' for row in rows) == 1
+    assert not logger.diagnostics_complete
+
+
+def test_interrupted_record_does_not_hide_the_next_complete_event(tmp_path):
+    logger = Logger(tmp_path)
+    fragment = b'{"event":"test.interrupted","message":"incomplete'
+    logger.path.write_bytes(fragment)
+    peer = logger.path.parent / 'business-input.json'
+    peer.write_bytes(b'original input')
+    logger.error('current failure', event='task.failed')
+    rows = records(logger.path)
+    assert any(row['event'] == 'task.failed' for row in rows)
+    assert any(row['event'] == 'logging.unstructured_record' for row in rows)
+    assert logger.path.with_name('events.1.jsonl').read_bytes() == fragment
+    assert peer.read_bytes() == b'original input' and not logger.diagnostics_complete
+
+
+def test_retention_failure_is_reported_to_the_healthy_sink(tmp_path, monkeypatch, capsys):
+    logger = Logger(tmp_path)
+    monkeypatch.setattr(logger, '_expire', lambda: (_ for _ in ()).throw(PermissionError('PRIVATE_CLEANUP')))
+    logger.close()
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert any(row['event'] == 'logging.sink_failed' and row['operation'] == 'retention_cleanup' for row in rows)
+    assert not logger.diagnostics_complete and 'PRIVATE_CLEANUP' not in str(rows)

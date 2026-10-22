@@ -90,7 +90,7 @@ def test_abrupt_worker_exit_keeps_unknown_owner_when_descendants_cannot_be_verif
     spec = plan(source_study, run_root=run_root)[0]
     outcome = run(spec)
     assert outcome.status == 'unknown'
-    assert outcome.error['type'] == 'RuntimeError' and 'exited 17' in outcome.error['message']
+    assert outcome.error['type'] == 'ChildExit' and outcome.error['exit_code'] == 17
     assert (spec.run_dir / '.execution').is_dir()
     assert not spec.result_path.exists()
     with pytest.raises(BusyError):

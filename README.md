@@ -14,7 +14,7 @@ RPipe（Research Pipeline）是研究项目的代码与执行模板，用声明�
 | 目标目录、每个Python文件、依赖规则与测试镜像 | [研究流水线 代码结构设计](<docs/研究流水线 代码结构设计.md>) |
 | 项目研究问题、Study实验设计、数据/模型/算法/指标和停止条件 | [研究流水线 研究计划](<docs/研究流水线 研究计划.md>) |
 
-架构设计集中维护研究对象、质量场景、四类组件、六阶段、状态与取消、身份与产物、恢复、日志、测试和交付合同。代码结构设计登记当前 48 个包内 Python 文件、Study 接入、依赖、调用方、测试镜像及源码与输出分类。两份正文分别标明目标、当前实现和差距；设计整理完成后再按审查结论实施和测试。
+架构设计集中维护研究对象、质量场景、四类组件、六阶段、状态与取消、身份与产物、恢复、日志、测试和交付合同。代码结构设计登记当前 48 个包内 Python 文件、Study 接入、依赖、调用方、测试镜像及源码与输出分类。#228 在 `3da2c50` 保留文档基线；本代码 Draft 跟进实现，两份正文同步区分已实现合同、剩余边界与实际验证范围。
 
 历史债务分支只作参考。Git 历史结果只支持其固定提交和条件，不能当新分支验收。进度维护在 PR 与提交说明，不增加报告文件。
 
@@ -22,7 +22,7 @@ RPipe（Research Pipeline）是研究项目的代码与执行模板，用声明�
 
 ## 当前使用边界
 
-源码包位于 `src/rpipe/`，声明位于 `studies/`。`rpipe.api.plan(study_dir, run_root=...)` 不装载 recipe/Torch、不写盘。CLI 的 `plan/status/logs/report/shared` 为读取；`make` 发布配置与索引，`run/launch/run-one` 显式执行，`process` 写派生摘要，`data/tensorboard` 显式输出。常规 Study 命令要求 `--run-root`，旧目录读取另走显式 legacy 入口。使用方应选择整个 checkout 外的运行根；当前只直接拒绝与 Study 源根互含，对库源码及整个 checkout 的保护仍有差距，详见架构设计 D3。
+源码包位于 `src/rpipe/`，声明位于 `studies/`。`rpipe.api.plan(study_dir, run_root=...)` 不装载 recipe/Torch、不写盘。CLI 的 `plan/status/logs/report/shared` 为读取；`make` 发布配置与索引，`run/launch/run-one` 显式执行，`process` 写派生摘要，`data/tensorboard` 显式输出。常规 Study 命令要求 `--run-root`，旧目录读取另走显式 legacy 入口。运行根与 Study、库源码及可定位的整个 checkout/宿主项目双向分离；解析符号链接及尚未创建的输出路径后检查，不能把输出写入输入目录。
 
 ```console
 rpipe plan studies/_template --run-root <external-run-root>
@@ -31,11 +31,11 @@ rpipe status studies/_template --run-root <external-run-root>
 rpipe process studies/_template --run-root <external-run-root>
 ```
 
-默认每Run独立科学子进程，启动前核源码摘要、配置和自己的train依赖。任意外部data.path/stats_path引用的内容漂移未纳入通用身份保证，原有显式checksum/pin校验继续保留。已有成功不原地重跑，换显式version；未确认停止保持unknown/busy。内存硬限制及同进程注入载荷的硬超时不受支持，启动前拒绝；Windows带recipe/数据worker的硬超时也拒绝。没有自动GPU分配或旧队列恢复。status/report当前展示正式result与busy，未发布结果时显示missing；失败、取消、unknown的原始事实保存在attempts/<uuid>/outcome.json，不按mtime或UUID猜哪次是最新。
+默认每 Run 独立科学子进程，启动前核源码摘要、配置和自己的 train 依赖。`provenance.inputs` 可显式固定外部文件或目录清单；未固定的 path/stats_path、默认缓存及隐式 profile 分列为未验证，不自动扫描全部数据。已有 result 不原地重跑，须换显式 version；无 result 的已确认失败/取消须 `--retry`（API `retry=True`），unknown/busy 不重放。Run 级 `execution.json` 明确本次 attempt，status/report 分列整体执行、科学结果、派生分析和证据完整性，不按 mtime/UUID 猜最近一次。内存硬限制、同进程硬超时及 Windows 带 recipe/数据 worker 的硬超时仍拒绝。没有自动 GPU 分配或旧队列恢复。
 
 库内实现只分两柱：`structure/`提供配置、产物、读取及data/model/algorithm/system组件，`flow/`组织默认六阶段、原生/HF组装和所属进程。旧 `structure.api/*` 等内部导入不自动恢复；调用方改用 `rpipe.api`、纯 `structure.contracts` 或明确structure领域模块。公开`run(..., payload=...)`参数保持调用兼容，不代表第三个源码层。旧Study内运行目录不会自动迁移/补签；目录对照须明确 `compare --legacy`，其Tensor/轨迹比较保留但来源标为未验证。旧GPU调度/阶段裁剪/隐式cache迁移参数不再接受；先按当前声明和显式根重新计划。精确API与兼容表见代码结构设计。
 
-既有代码验证以 PR 中固定代码 SHA 的 CPU 合同、有限原生/HF 数值和离线构建记录为准，不自动覆盖后续 HEAD。本次设计整理没有新增代码测试；正式 MNIST/CIFAR、GPU、性能及历史长曲线未验收。
+本代码 Draft 的验证以 PR 正文中最终完整代码 SHA 的本地有界 CPU、有限离线原生/HF 和安装 smoke 记录为准；历史通过数不覆盖后续 HEAD，远端 CI 仅作参考。正式 MNIST/CIFAR、GPU、长程性能及下游固定副本未验收。
 
 ## 宿主项目如何接入
 

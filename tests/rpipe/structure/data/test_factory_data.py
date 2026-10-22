@@ -41,7 +41,8 @@ def test_unregistered_data_is_rejected(tmp_path, mapping):
     assert list(tmp_path.iterdir()) == []
 
 
-def test_cifar10_builder_uses_fake_dataset(tmp_path: Path, monkeypatch):
+@pytest.mark.parametrize('record_stats', [False, True])
+def test_cifar10_builder_uses_fake_dataset(tmp_path: Path, monkeypatch, record_stats):
     from PIL import Image
     downloads = []
 
@@ -68,6 +69,9 @@ def test_cifar10_builder_uses_fake_dataset(tmp_path: Path, monkeypatch):
     import torchvision.datasets as tv_datasets
 
     monkeypatch.setattr(tv_datasets, 'CIFAR10', _Fake)
+    profile = tmp_path / 'stats.yaml'
+    if record_stats:
+        profile.write_text('mean: [0.1, 0.2, 0.3]\nstd: [0.2, 0.3, 0.4]\n', encoding='utf-8')
     data = data_api.build(
         DataConfig.from_mapping(
             {
@@ -78,13 +82,17 @@ def test_cifar10_builder_uses_fake_dataset(tmp_path: Path, monkeypatch):
         ),
         tmp_path,
         seed=0,
+        profile_path=profile,
     )
     assert downloads == [False, False]
     assert data.meta['data_size'] == [3, 32, 32]
     assert data.meta['train_size'] == 8
+    assert data.meta['stats_source'] == ('study_profile' if record_stats else 'builtin_fallback')
+    assert data.meta['stats_reference'] == (str(profile.resolve()) if record_stats else None)
     images, targets = next(iter(data.iter_batches('train')))
     assert tuple(images.shape) == (4, 3, 32, 32)
     assert tuple(targets.shape) == (4,)
+    data.close()
 
 
 def test_svhn_builder_uses_fake_dataset(tmp_path: Path, monkeypatch):

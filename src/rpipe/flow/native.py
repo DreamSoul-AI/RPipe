@@ -44,7 +44,7 @@ class NativeRun:
         validate_control(ctx.control)
         system_config = SystemConfig.from_mapping(ctx.control.system)
         ctx.state['runtime'] = apply_runtime(ctx.control.seed, system_config)
-        system = SystemFactory.build(system_config, ctx.layout.assets_dir)
+        system = SystemFactory.build(system_config, ctx.layout.assets_dir, logger=ctx.state.get('logger'))
         system.meta.update(ctx.state['runtime'])
         system.study_root = Path(ctx.layout.study_root)
         system.source_dir = Path(ctx.study_dir)

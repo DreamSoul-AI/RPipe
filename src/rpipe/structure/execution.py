@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import subprocess
-import traceback
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from .contracts import AdmissionError, Budget, Cancellation, RunOutcome, RunSpec, SourceMismatch
-from .artifacts import ArtifactLayout, Ownership, identity, read_json, write_config, write_json, validate_source, validate_train
+from .contracts import AdmissionError, Budget, Cancellation, RunOutcome, RunSpec, SourceMismatch, project_execution
+from .artifacts import (ArtifactLayout, Ownership, environment_snapshot, identity, input_provenance,
+                        read_execution, read_json, safe_error_record, write_config, write_json, validate_source, validate_train)
 
 
 @dataclass
@@ -45,20 +45,33 @@ def _validate_run(payload: Any) -> None:
 
 
 def error_record(exc: BaseException) -> dict[str, Any]:
-    remote = getattr(exc, 'record', None)
-    if isinstance(remote, dict):
-        return remote
-    return {'type': type(exc).__name__, 'message': str(exc),
-            'traceback': ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))}
+    return safe_error_record(exc)
 
 
 class Cancelled(Exception):
     pass
 
 
+def _admit(spec: RunSpec, retry: bool) -> None:
+    if spec.result_path.exists():
+        if read_json(spec.result_path).get('identity') != identity(spec):
+            raise SourceMismatch('existing Run has a different source/configuration identity')
+        raise AdmissionError('existing Run result is immutable; choose a new version')
+    if (spec.run_dir / 'execution.json').exists():
+        record, complete = read_execution(spec)
+        previous = project_execution(record, {}, busy=False, complete=complete)
+        if previous['status'] not in {'failed', 'cancelled'}:
+            raise AdmissionError('previous execution is unresolved; retry is not safe')
+        if not retry:
+            raise AdmissionError('previous execution requires explicit retry=True')
+    elif (spec.run_dir / 'attempts').is_dir() and any((spec.run_dir / 'attempts').iterdir()):
+        raise AdmissionError('legacy attempts have no explicit active record; retry is not safe')
+
+
 def execute(spec: RunSpec, payload: Any, *, budget: Budget | None = None,
             cancellation: Cancellation | None = None,
-            pipeline: Callable | None = None, configure: Callable | None = None) -> RunOutcome:
+            pipeline: Callable | None = None, configure: Callable | None = None,
+            retry: bool = False) -> RunOutcome:
     budget = budget or Budget()
     budget.validate()
     _validate_run(payload)
@@ -70,26 +83,42 @@ def execute(spec: RunSpec, payload: Any, *, budget: Budget | None = None,
     cancellation = cancellation or Cancellation()
     if cancellation.is_set():
         return RunOutcome('cancelled', cancelled=True)
-    if spec.result_path.exists():
-        if read_json(spec.result_path).get('identity') != identity(spec):
-            raise SourceMismatch('existing Run has a different source/configuration identity')
-        raise AdmissionError('existing Run result is immutable; choose a new version')
+    if not isinstance(retry, bool):
+        raise AdmissionError('retry must be a boolean')
+    # Acquire still decides competing starts; unresolved owners are never stolen.
+    if not (spec.run_dir / '.execution').exists():
+        _admit(spec, retry)
     validate_train(spec)
-    owner = Ownership(spec)
+    attempt = uuid.uuid4().hex
+    owner = Ownership(spec, attempt=attempt)
     owner.acquire()
+    try:
+        _admit(spec, retry)
+    except BaseException as primary:
+        try:
+            owner.release()
+        except BaseException as cleanup_error:
+            primary.cleanup_errors = (*getattr(primary, 'cleanup_errors', ()), cleanup_error)
+        raise
     ctx = RunContext(spec, cancellation, ArtifactLayout(spec))
     ctx.state['budget'] = budget
-    attempt = uuid.uuid4().hex
     ctx.state['attempt'] = attempt
     attempt_path = spec.run_dir / 'attempts' / attempt / 'outcome.json'
+    execution_path = spec.run_dir / 'execution.json'
+    record = {'schema': 1, 'identity': identity(spec), 'attempt': attempt,
+              'owner_token': owner.token, 'phase': 'running', 'candidate_status': None,
+              'quality': None, 'evidence_complete': False, 'scientific_result_published': False,
+              'derived_status': 'not_run', 'error': None, 'cleanup_errors': [], 'cancelled': False}
     primary = None
     cleanup = []
     result = {}
     published = False
     unknown = False
+    derived = 'not_run'
     try:
-        if spec.result_path.exists():
-            raise AdmissionError('Run was completed before admission')
+        record['input_provenance'] = input_provenance(spec)
+        record['environment'] = environment_snapshot()
+        write_json(execution_path, record)
         write_config(ctx.layout.config_path, ctx.config)
         if configure:
             configure(ctx)
@@ -113,12 +142,28 @@ def execute(spec: RunSpec, payload: Any, *, budget: Budget | None = None,
             raise AdmissionError('evidence_complete must be a boolean')
     except BaseException as exc:
         primary = error_record(exc)
+        logger = ctx.state.get('logger')
+        if logger is not None and not isinstance(vars(exc).get('record'), dict):
+            try:
+                if isinstance(exc, Cancelled):
+                    logger.info('Run cancellation confirmed', event='task.cancelled')
+                else:
+                    logger.exception('Run execution failed', exc, event='task.failed')
+            except BaseException:
+                logger.diagnostics_complete = False
     finally:
         try:
             payload.close(ctx)
         except BaseException as exc:
             cleanup.append(error_record(exc))
-        cleanup.extend(ctx.state.get('cleanup_error_records', []))
+        supplied = ctx.state.get('cleanup_error_records', [])
+        if not isinstance(supplied, (list, tuple)):
+            supplied = [AdmissionError('cleanup error records must be a sequence')]
+        reported_count = ctx.state.get('worker_cleanup_count', 0)
+        if type(reported_count) is not int or not 0 <= reported_count <= len(supplied):
+            reported_count = 0
+        reported_cleanup = range(len(cleanup), len(cleanup) + reported_count)
+        cleanup.extend(safe_error_record(item) for item in supplied)
         unknown = bool(ctx.state.get('unknown_resources'))
         for process in ctx.processes:
             if process.poll() is None:
@@ -138,35 +183,100 @@ def execute(spec: RunSpec, payload: Any, *, budget: Budget | None = None,
             validate_source(spec)
             if ctx.config != spec.to_config() or (ctx.control is not None and ctx.control.to_dict() != spec.to_config()):
                 raise SourceMismatch('effective configuration changed before result publication')
+            structure = result.get('structure')
+            data_snapshot = structure.get('data') if isinstance(structure, dict) else None
+            observed_stats = data_snapshot.get('stats_source') if isinstance(data_snapshot, dict) else None
+            observed_reference = data_snapshot.get('stats_reference') if isinstance(data_snapshot, dict) else None
+            record['input_provenance'] = input_provenance(spec, observed_stats_source=observed_stats,
+                                                         observed_stats_reference=observed_reference)
             result = {**result, 'id': spec.id, 'status': 'succeeded', 'quality': result.get('quality'),
-                      'evidence_complete': result.get('evidence_complete', True), 'identity': identity(spec), 'attempt': attempt}
+                      'evidence_complete': result.get('evidence_complete', True), 'identity': identity(spec), 'attempt': attempt,
+                      'input_provenance': record.get('input_provenance'),
+                      'environment': ctx.state.get('worker_environment', record.get('environment'))}
+            owner.verify()
             write_json(spec.result_path, result)
             published = True
             complete = result['evidence_complete']
             # Derived processing has a separate failure record and cannot rewrite the science result.
             process_hook = ctx.state.get('process_hook')
             if process_hook:
+                derived = 'running'
+                ctx.state['phase'] = 'process'
+                if ctx.state.get('logger') is not None:
+                    ctx.state['logger'].bind(phase='process')
+                    ctx.state['logger'].info('Run phase started', event='task.phase_changed')
                 process_hook(ctx)
+                derived = 'succeeded'
         except BaseException as exc:
             primary = error_record(exc)
-            status = 'failed'
+            logger = ctx.state.get('logger')
+            if logger is not None and not isinstance(vars(exc).get('record'), dict):
+                try:
+                    if isinstance(exc, Cancelled):
+                        logger.info('Run cancellation confirmed', event='task.cancelled')
+                    else:
+                        logger.exception('Run publication or derived processing failed', exc, event='task.failed')
+                except BaseException:
+                    logger.diagnostics_complete = False
+            status = 'cancelled' if primary['type'] in {'Cancelled', 'CancelledError'} else 'failed'
             complete = False
-    outcome = RunOutcome(status, result.get('quality'), complete, result, primary, tuple(cleanup), cancellation.is_set())
+            if published:
+                derived = status
+    if status == 'succeeded' and cancellation.is_set():
+        status, complete = 'cancelled', False
+    logger = ctx.state.get('logger')
+    diagnostic_errors = []
+    if logger is not None:
+        for index, failure in enumerate(cleanup):
+            if index not in reported_cleanup:
+                try:
+                    logger.exception('Run cleanup operation failed', failure,
+                                     event='operation.failed', operation='cleanup')
+                except BaseException:
+                    logger.diagnostics_complete = False
+        try:
+            logger.bind(phase='closing')
+            logger.info('execution candidate recorded', event='operation.completed',
+                        operation='execution_candidate', status=status, outcome='unknown')
+            logger.close()
+        except BaseException as exc:
+            diagnostic_errors.append(error_record(exc))
+        complete = complete and getattr(logger, 'diagnostics_complete', True) and not diagnostic_errors
+    record.update(phase='closing', candidate_status=status, quality=result.get('quality') if published else None,
+                  evidence_complete=bool(complete), scientific_result_published=published,
+                  derived_status=derived, error=primary, cleanup_errors=cleanup,
+                  cancelled=cancellation.is_set(), budget=vars(ctx.state['budget']),
+                  diagnostic_errors=diagnostic_errors, stage=ctx.state.get('phase'),
+                  scientific_result='result.json' if published else None,
+                  environment=ctx.state.get('worker_environment', record.get('environment')))
+
+    def persist():
+        owner.verify()
+        write_json(attempt_path, record)
+        write_json(execution_path, record)
+
     try:
-        write_json(attempt_path, {'status': status, 'quality': outcome.quality, 'evidence_complete': complete,
-                                'scientific_result_published': published, 'error': primary,
-                                'cleanup_errors': cleanup, 'cancelled': outcome.cancelled, 'identity': identity(spec),
-                                'budget': vars(ctx.state['budget'])})
+        persist()
     except BaseException as exc:
-        outcome.cleanup_errors += (error_record(exc),)
-        outcome.evidence_complete = False
-        outcome.status = 'unknown'
+        cleanup.append(error_record(exc))
         unknown = True
     if not unknown:
         try:
             owner.release()
         except BaseException as exc:
-            outcome.cleanup_errors += (error_record(exc),)
-            outcome.evidence_complete = False
-            outcome.status = 'unknown'
-    return outcome
+            cleanup.append(error_record(exc))
+            unknown = True
+    if unknown:
+        record.update(candidate_status='unknown', evidence_complete=False, cleanup_errors=cleanup)
+        # Only an unreleased owner can still update this Run's active record.
+        try:
+            holder = read_json(owner.path / 'owner.json')
+            if holder.get('token') == owner.token and holder.get('attempt') == attempt:
+                persist()
+        except BaseException as exc:
+            cleanup.append(error_record(exc))
+    projected = project_execution(record, result if published else {}, busy=unknown)
+    return RunOutcome(projected['status'], projected['quality'], projected['evidence_complete'],
+                      result if published else {}, primary, tuple(cleanup), cancellation.is_set(),
+                      attempt=attempt, scientific_status=projected['scientific_status'],
+                      derived_status=projected['derived_status'])

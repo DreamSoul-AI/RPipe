@@ -77,7 +77,8 @@ def test_atomic_publish_failure_does_not_report_scientific_success_or_remove_pee
     assert failed_publications == [spec.result_path]
     assert outcome.status == 'failed'
     assert outcome.evidence_complete is False
-    assert 'result storage unavailable' in str(outcome.error)
+    assert outcome.error['type'] == 'OSError'
+    assert outcome.error['message'] == '[redacted]'
     assert not spec.result_path.exists()
     assert peer.read_bytes() == b'other owner data'
 

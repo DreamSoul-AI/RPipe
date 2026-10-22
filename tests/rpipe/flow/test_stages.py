@@ -38,7 +38,7 @@ def test_write_hook_failure_cannot_publish_success(source_study, run_root, paylo
     _hook(source_study, 'write', 'def run(ctx):\n    raise ValueError("write gate failed")\n')
     spec = plan(source_study, run_root=run_root)[0]
     outcome = run(spec, payload=payload_factory())
-    assert outcome.status == 'failed' and 'write gate failed' in str(outcome.error)
+    assert outcome.status == 'failed' and outcome.error['type'] == 'ValueError'
     assert not spec.result_path.exists()
 
 
@@ -49,6 +49,14 @@ def test_process_hook_failure_preserves_published_scientific_success(source_stud
     spec = plan(source_study, run_root=run_root)[0]
     outcome = run(spec, payload=payload_factory())
     stored = spec.result_path.read_bytes()
-    assert outcome.status == 'failed' and 'derived processing failed' in str(outcome.error)
-    assert read_run(spec)['status'] == 'succeeded'
+    assert outcome.status == 'failed' and outcome.error['type'] == 'ValueError'
+    result = read_run(spec)
+    assert result['status'] == outcome.status == 'failed'
+    assert result['scientific_status'] == 'succeeded'
+    assert result['derived_status'] == 'failed'
+    assert outcome.scientific_status == 'succeeded' and outcome.derived_status == 'failed'
+    assert outcome.result['status'] == 'succeeded'
+    from rpipe.structure.contracts import AdmissionError
+    with pytest.raises(AdmissionError, match='immutable'):
+        run(spec, payload=payload_factory(), retry=True)
     assert spec.result_path.read_bytes() == stored

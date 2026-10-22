@@ -4,21 +4,25 @@ from __future__ import annotations
 from pathlib import Path
 
 from .structure.contracts import AdmissionError, BusyError, SourceMismatch, Budget, Cancellation, RunOutcome, RunSpec
-from .structure.artifacts import Ownership, cache_lock, identity, load_config, source_digest, validate_source, write_config, write_json
+from .structure.artifacts import (Ownership, cache_lock, identity, load_config, source_digest,
+                                  validate_input_paths, validate_source, write_config, write_json)
 from .structure.plan import expand
 from .structure.readout import read_run, aggregate, report, logs, compare, read_legacy
 
 
 def plan(study_dir: Path | str, *, run_root: Path | str, version: str | None = None) -> tuple[RunSpec, ...]:
     source = Path(study_dir).resolve()
-    return expand(load_config(source / 'study.yaml'), load_config(source / 'experiment_config.yaml'),
-                  source_dir=source, run_root=run_root, source_digest=source_digest(source), version=version)
+    specs = expand(load_config(source / 'study.yaml'), load_config(source / 'experiment_config.yaml'),
+                   source_dir=source, run_root=run_root, source_digest=source_digest(source), version=version)
+    for spec in specs:
+        validate_input_paths(spec)
+    return specs
 
 
 def run(spec: RunSpec, *, payload=None, budget: Budget | None = None,
-        cancellation: Cancellation | None = None) -> RunOutcome:
+        cancellation: Cancellation | None = None, retry: bool = False) -> RunOutcome:
     from .flow.run import run as execute_run
-    return execute_run(spec, payload=payload, budget=budget, cancellation=cancellation)
+    return execute_run(spec, payload=payload, budget=budget, cancellation=cancellation, retry=retry)
 
 
 def cancel(cancellation: Cancellation) -> None:
@@ -71,14 +75,15 @@ def _one_root(specs) -> None:
         raise AdmissionError('one Study source/version/output root is required')
 
 
-def launch(specs, *, budget: Budget | None = None, cancellation: Cancellation | None = None) -> tuple[RunOutcome, ...]:
+def launch(specs, *, budget: Budget | None = None, cancellation: Cancellation | None = None,
+           retry: bool = False) -> tuple[RunOutcome, ...]:
     specs = tuple(specs)
     _one_root(specs)
     outcomes = []
     for spec in specs:
         if cancellation and cancellation.is_set():
             break
-        outcomes.append(run(spec, budget=budget, cancellation=cancellation))
+        outcomes.append(run(spec, budget=budget, cancellation=cancellation, retry=retry))
         if outcomes[-1].status == 'unknown':
             break
     return tuple(outcomes)

@@ -385,6 +385,25 @@ class Cancellation:
         return self.is_set()
 
 
+def validate_run_root(source_dir: Path | str, run_root: Path | str) -> None:
+    """Protect the Study, installed library and their complete source projects."""
+    output = Path(run_root).resolve()
+    roots = set()
+    for source in (Path(source_dir).resolve(), Path(__file__).resolve().parents[1]):
+        roots.add(source)
+        project_found = False
+        for candidate in (source, *source.parents):
+            if (candidate / '.git').exists():
+                roots.add(candidate)
+                break
+            if not project_found and any((candidate / name).is_file()
+                                         for name in ('pyproject.toml', 'setup.py', 'setup.cfg')):
+                roots.add(candidate)
+                project_found = True
+    if any(output.is_relative_to(root) or root.is_relative_to(output) for root in roots):
+        raise AdmissionError('run_root must be separate from source roots and their checkouts')
+
+
 @dataclass(frozen=True)
 class RunSpec:
     id: str
@@ -415,8 +434,7 @@ class RunSpec:
             raise AdmissionError('seed must be a nonnegative integer')
         if self.config.get('id') != self.id or self.config.get('seed') != self.seed:
             raise AdmissionError('Run identity/seed must match the effective configuration')
-        if self.run_root.is_relative_to(self.source_dir) or self.source_dir.is_relative_to(self.run_root):
-            raise AdmissionError('run_root must be separate from the source Study')
+        validate_run_root(self.source_dir, self.run_root)
         conditions = self.to_config()
         for key in ('id', 'seed', 'description', 'tags'):
             conditions.pop(key, None)
@@ -452,3 +470,47 @@ class RunOutcome:
     error: dict[str, Any] | None = None
     cleanup_errors: tuple[dict[str, Any], ...] = ()
     cancelled: bool = False
+    attempt: str | None = None
+    scientific_status: str = 'missing'
+    derived_status: str = 'not_run'
+
+
+def project_execution(record: dict, result: dict, *, busy: bool, complete: bool = True) -> dict:
+    """Project one fixed attempt; callers decide whether its owner is still held."""
+    status = record.get('candidate_status')
+    valid = (type(record.get('schema')) is int and record['schema'] == 1 and record.get('phase') == 'closing'
+             and isinstance(status, str) and status in {'succeeded', 'failed', 'cancelled', 'unknown'}
+             and isinstance(record.get('evidence_complete'), bool)
+             and (record.get('quality') is None or isinstance(record['quality'], bool))
+             and isinstance(record.get('scientific_result_published'), bool)
+             and isinstance(record.get('cancelled'), bool)
+             and isinstance(record.get('cleanup_errors'), list)
+             and (record.get('error') is None or isinstance(record['error'], dict)))
+    published = record.get('scientific_result_published') is True
+    if published:
+        valid = valid and (result.get('status') == 'succeeded'
+                           and result.get('identity') == record.get('identity')
+                           and result.get('attempt') == record.get('attempt')
+                           and isinstance(result.get('evidence_complete'), bool)
+                           and result.get('quality') == record.get('quality'))
+    elif result:
+        valid = False
+    if status == 'succeeded' and not published:
+        valid = False
+    if status == 'succeeded' and (record.get('error') or record.get('cleanup_errors')
+                                  or record.get('cancelled')
+                                  or record.get('derived_status') not in {'not_run', 'succeeded'}):
+        valid = False
+    return {**result, 'id': record.get('identity', {}).get('id'),
+            'identity': record.get('identity'), 'attempt': record.get('attempt'),
+            'status': status if valid and complete and not busy else 'unknown',
+            'quality': record.get('quality') if valid else None,
+            'evidence_complete': bool(valid and complete and not busy and status == 'succeeded'
+                                      and record['evidence_complete'] and result.get('evidence_complete')),
+            'scientific_status': result.get('status', 'missing'),
+            'derived_status': record.get('derived_status', 'not_run'),
+            'input_provenance': record.get('input_provenance'), 'environment': record.get('environment'),
+            'error': record.get('error'), 'cleanup_errors': record.get('cleanup_errors', []),
+            'cancelled': record.get('cancelled', False), 'busy': busy,
+            **({'metadata_status': 'incomplete' if record.get('phase') == 'running' else 'invalid'}
+               if not valid or not complete else {})}

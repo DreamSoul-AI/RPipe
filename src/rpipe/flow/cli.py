@@ -26,6 +26,7 @@ def main(argv=None) -> int:
         if name in ('run', 'study', 'launch', 'run-one'):
             command.add_argument('--timeout', type=float)
             command.add_argument('--memory-bytes', type=int)
+            command.add_argument('--retry', action='store_true')
     compare = commands.add_parser('compare')
     compare.add_argument('left', type=Path)
     compare.add_argument('right', type=Path)
@@ -77,8 +78,10 @@ def main(argv=None) -> int:
                 api.make(specs)
             # A single coordinator handles all public launch paths and the train/eval barrier.
             value = [{'status': r.status, 'quality': r.quality, 'evidence_complete': r.evidence_complete,
+                      'attempt': r.attempt, 'scientific_status': r.scientific_status,
+                      'derived_status': r.derived_status,
                       'error_type': r.error.get('type') if r.error else None}
-                     for r in api.launch(specs, budget=api.Budget(args.timeout, args.memory_bytes))]
+                     for r in api.launch(specs, budget=api.Budget(args.timeout, args.memory_bytes), retry=args.retry)]
             print(json.dumps(value, default=str))
             return 0 if all(r['status'] == 'succeeded' for r in value) else 1
         elif args.command == 'status':
@@ -99,10 +102,14 @@ def main(argv=None) -> int:
             value = profile_study(args.study_dir, shared_data_dir=args.run_root / 'shared' / 'data',
                                   profiles_dir=specs[0].study_root / 'shared' / 'data', download=args.download)
         elif args.command == 'tensorboard':
-            if args.out.resolve().is_relative_to(args.study_dir.resolve()) or args.study_dir.resolve().is_relative_to(args.out.resolve()):
-                raise ValueError('export must be separate from source Study')
+            from rpipe.structure.contracts import validate_run_root
+            from rpipe.structure.artifacts import validate_input_paths
+            for spec in specs:
+                validate_run_root(spec.source_dir, args.out)
+                validate_input_paths(spec, output_root=args.out)
             from .exports import export_tensorboard
-            value = export_tensorboard(specs[0].study_root, args.out)
+            value = export_tensorboard(specs[0].study_root, args.out,
+                                       run_ids=[s.id for s in specs] if selected else None)
         else:
             value = api.process(specs)
             if args.figures:

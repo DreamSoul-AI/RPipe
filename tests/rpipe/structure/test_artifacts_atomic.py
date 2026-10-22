@@ -448,11 +448,14 @@ def test_owned_writers_keep_raw_handle_without_entering_proxy(tmp_path, monkeypa
         assert target.read_bytes() == b'content'
     elif writer == 'logger':
         logger.info('content')
-        assert logger.path.read_bytes().rstrip().endswith(b'[flow] content')
+        import json
+        assert json.loads(logger.path.read_text(encoding='utf-8').splitlines()[-1])['message'] == 'content'
     elif writer == 'tracker-start':
         tracker.begin_run()
         assert b'"event": "start"' in tracker.jsonl_path.read_bytes()
     else:
         tracker.append_jsonl('train')
         assert b'"mean": 2.0' in tracker.jsonl_path.read_bytes()
-    assert len(opened) == 1 and closed == opened and opened[0].closed
+    assert len(opened) == (2 if writer == 'logger' else 1)
+    assert closed == (list(reversed(opened)) if writer == 'logger' else opened)
+    assert all(handle.closed for handle in opened)

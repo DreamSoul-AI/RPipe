@@ -63,3 +63,44 @@ def test_train_only_display_tags_do_not_break_same_seed_eval_pair(source_study, 
         assert 'baseline' in trains[evaluation.seed].config['tags']
         assert 'baseline' not in evaluation.config.get('tags', ())
     assert not run_root.exists()
+
+
+def test_run_description_is_rendered_from_effective_scientific_settings(source_study, run_root):
+    from rpipe.api import plan
+
+    original = plan(source_study, run_root=run_root)
+    with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
+        stream.write('fixed: {data: {config: {train_size: 5}}}\n'
+                     'run_description: "{data_name}/{model_name}/{mode}/{seed}/{train_size}/{source}"\n')
+    specs = plan(source_study, run_root=run_root)
+    assert [s.config['description'] for s in specs] == [
+        'Toy/linear/train/0/5/custom_torch', 'Toy/linear/train/1/5/custom_torch']
+    assert [s.seed for s in original] == [s.seed for s in specs]
+    assert not run_root.exists()
+
+
+@pytest.mark.parametrize('template', ['{missing}', '{seed.__class__}', '{seed:1000000000}', '{seed!r}'])
+def test_run_description_rejects_unknown_or_unbounded_format_syntax(source_study, run_root, template):
+    from rpipe.api import plan
+    import yaml
+
+    declaration = {'study': 'toy', 'run_description': template}
+    (source_study / 'study.yaml').write_text(yaml.safe_dump(declaration), encoding='utf-8')
+    with pytest.raises(ValueError, match='run_description'):
+        plan(source_study, run_root=run_root)
+    assert not run_root.exists()
+
+
+@pytest.mark.parametrize('declaration, phrase', [
+    ('freeze: true\n', 'freeze'),
+    ('flow: {prepare_shared: true}\n', 'prepare_shared'),
+    ('flow: {study_phases: "false"}\n', 'study_phases'),
+    ('flow: {unknown_stage: true}\n', 'flow'),
+])
+def test_unimplemented_or_ambiguous_declarations_fail_explicitly(source_study, run_root, declaration, phrase):
+    from rpipe.api import plan
+
+    (source_study / 'study.yaml').write_text('study: toy\n' + declaration, encoding='utf-8')
+    with pytest.raises(ValueError, match=phrase):
+        plan(source_study, run_root=run_root)
+    assert not run_root.exists()

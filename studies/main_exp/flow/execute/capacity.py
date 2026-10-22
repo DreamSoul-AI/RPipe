@@ -87,7 +87,7 @@ def main(recipe, argv):
             folder = root / 'declarations' / f'{model}-round{round_size}'
             folder.mkdir(parents=True)
             combinations = [('cnn', 0), ('resnet18', 0), ('linear', 0)] if model == 'mixed' else [(model, n) for n in range(3)]
-            write_config(folder / 'study.yaml', {'study': ident, 'recipe': 'recipe.py', 'freeze': True,
+            write_config(folder / 'study.yaml', {'study': ident, 'recipe': 'recipe.py',
                 'flow': {'study_phases': True, 'prepare_shared': False},
                 'axes': {'model.name': [m for m, _ in combinations]} if model == 'mixed' else {},
                 'seeds': [0] if model == 'mixed' else [0, 1, 2]})
