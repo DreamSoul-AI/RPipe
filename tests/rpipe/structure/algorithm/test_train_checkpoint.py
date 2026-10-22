@@ -197,7 +197,7 @@ def test_resume_rejects_changed_native_sampler_budget(tmp_path: Path):
         data = Data(
             name='toy',
             source='x',
-            loaders={},
+            loaders={'test': torch.utils.data.DataLoader(dataset, batch_size=4)},
             meta={'train_size': 32, 'batch_size': 4, 'seed': 0},
         )
         data._train_set = dataset
@@ -341,6 +341,7 @@ def test_epoch_budget_stops_even_when_accumulation_drops_tail_batches(tmp_path):
 
         def iter_batches(self, split):
             if split != 'train':
+                yield torch.ones(2, 2), torch.zeros(2, dtype=torch.long)
                 return
             self.calls += 1
             assert self.calls <= 3, 'unbounded epoch loop'
