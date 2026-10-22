@@ -42,7 +42,9 @@ class Samples:
 dataset = Samples()
 generator = torch.Generator().manual_seed(19)
 loader = DataLoader(dataset, batch_size=2, sampler=RandomSampler(dataset, generator=generator), generator=generator)
-data = Data(name='offline', source='torch', loaders={'train': loader},
+# Held-out evaluation must not consume the training RNG or its sample trace.
+test_batches = [(torch.zeros(2, 4), torch.zeros(2, dtype=torch.long))]
+data = Data(name='offline', source='torch', loaders={'train': loader, 'test': test_batches},
             meta={'seed': 19, 'batch_size': 2, 'train_size': len(dataset)})
 if unit == 'step' and not action.endswith('-finite'):
     data._train_set = dataset

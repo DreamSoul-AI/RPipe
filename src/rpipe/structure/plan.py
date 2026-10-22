@@ -4,11 +4,12 @@ from __future__ import annotations
 import itertools
 import json
 import math
+from string import Formatter
 from dataclasses import replace
 from pathlib import Path
 from collections.abc import Mapping
 
-from .contracts import AdmissionError, RunConfig, RunSpec, compute_run_id, deep_merge, validate_run_config
+from .contracts import AdmissionError, RunConfig, RunSpec, compute_run_id, deep_merge, get_setting, validate_run_config
 
 
 
@@ -39,13 +40,50 @@ def _set(mapping: dict, key: str, value) -> None:
     mapping[parts[-1]] = value
 
 
+def _description(template, config):
+    if not isinstance(template, str) or len(template) > 1024:
+        raise AdmissionError('run_description must be a string of at most 1024 characters')
+    data, model, algorithm = (config.get(key) or {} for key in ('data', 'model', 'algorithm'))
+    values = {'data_name': data.get('name'), 'model_name': model.get('name'),
+              'mode': algorithm.get('mode') or 'train', 'seed': config.get('seed'),
+              'train_size': get_setting(data, 'train_size'),
+              'source': algorithm.get('source') or 'custom_torch'}
+    parts = []
+    try:
+        for literal, field, spec, conversion in Formatter().parse(template):
+            parts.append(literal)
+            if field is not None:
+                if field not in values or spec or conversion:
+                    raise ValueError('unsupported placeholder')
+                value = values[field]
+                if not isinstance(value, (str, bool, int, float, type(None))):
+                    raise ValueError('placeholder is not scalar')
+                parts.append(str(value))
+    except (ValueError, TypeError) as exc:
+        raise AdmissionError('run_description supports only the documented bare scalar placeholders') from exc
+    result = ''.join(parts)
+    if len(result) > 4096:
+        raise AdmissionError('run_description output exceeds 4096 characters')
+    return result
+
+
 def expand(study: dict, base: dict, *, source_dir: Path | str, run_root: Path | str,
            source_digest: str, version: str | None = None) -> tuple[RunSpec, ...]:
     source = Path(source_dir).resolve()
+    if 'freeze' in study:
+        raise AdmissionError('freeze is unsupported; remove it: source identity is checked, no archive is created')
     allowed = {'study', 'description', 'origin', 'experiment', 'fixed', 'axes', 'seeds', 'tags',
-               'run_description', 'recipe', 'flow', 'freeze', 'provenance'}
+               'run_description', 'recipe', 'flow', 'provenance'}
     if set(study) - allowed:
         raise AdmissionError(f'unknown Study fields: {sorted(set(study) - allowed)}')
+    flow = study.get('flow') or {}
+    if not isinstance(flow, dict) or set(flow) - {'study_phases', 'prepare_shared'}:
+        raise AdmissionError('flow must contain only study_phases and prepare_shared')
+    for key, value in flow.items():
+        if type(value) is not bool:
+            raise AdmissionError(f'flow.{key} must be a boolean')
+    if flow.get('prepare_shared'):
+        raise AdmissionError('flow.prepare_shared is unsupported; prepare inputs with an explicit data request')
     fixed = study.get('fixed') or {}
     axes = dict(study.get('axes') or {})
     if not isinstance(fixed, dict):
@@ -87,7 +125,10 @@ def expand(study: dict, base: dict, *, source_dir: Path | str, run_root: Path | 
                     tags.extend(rule.get('tags') or [])
             if tags:
                 patch['tags'] = sorted(set(tags))
-            run_config = RunConfig.from_mapping(deep_merge(base, patch), assign_id=True)
+            effective = deep_merge(base, patch)
+            if 'run_description' in study:
+                effective['description'] = _description(study['run_description'], effective)
+            run_config = RunConfig.from_mapping(effective, assign_id=True)
             validate_run_config(run_config)
             cfg = run_config.to_mapping()
             experiment_id = exp + ':' + compute_run_id(factors)

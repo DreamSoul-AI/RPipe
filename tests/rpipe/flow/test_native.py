@@ -49,7 +49,8 @@ def test_sequential_injected_native_studies_do_not_share_recipe_builders(
     (other / 'experiment_config.yaml').write_bytes((tensor_study / 'experiment_config.yaml').read_bytes())
     outcome = run(plan(other, run_root=run_root)[0], payload=NativeRun())
     assert outcome.status == 'failed'
-    assert 'unknown data name/source' in str(outcome.error)
+    assert outcome.error['type'] == 'ValueError'
+    assert outcome.error['message'] == '[redacted]'
     assert DataRegistry.get(name, 'fixture') is None
 
 

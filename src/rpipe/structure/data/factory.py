@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Iterator, Callable
 from rpipe.structure.contracts import DataConfig
 
-from rpipe.structure.artifacts import cache_lock, reference_tree
+from rpipe.structure.artifacts import cache_lock, reference_tree, contained
 
 from rpipe.structure.system.origin import apply_model_origin, bind_endpoint, discard_bad_archive, endpoint_for
 
@@ -291,13 +291,19 @@ _VISION_TORCH: dict[str, dict[str, Any]] = {
     )
 }
 
-def _with_recorded_stats(spec: dict[str, Any], path: Path) -> dict[str, Any]:
+def _with_recorded_stats(spec: dict[str, Any], path: Path, *, required: bool = False) -> dict[str, Any]:
     """Prefer mean / std from ``stats.yaml`` when a profile has been written."""
     from rpipe.structure.data.profile import load_stats
 
-    recorded = load_stats(path)
+    recorded = load_stats(path, required=required)
     if recorded is None:
         return spec
+    import math
+    mean, std = recorded['mean'], recorded['std']
+    if (len(mean) != len(spec['mean']) or len(std) != len(mean)
+            or any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x)
+                   for x in (*mean, *std)) or any(x <= 0 for x in std)):
+        raise ValueError('normalization statistics require matching finite channels and positive std')
     copied = dict(spec)
     copied['mean'] = tuple(float(x) for x in recorded['mean'])
     copied['std'] = tuple(float(x) for x in recorded['std'])
@@ -330,19 +336,24 @@ def _build_torch_vision(
     cfg = dict(data_config.config)
     explicit_root = data_config.path is not None
     root = Path(data_config.path) if explicit_root else assets_dir / str(spec['root'])
+    canonical_raw = assets_dir / name / 'raw'
+    native_raw = root / name / 'raw' if name in ('MNIST', 'FashionMNIST') else root
     if explicit_root:
         if not root.is_dir():
             raise FileNotFoundError(f'missing declared data directory: {root}')
     else:
+        for output in (root, canonical_raw, native_raw):
+            contained(output, assets_dir)
         root.mkdir(parents=True, exist_ok=True)
-    canonical_raw = assets_dir / name / 'raw'
-    native_raw = root / name / 'raw' if name in ('MNIST', 'FashionMNIST') else root
     if not explicit_root and canonical_raw.is_dir():
         reference_tree(canonical_raw, native_raw)
     ctor = getattr(datasets, str(spec['ctor']))
     augment = bool(cfg.get('augment', spec.get('train_aug') is not None))
     stats = cfg.get('stats_path', profile_path if profile_path is not None else root / 'stats.yaml')
-    spec = _with_recorded_stats(spec, Path(stats))
+    recorded_spec = _with_recorded_stats(spec, Path(stats), required='stats_path' in cfg)
+    stats_source = ('builtin_fallback' if recorded_spec is spec else
+                    'explicit_file' if 'stats_path' in cfg else 'study_profile')
+    spec = recorded_spec
     # Pixels stay in 0–1; model-side kornia owns augmentation.
     train_tf = transforms.ToTensor()
     test_tf = transforms.ToTensor()
@@ -405,6 +416,8 @@ def _build_torch_vision(
             'target_size': int(spec['target_size']),
             'mean': tuple(spec['mean']),
             'std': tuple(spec['std']),
+            'stats_source': stats_source,
+            'stats_reference': None if stats_source == 'builtin_fallback' else str(Path(stats).resolve()),
             'train_aug': spec.get('train_aug') if augment else None,
             'augment': augment,
             'pin_memory': opts['pin_memory'],

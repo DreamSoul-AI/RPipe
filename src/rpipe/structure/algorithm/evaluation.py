@@ -21,7 +21,7 @@ class EvalAlgorithm(Algorithm):
             tracker.flush('test')
             if logger is not None:
                 logger.report(tracker, 'test')
-            return {'mode': 'eval', 'stub': True}
+            return {'mode': 'eval', 'stub': True, 'resume_count': 0, 'resume_path': None}
         if getattr(model, 'module', None) is None or not callable(getattr(data, 'iter_batches', None)):
             raise ValueError('eval requires a model module and data.iter_batches; use explicit stub data for flow checks')
         if getattr(system, 'place_module', None):
@@ -54,17 +54,28 @@ class EvalAlgorithm(Algorithm):
         report_extra['elapsed'] = format_hms(elapsed)
         if logger is not None:
             logger.info(f"eval elapsed={report_extra['elapsed']}")
-        accuracy = metrics.get('Accuracy', 0.0)
-        return {
+        result = {
             'mode': 'eval',
-            'accuracy': accuracy,
-            'best_accuracy': (restored or {}).get('best_accuracy', accuracy),
             'resume_stem': extra.get('resume_stem'),
+            'resume_path': extra.get('resume_path') if restored is not None else None,
+            'resume_count': extra['resume_count'],
             'step': (restored or {}).get('step'),
             'epoch': (restored or {}).get('epoch'),
             'elapsed': format_hms(elapsed),
             'elapsed_seconds': float(elapsed),
         }
+        if 'Accuracy' in metrics:
+            result['accuracy'] = metrics['Accuracy']
+        checkpoint = restored or {}
+        if checkpoint.get('best_metric', 'Accuracy') == 'Accuracy':
+            if checkpoint.get('best_accuracy') is not None:
+                result['best_accuracy'] = checkpoint['best_accuracy']
+            elif 'Accuracy' in metrics:
+                result['best_accuracy'] = metrics['Accuracy']
+        for name in ('best_metric', 'best_value'):
+            if name in checkpoint:
+                result[name] = checkpoint[name]
+        return result
 
 
 def run(control_algorithm: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:

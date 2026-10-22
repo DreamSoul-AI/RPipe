@@ -70,4 +70,3 @@ recipe: recipe.py
 flow:
   study_phases: true
   prepare_shared: false
-freeze: true

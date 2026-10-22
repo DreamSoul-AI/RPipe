@@ -66,8 +66,9 @@ def test_silent_worker_cannot_reuse_previous_worker_response(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize('extension', ['recipe', 'hook', 'disabled-hook'])
 def test_abrupt_worker_exit_keeps_unknown_owner_when_descendants_cannot_be_verified(
-        source_study, run_root, monkeypatch):
+        source_study, run_root, monkeypatch, extension):
     import importlib
     import os
     from types import SimpleNamespace
@@ -75,8 +76,13 @@ def test_abrupt_worker_exit_keeps_unknown_owner_when_descendants_cannot_be_verif
     from rpipe.structure.contracts import BusyError
 
     with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
-        stream.write('recipe: recipe.py\n')
-    (source_study / 'recipe.py').write_text('def register(ctx): pass\n', encoding='utf-8')
+        stream.write('recipe: recipe.py\n' if extension == 'recipe' else
+                     f'flow: {{study_phases: {str(extension == "hook").lower()}}}\n')
+    if extension == 'recipe':
+        (source_study / 'recipe.py').write_text('def register(ctx): pass\n', encoding='utf-8')
+    else:
+        (source_study / 'flow').mkdir()
+        (source_study / 'flow' / 'prepare.py').write_text('def run(ctx): pass\n', encoding='utf-8')
     module = importlib.import_module('rpipe.flow.run')
     native_popen = subprocess.Popen
 
@@ -89,9 +95,48 @@ def test_abrupt_worker_exit_keeps_unknown_owner_when_descendants_cannot_be_verif
     monkeypatch.setattr(module.subprocess, 'Popen', AbruptWorker)
     spec = plan(source_study, run_root=run_root)[0]
     outcome = run(spec)
-    assert outcome.status == 'unknown'
-    assert outcome.error['type'] == 'RuntimeError' and 'exited 17' in outcome.error['message']
-    assert (spec.run_dir / '.execution').is_dir()
+    unknown = extension != 'disabled-hook'
+    assert outcome.status == ('unknown' if unknown else 'failed')
+    assert outcome.error['type'] == 'ChildExit' and outcome.error['exit_code'] == 17
+    assert (spec.run_dir / '.execution').is_dir() is unknown
     assert not spec.result_path.exists()
-    with pytest.raises(BusyError):
-        run(spec)
+    if unknown:
+        with pytest.raises(BusyError):
+            run(spec, retry=True)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('extension', ['recipe', 'hook', 'workers', 'hf', 'disabled-hook', 'no-hook'])
+def test_windows_hard_timeout_admission_matches_possible_descendants(
+        source_study, run_root, monkeypatch, extension):
+    import importlib
+    import os
+    from types import SimpleNamespace
+    from rpipe.api import plan
+    from rpipe.structure.artifacts import load_config, write_config
+    from rpipe.structure.contracts import AdmissionError, Budget
+
+    with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
+        stream.write('recipe: recipe.py\n' if extension == 'recipe' else
+                     f'flow: {{study_phases: {str(extension != "disabled-hook").lower()}}}\n')
+    if extension == 'recipe':
+        (source_study / 'recipe.py').write_text('def register(ctx): pass\n', encoding='utf-8')
+    elif extension in {'hook', 'disabled-hook'}:
+        (source_study / 'flow').mkdir()
+        (source_study / 'flow' / 'prepare.py').write_text('def run(ctx): pass\n', encoding='utf-8')
+    config = load_config(source_study / 'experiment_config.yaml')
+    if extension == 'workers':
+        config['data']['config'] = {'num_workers': 1}
+    if extension == 'hf':
+        config['algorithm']['source'] = 'transformers_trainer'
+    write_config(source_study / 'experiment_config.yaml', config)
+    spec = plan(source_study, run_root=run_root)[0]
+    module = importlib.import_module('rpipe.flow.run')
+    monkeypatch.setattr(module, 'os', SimpleNamespace(name='nt', environ=os.environ, pathsep=os.pathsep))
+    possible = extension not in {'disabled-hook', 'no-hook'}
+    if possible:
+        with pytest.raises(AdmissionError):
+            module.ProcessRun(spec, Budget(timeout_seconds=1))
+    else:
+        assert not module.ProcessRun(spec, Budget(timeout_seconds=1)).may_have_descendants
+    assert not run_root.exists()

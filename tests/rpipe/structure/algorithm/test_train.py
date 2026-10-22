@@ -63,6 +63,28 @@ class _Data:
     meta = {'stub': True}
 
 
+@pytest.mark.parametrize('names, absent', [(['Loss'], 'accuracy'), (['Accuracy'], 'train_loss')])
+def test_train_summary_omits_metrics_that_were_not_requested(tmp_path, names, absent):
+    from types import SimpleNamespace
+    import torch
+    from rpipe.structure.algorithm.metrics import MetricBundle
+    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.system.factory import SystemFactory
+
+    data = SimpleNamespace(meta={}, iter_batches=lambda split: iter([
+        (torch.ones(2, 1), torch.zeros(2, dtype=torch.long)),
+    ]))
+    system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
+    try:
+        result = TrainAlgorithm(AlgorithmConfig.from_mapping({'num_steps': 1, 'resume': False})).run(
+            data, SimpleNamespace(module=torch.nn.Linear(1, 2)), system,
+            AlgorithmTracker(tmp_path, MetricBundle({'train': names, 'test': names})),
+        )
+        assert absent not in result
+    finally:
+        system.logger.close()
+
+
 def test_two_epoch_stub_train_does_not_raise(tmp_path):
     algo = TrainAlgorithm(AlgorithmConfig.from_mapping({'mode': 'train', 'num_epochs': 2}))
     tracker = AlgorithmTracker(tmp_path)
@@ -378,10 +400,14 @@ def test_train_final_flush_cannot_replace_primary_failure(tmp_path, monkeypatch,
     assert not list(tracker.state_path.parent.glob('*.tmp'))
     assert caught.value is primary
     if log_mode == 'available':
+        import json
         text = log_path.read_text(encoding='utf-8')
-        assert 'tracker final flush failed' in text
-        assert ('PermissionError' if secondary_kind == 'publication' else 'TypeError') in text
-        assert 'original iterator failure' in text
+        record = json.loads(text.splitlines()[-1])
+        assert record['message'] == 'tracker final flush failed'
+        assert record['exception_type'] == ('PermissionError' if secondary_kind == 'publication' else 'TypeError')
+        assert primary_type.__name__ in record['traceback']
+        assert record['exception_message'] == '[redacted]'
+        assert 'original iterator failure' not in text
 
 
 @pytest.mark.parametrize('secondary_kind', ['publication', 'serialization'])

@@ -96,6 +96,7 @@ class Algorithm(AlgorithmHook):
         extra: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         extra = extra if extra is not None else {}
+        extra.setdefault('resume_count', 0)
         del data
         stem = resume_stem(self.config, mode=self.mode)
         extra['resume_stem'] = stem
@@ -117,6 +118,7 @@ class Algorithm(AlgorithmHook):
             extra['resume_skipped'] = stem
             return None
         apply_module_state(getattr(model, 'module', None), payload)
+        extra['resume_count'] += 1
         extra['resume_payload'] = payload
         if self.mode == 'train':
             if payload.get('training_state') is None or self.config.source == 'transformers_trainer':

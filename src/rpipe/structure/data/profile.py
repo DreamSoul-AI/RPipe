@@ -8,19 +8,30 @@ standardize recipe.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from itertools import chain
+from typing import Any, Iterable
 
 import yaml
 
-from rpipe.structure.artifacts import _read_text, atomic_write_text
-from rpipe.structure.contracts import DataConfig
+from rpipe.structure.artifacts import _read_text, atomic_write_text, contained
+from rpipe.structure.contracts import AdmissionError, DataConfig, validate_run_root
 from rpipe.structure.data.factory import DataFactory, vision_root
 from rpipe.structure.system.origin import normalize_origin
 
 STATS_NAME = 'stats.yaml'
 
 
-def summarize_batches(batches: list[tuple[Any, Any]]) -> dict[str, Any]:
+def _profile_path(profiles: Path, name: str) -> Path:
+    folder = profiles / name
+    if folder.resolve() != folder:
+        raise AdmissionError('profile dataset output cannot be a directory link')
+    contained(folder, profiles)
+    path = folder / STATS_NAME
+    contained(path, folder)
+    return path
+
+
+def summarize_batches(batches: Iterable[tuple[Any, Any]]) -> dict[str, Any]:
     """Channel mean / std / min / max and class counts over NCHW batches in 0–1."""
     import torch
 
@@ -32,7 +43,7 @@ def summarize_batches(batches: list[tuple[Any, Any]]) -> dict[str, Any]:
     classes: dict[int, int] = {}
     shape: list[int] | None = None
     for images, targets in batches:
-        images = images.detach().float()
+        images = images.detach().double()
         if images.ndim != 4:
             raise ValueError(f'expected NCHW, got {tuple(images.shape)}')
         if shape is None:
@@ -75,84 +86,103 @@ def summarize_batches(batches: list[tuple[Any, Any]]) -> dict[str, Any]:
     }
 
 
-def load_stats(path: Path | str) -> dict[str, Any] | None:
+def load_stats(path: Path | str, *, required: bool = False) -> dict[str, Any] | None:
     file = Path(path)
     if not file.is_file():
+        if required:
+            raise FileNotFoundError('declared normalization statistics are missing')
         return None
     body = yaml.safe_load(_read_text(file)) or {}
-    if not isinstance(body, dict) or not body.get('mean') or not body.get('std'):
+    if (not isinstance(body, dict) or any(not isinstance(body.get(key), (list, tuple))
+                                        or not body[key] for key in ('mean', 'std'))):
+        if required:
+            raise ValueError('declared statistics require nonempty mean and std arrays')
         return None
     return body
 
 
-def profile_study(study_dir: Path | str, *, shared_data_dir: Path | str,
+def profile_study(study_dir: Path | str, *, configs: Iterable[dict[str, Any]], shared_data_dir: Path | str,
                   profiles_dir: Path | str, download: bool = False) -> list[Path]:
-    """Profile explicit local inputs and publish profiles to an explicit output root."""
-    study = Path(study_dir)
-    declared = yaml.safe_load(_read_text(study / 'study.yaml')) or {}
-    if not isinstance(declared, dict):
-        raise ValueError('study.yaml must be a mapping')
-    origin = normalize_origin(declared.get('origin'))
+    """Profile resolved selected configs without loading a recipe or changing inputs."""
+    study = Path(study_dir).resolve()
     shared = Path(shared_data_dir)
-    written: list[Path] = []
-    for name in _data_names(declared):
+    profiles = Path(profiles_dir).resolve()
+    validate_run_root(study, shared)
+    validate_run_root(study, profiles)
+    requests: dict[str, tuple[DataConfig, str]] = {}
+    for config in configs:
+        data_config = DataConfig.from_mapping(config.get('data'))
+        name = data_config.name
         root = vision_root(name) or name
-        folder = Path(profiles_dir) / root
-        data = DataFactory.build(
-            DataConfig.from_mapping(
-                {
-                    'name': name,
-                    'source': 'torch',
-                    'config': {'batch_size': 256, 'augment': False, 'num_workers': 0, 'download': download},
-                }
-            ),
-            shared,
-            origin=origin,
-        )
-        splits = {}
-        for split in ('train', 'test'):
-            batches = [(images, targets) for images, targets in _iter_pairs(data, split)]
-            if batches:
+        if not isinstance(root, str) or not root or root in ('.', '..') or Path(root).name != root:
+            raise ValueError('profile data.name must identify one dataset directory')
+        data_config.source = data_config.source or 'torch'
+        if data_config.path is not None:
+            data_config.path = str((study / data_config.path).resolve())
+            if download:
+                raise ValueError('declared data paths are read-only; download into the owned shared cache')
+        folder = _profile_path(profiles, root).parent
+        declared_stats = data_config.config.get('stats_path')
+        for reference in (data_config.path, declared_stats):
+            if reference is not None:
+                path = (study / reference).resolve()
+                if folder.is_relative_to(path) or path.is_relative_to(folder):
+                    raise ValueError('profile output must be outside declared input paths')
+        # Profiles describe the full raw input; Run subsets and model normalization do not apply.
+        data_config.config.pop('train_size', None)
+        data_config.config.pop('stats_path', None)
+        data_config.config.update(batch_size=256, augment=False, num_workers=0, download=download)
+        origin = normalize_origin(config.get('origin'))
+        if root in requests and requests[root] != (data_config, origin):
+            raise ValueError(f'conflicting profile inputs for dataset {name!r}; select one Run with --id')
+        requests[root] = data_config, origin
+    if not requests:
+        raise ValueError('profiling requires at least one selected data config')
+    written: list[Path] = []
+    for root, (data_config, origin) in requests.items():
+        name = data_config.name
+        data = DataFactory.build(data_config, shared, origin=origin)
+        primary = None
+        try:
+            splits = {}
+            for split in ('train', 'test'):
+                batches = iter(_iter_pairs(data, split))
+                first = next(batches, None)
+                if first is None:
+                    continue
+                batches = chain((first,), batches)
+                del first
                 splits[split] = summarize_batches(batches)
-        if 'train' not in splits:
-            raise RuntimeError(f'{name}: train split is empty')
-        train_pixel = splits['train']['pixel']
-        body = {
-            'name': name,
-            'summary': _summary_line(name, splits),
-            'mean': list(train_pixel['mean']),
-            'std': list(train_pixel['std']),
-            'splits': splits,
-        }
-        path = folder / STATS_NAME
-        atomic_write_text(path, yaml.safe_dump(body, sort_keys=False, allow_unicode=True))
-        written.append(path)
+            if 'train' not in splits:
+                raise RuntimeError(f'{name}: train split is empty')
+            train_pixel = splits['train']['pixel']
+            body = {'name': name, 'summary': _summary_line(name, splits),
+                    'mean': list(train_pixel['mean']), 'std': list(train_pixel['std']),
+                    'splits': splits}
+            path = _profile_path(profiles, root)
+            atomic_write_text(path, yaml.safe_dump(body, sort_keys=False, allow_unicode=True))
+            written.append(path)
+        except BaseException as exc:
+            primary = exc
+            raise
+        finally:
+            close = getattr(data, 'close', None)
+            if callable(close):
+                try:
+                    close()
+                except BaseException as cleanup:
+                    if primary is None:
+                        raise
+                    primary.cleanup_errors = (*getattr(primary, 'cleanup_errors', ()), cleanup)
+                    if callable(getattr(primary, 'add_note', None)):
+                        primary.add_note('data profile cleanup also failed: ' + type(cleanup).__name__)
     return written
 
 
 def _iter_pairs(data: Any, split: str):
-    loader = getattr(data, '_loaders', {}).get(split)
-    if loader is None:
-        return
-    for batch in loader:
+    for batch in data.iter_batches(split):
         if isinstance(batch, (tuple, list)) and len(batch) >= 2:
             yield batch[0], batch[1]
-
-
-def _data_names(study: dict[str, Any]) -> list[str]:
-    names: list[str] = []
-    axes = study.get('axes') if isinstance(study.get('axes'), dict) else {}
-    axis_names = axes.get('data.name')
-    if isinstance(axis_names, list):
-        names.extend(str(item) for item in axis_names)
-    fixed = study.get('fixed') if isinstance(study.get('fixed'), dict) else {}
-    data = fixed.get('data')
-    if isinstance(data, dict) and data.get('name'):
-        names.append(str(data['name']))
-    seen = list(dict.fromkeys(names))
-    if not seen:
-        raise ValueError('study.yaml has no data.name')
-    return seen
 
 
 def _summary_line(name: str, splits: dict[str, Any]) -> str:

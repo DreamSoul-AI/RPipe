@@ -287,6 +287,59 @@ def test_tensorboard_refuses_study_output_and_state_only_inputs(tmp_path, tensor
     assert not (tmp_path / 'events').exists()
 
 
+def test_tensorboard_explicit_selection_excludes_other_run_trajectories(tmp_path, tensorboard_writer):
+    from rpipe.flow.exports import export_tensorboard
+
+    study = tmp_path / 'study'
+    row = {'split': 'train', 'name': 'Loss', 'mean': 1, 'optimizer_step': 1}
+    _tb_source(study, 'selected', [row])
+    _tb_source(study, 'unselected', [dict(row, mean=99)])
+    export_tensorboard(study, tmp_path / 'events', run_ids=['selected'])
+    assert [writer.path.name for writer in tensorboard_writer] == ['selected']
+    assert tensorboard_writer[0].rows[0][2] == 1
+
+
+@pytest.mark.parametrize('ids', [['missing'], ['../escape'], ['a', 'a']])
+def test_tensorboard_bad_or_missing_selection_fails_before_creating_output(tmp_path, tensorboard_writer, ids):
+    from rpipe.flow.exports import export_tensorboard
+
+    study = tmp_path / 'study'
+    _tb_source(study, 'a', [{'split': 'train', 'name': 'Loss', 'mean': 1, 'optimizer_step': 1}])
+    with pytest.raises(ValueError):
+        export_tensorboard(study, tmp_path / 'events', run_ids=ids)
+    assert not (tmp_path / 'events').exists()
+    assert not tensorboard_writer
+
+
+def test_tensorboard_rejects_tracker_link_outside_selected_output(tmp_path, tensorboard_writer):
+    from rpipe.flow.exports import export_tensorboard
+
+    peer = _tb_source(tmp_path / 'peer', 'x', [{'split': 'train', 'name': 'Loss', 'mean': 1, 'epoch': 1}])
+    study = tmp_path / 'study'
+    target = study / 'runs' / 'a' / 'assets'
+    target.mkdir(parents=True)
+    (target / 'tracker').symlink_to(peer.parent, target_is_directory=True)
+    before = peer.read_bytes()
+    with pytest.raises(ValueError, match='escape'):
+        export_tensorboard(study, tmp_path / 'events', run_ids=['a'])
+    assert peer.read_bytes() == before
+    assert not (tmp_path / 'events').exists()
+
+
+def test_tensorboard_rejects_its_library_checkout_before_writing(tmp_path, tensorboard_writer):
+    import rpipe.flow.exports as exports
+    from rpipe.structure.contracts import AdmissionError
+
+    study = tmp_path / 'study'
+    _tb_source(study, 'a', [{'split': 'train', 'name': 'Loss', 'mean': 1, 'epoch': 1}])
+    destination = Path(exports.__file__).resolve().parents[3] / '.tmp' / 'forbidden-tensorboard-export'
+    assert not destination.exists()
+    with pytest.raises(AdmissionError, match='source|checkout|project'):
+        exports.export_tensorboard(study, destination)
+    assert not destination.exists()
+    assert not tensorboard_writer
+
+
 @pytest.mark.external
 def test_tensorboard_real_event_roundtrip(tmp_path):
     pytest.importorskip('tensorboard')

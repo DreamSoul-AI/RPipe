@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import pytest
 
 from rpipe.structure.artifacts import atomic_replace, atomic_write_text
@@ -234,15 +235,14 @@ def test_owned_text_stage_chmod_refusal_preserves_old_target_and_peer(tmp_path, 
 
 
 @pytest.mark.parametrize('writer', ['text', 'config', 'result'])
-@pytest.mark.parametrize('readonly', [False, True], ids=['writable-control', 'native-readonly'])
+@pytest.mark.parametrize('readonly', [False, pytest.param(True, marks=pytest.mark.skipif(
+    os.name != 'nt', reason='Windows read-only replacement and unlink semantics'))],
+    ids=['writable-control', 'native-readonly'])
 def test_atomic_text_native_permissions_cleanup_owned_stage(tmp_path, monkeypatch, writer, readonly):
-    import os
     from rpipe.structure import artifacts as _atomic
     from rpipe.structure.artifacts import write_config
     from rpipe.structure.artifacts import write_json as write_result
 
-    if readonly and os.name != 'nt':
-        pytest.skip('Windows read-only replacement and unlink semantics')
     target, peer = tmp_path / 'target.txt', tmp_path / 'peer.tmp'
     target.write_bytes(b'old evidence')
     peer.write_bytes(b'other writer evidence')
@@ -448,11 +448,14 @@ def test_owned_writers_keep_raw_handle_without_entering_proxy(tmp_path, monkeypa
         assert target.read_bytes() == b'content'
     elif writer == 'logger':
         logger.info('content')
-        assert logger.path.read_bytes().rstrip().endswith(b'[flow] content')
+        import json
+        assert json.loads(logger.path.read_text(encoding='utf-8').splitlines()[-1])['message'] == 'content'
     elif writer == 'tracker-start':
         tracker.begin_run()
         assert b'"event": "start"' in tracker.jsonl_path.read_bytes()
     else:
         tracker.append_jsonl('train')
         assert b'"mean": 2.0' in tracker.jsonl_path.read_bytes()
-    assert len(opened) == 1 and closed == opened and opened[0].closed
+    assert len(opened) == (2 if writer == 'logger' else 1)
+    assert closed == (list(reversed(opened)) if writer == 'logger' else opened)
+    assert all(handle.closed for handle in opened)

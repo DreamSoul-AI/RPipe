@@ -10,6 +10,13 @@ from .study import run_study_phase
 def pipeline(payload, ctx) -> dict:
     study = ctx.state['study']
 
+    def phase(name):
+        ctx.state['phase'] = name
+        logger = ctx.state.get('logger')
+        if logger is not None:
+            logger.bind(phase=name)
+            logger.info('Run phase started', event='task.phase_changed')
+
     def hook(phase):
         run_study_phase(ctx.study_dir, phase, ctx, study)
         check()
@@ -20,16 +27,19 @@ def pipeline(payload, ctx) -> dict:
         if ctx.cancellation.is_set():
             raise Cancelled('cancelled between phases')
 
+    phase('prepare')
     if not getattr(payload, 'manages_prepare_hook', False):
         ctx.state['before_prepare'](ctx)
     payload.prepare(ctx)
     check()
     hook('prepare')
     check()
+    phase('execute')
     payload.execute(ctx)
     check()
     hook('execute')
     check()
+    phase('collect')
     collected = payload.collect(ctx)
     check()
     if not isinstance(collected, dict):
@@ -41,10 +51,12 @@ def pipeline(payload, ctx) -> dict:
     ctx.state['collected'] = collected
     hook('collect')
     check()
+    phase('summarize')
     ctx.state['result_draft'] = dict(ctx.state['collected'])
     hook('summarize')
     check()
     # Original write hook timing: complete before the coordinator publishes.
+    phase('write')
     hook('write')
     check()
     return dict(ctx.state['result_draft'])

@@ -26,6 +26,48 @@ def test_stub_source_does_not_download(tmp_path: Path):
     assert not (tmp_path / 'mnist').exists()
 
 
+@pytest.mark.parametrize('linked', ['dataset', 'native-raw', 'canonical-raw'])
+def test_owned_vision_cache_cannot_publish_through_links_into_source(tmp_path, monkeypatch, file_bytes, linked):
+    from rpipe.structure.contracts import AdmissionError
+    import torchvision.datasets
+
+    source, cache = tmp_path / 'source', tmp_path / 'cache'
+    source.mkdir()
+    cache.mkdir()
+    (source / 'sentinel').write_bytes(b'original source')
+    native, canonical = cache / 'mnist' / 'MNIST' / 'raw', cache / 'MNIST' / 'raw'
+    if linked == 'dataset':
+        (cache / 'mnist').symlink_to(source, target_is_directory=True)
+    elif linked == 'native-raw':
+        native.parent.mkdir(parents=True)
+        native.symlink_to(source, target_is_directory=True)
+    else:
+        canonical.parent.mkdir(parents=True)
+        canonical.symlink_to(source, target_is_directory=True)
+        native.mkdir(parents=True)
+        (native / 'new-image').write_bytes(b'owned raw input')
+    if linked == 'native-raw':
+        canonical.mkdir(parents=True, exist_ok=True)
+        (canonical / 'new-image').write_bytes(b'owned raw input')
+    before = file_bytes(source)
+    calls = []
+
+    class Dataset:
+        def __init__(self, *args, **kwargs):
+            calls.append(kwargs)
+
+        def __len__(self):
+            return 2
+
+    monkeypatch.setattr(torchvision.datasets, 'MNIST', Dataset)
+    try:
+        with pytest.raises(AdmissionError):
+            data_api.build(DataConfig.from_mapping({'name': 'MNIST', 'source': 'torch'}), cache)
+    finally:
+        assert file_bytes(source) == before
+    assert not calls
+
+
 @pytest.mark.parametrize('mapping', [
     {'name': 'Typo', 'source': 'torch'},
     {'name': 'Typo', 'source': 'stub'},
@@ -41,7 +83,8 @@ def test_unregistered_data_is_rejected(tmp_path, mapping):
     assert list(tmp_path.iterdir()) == []
 
 
-def test_cifar10_builder_uses_fake_dataset(tmp_path: Path, monkeypatch):
+@pytest.mark.parametrize('record_stats', [False, True])
+def test_cifar10_builder_uses_fake_dataset(tmp_path: Path, monkeypatch, record_stats):
     from PIL import Image
     downloads = []
 
@@ -68,6 +111,9 @@ def test_cifar10_builder_uses_fake_dataset(tmp_path: Path, monkeypatch):
     import torchvision.datasets as tv_datasets
 
     monkeypatch.setattr(tv_datasets, 'CIFAR10', _Fake)
+    profile = tmp_path / 'stats.yaml'
+    if record_stats:
+        profile.write_text('mean: [0.1, 0.2, 0.3]\nstd: [0.2, 0.3, 0.4]\n', encoding='utf-8')
     data = data_api.build(
         DataConfig.from_mapping(
             {
@@ -78,13 +124,17 @@ def test_cifar10_builder_uses_fake_dataset(tmp_path: Path, monkeypatch):
         ),
         tmp_path,
         seed=0,
+        profile_path=profile,
     )
     assert downloads == [False, False]
     assert data.meta['data_size'] == [3, 32, 32]
     assert data.meta['train_size'] == 8
+    assert data.meta['stats_source'] == ('study_profile' if record_stats else 'builtin_fallback')
+    assert data.meta['stats_reference'] == (str(profile.resolve()) if record_stats else None)
     images, targets = next(iter(data.iter_batches('train')))
     assert tuple(images.shape) == (4, 3, 32, 32)
     assert tuple(targets.shape) == (4,)
+    data.close()
 
 
 def test_svhn_builder_uses_fake_dataset(tmp_path: Path, monkeypatch):

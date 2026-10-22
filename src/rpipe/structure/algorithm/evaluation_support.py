@@ -44,20 +44,26 @@ def eval_test_split(
         return {}
     device = torch.device(getattr(system, 'device', 'cpu'))
     module.eval()
+    samples = 0
     with torch.no_grad():
         for index, batch in enumerate(data.iter_batches('test')):
             from rpipe.structure.system.runtime import check_cancelled
             check_cancelled(system)
             images, targets = prepare_tensors(batch, module, device)
+            if images.size(0) <= 0:
+                raise ValueError('empty test batch cannot produce evaluation metrics')
             logits = module(images)
             values = tracker.evaluate('test', 'batch', (images, targets), logits)
             tracker.append('test', n=int(images.size(0)), values=values)
+            samples += int(images.size(0))
             if num_steps is not None and (index + 1) >= num_steps:
                 break
+    if not samples:
+        raise ValueError('empty test iterator cannot produce evaluation metrics')
+    tracker.save('test')
     if logger is not None:
         logger.report(tracker, 'test', extra=extra)
     tracker.flush('test', progress=extra.get('progress', extra))
-    tracker.save('test')
     tracker.reset('test')
     tracker.flush_state()
     module.train()

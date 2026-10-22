@@ -83,3 +83,70 @@ def test_launch_unknown_owner_stops_new_dispatch(source_study, run_root, monkeyp
     monkeypatch.setattr(api, 'run', unresolved)
     assert [outcome.status for outcome in api.launch(specs)] == ['unknown']
     assert calls == [specs[0].id]
+
+
+def test_launch_preserves_explicit_retry_choice(source_study, run_root, monkeypatch):
+    from rpipe import api
+    from rpipe.structure.contracts import RunOutcome
+
+    specs = api.plan(source_study, run_root=run_root)
+    calls = []
+    def execute(spec, **kwargs):
+        calls.append(kwargs['retry'])
+        return RunOutcome('failed')
+    monkeypatch.setattr(api, 'run', execute)
+    api.launch(specs, retry=True)
+    assert calls == [True, True]
+
+
+@pytest.mark.parametrize('target_kind', ['source', 'input'])
+def test_process_rejects_summary_link_before_writing_source_or_input(
+        source_study, run_root, tmp_path, file_bytes, monkeypatch, target_kind):
+    from rpipe import api
+    from rpipe.flow import study
+    from rpipe.structure.artifacts import load_config, write_config
+    from rpipe.structure.contracts import AdmissionError
+
+    inputs = run_root / 'shared' / 'input'
+    inputs.mkdir(parents=True)
+    (inputs / 'process.json').write_bytes(b'original input')
+    (source_study / 'process.json').write_bytes(b'original source')
+    config = load_config(source_study / 'experiment_config.yaml')
+    config['data']['path'] = str(inputs)
+    write_config(source_study / 'experiment_config.yaml', config)
+    spec = api.plan(source_study, run_root=run_root)[0]
+    spec.study_root.mkdir(parents=True)
+    target = source_study if target_kind == 'source' else inputs
+    (spec.study_root / 'summary').symlink_to(target, target_is_directory=True)
+    peer = tmp_path / 'peer'
+    peer.write_bytes(b'peer untouched')
+    before_source, before_inputs = file_bytes(source_study), file_bytes(inputs)
+    hooks = []
+    monkeypatch.setattr(study, 'run_study_phase', lambda *args, **kwargs: hooks.append(args))
+    try:
+        with pytest.raises(AdmissionError):
+            api.process([spec])
+    finally:
+        assert file_bytes(source_study) == before_source
+        assert file_bytes(inputs) == before_inputs
+        assert peer.read_bytes() == b'peer untouched'
+        assert not hooks
+
+
+def test_process_rechecks_source_before_output_or_hook(
+        source_study, run_root, file_bytes, monkeypatch):
+    from rpipe import api
+    from rpipe.flow import study
+    from rpipe.structure.contracts import SourceMismatch
+
+    spec = api.plan(source_study, run_root=run_root)[0]
+    with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
+        stream.write('# changed after planning\n')
+    before = file_bytes(source_study)
+    hooks = []
+    monkeypatch.setattr(study, 'run_study_phase', lambda *args, **kwargs: hooks.append(args))
+    with pytest.raises(SourceMismatch):
+        api.process([spec])
+    assert file_bytes(source_study) == before
+    assert not run_root.exists()
+    assert not hooks

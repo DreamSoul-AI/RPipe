@@ -198,6 +198,7 @@ def _run_stub(config: AlgorithmConfig, tracker: AlgorithmTracker) -> dict[str, A
         'steps': budget.num_steps,
         'epochs': budget.num_epochs or 1,
         'stub': True,
+        'resume_count': 0, 'resume_path': None, 'resume_step': None,
     }
 
 
@@ -461,19 +462,21 @@ def _run_supervised(
     else:
         tracker.flush_state()
 
-    train_loss = tracker.segment_mean('train').get('Loss', 0.0)
-    accuracy = tracker.segment_mean('test').get('Accuracy', 0.0)
     summary: dict[str, Any] = {
         'mode': 'train',
         'steps': steps,
         'epochs': epoch,
         'progress_unit': budget.unit,
         'train_size': data.meta.get('train_size') if getattr(data, 'meta', None) else None,
-        'train_loss': train_loss,
-        'accuracy': accuracy,
         'best_value': algo._best_test,
         'best_metric': algo._best_metric,
+        'resume_count': resume_extra['resume_count'],
+        'resume_path': resume_extra.get('resume_path') if restored is not None else None,
+        'resume_step': restored.get('step') if restored is not None else None,
     }
+    for split, metric, name in (('train', 'Loss', 'train_loss'), ('test', 'Accuracy', 'accuracy')):
+        if metric in tracker.segment_mean(split):
+            summary[name] = tracker.segment_mean(split)[metric]
     if algo._best_metric == 'Accuracy':
         summary['best_accuracy'] = algo._best_test
     summary['elapsed'] = format_hms(clock.elapsed_seconds())

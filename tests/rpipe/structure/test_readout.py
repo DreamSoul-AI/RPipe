@@ -138,3 +138,86 @@ def test_invalid_result_flags_keep_valid_peer_and_unknown_fact(
     assert len(body['runs']) == 2 and body['complete'] is False
     assert body['runs'][0]['status'] == 'succeeded'
     assert file_bytes(run_root) == before
+
+
+@pytest.mark.parametrize('kind', ['failure', 'cancel'])
+def test_read_run_exposes_explicit_failed_or_cancelled_attempt_without_writing(
+        source_study, run_root, payload_factory, file_bytes, kind):
+    from rpipe.api import Cancellation, plan, read_run, run
+
+    cancellation = Cancellation()
+    class Attempt(payload_factory):
+        def execute(self, ctx):
+            if kind == 'cancel':
+                cancellation.request()
+            else:
+                raise ValueError('attempt failure')
+    spec = plan(source_study, run_root=run_root)[0]
+    outcome = run(spec, payload=Attempt(), cancellation=cancellation)
+    before = file_bytes(run_root)
+    row = read_run(spec)
+    assert row['status'] == outcome.status == ('cancelled' if kind == 'cancel' else 'failed')
+    assert row['attempt'] and row['scientific_status'] == 'missing' and not row['busy']
+    assert row['evidence_complete'] is False
+    assert file_bytes(run_root) == before
+
+
+def test_result_only_legacy_record_remains_readable_without_migration(
+        source_study, run_root, payload_factory, file_bytes):
+    from rpipe.api import plan, read_run, run
+
+    spec = plan(source_study, run_root=run_root)[0]
+    assert run(spec, payload=payload_factory()).status == 'succeeded'
+    (spec.run_dir / 'execution.json').unlink()
+    before = file_bytes(run_root)
+    row = read_run(spec)
+    assert row['status'] == row['scientific_status'] == 'succeeded'
+    assert row['execution_status'] == 'legacy_unindexed'
+    assert file_bytes(run_root) == before
+
+
+def test_unindexed_legacy_attempts_are_unknown_and_cannot_be_selected_by_order(
+        source_study, run_root, payload_factory, file_bytes):
+    from rpipe.api import plan, read_run, run
+    from rpipe.structure.artifacts import identity, write_json
+    from rpipe.structure.contracts import AdmissionError
+
+    spec = plan(source_study, run_root=run_root)[0]
+    for attempt, status in [('f' * 32, 'succeeded'), ('0' * 32, 'failed')]:
+        write_json(spec.run_dir / 'attempts' / attempt / 'outcome.json',
+                   {'status': status, 'identity': identity(spec)})
+    before = file_bytes(run_root)
+    row = read_run(spec)
+    assert row['status'] == 'unknown' and row['execution_status'] == 'legacy_unindexed'
+    assert 'attempt' not in row and not row['evidence_complete']
+    with pytest.raises(AdmissionError, match='legacy'):
+        run(spec, payload=payload_factory(), retry=True)
+    assert file_bytes(run_root) == before
+
+
+@pytest.mark.parametrize('damage', ['missing-attempt', 'mismatched-attempt', 'typed-attempt', 'bad-schema', 'bad-path'])
+def test_active_execution_record_requires_matching_bounded_attempt_evidence(
+        source_study, run_root, payload_factory, file_bytes, damage):
+    from rpipe.api import plan, read_run, run
+    from rpipe.structure.artifacts import read_json, write_json
+
+    spec = plan(source_study, run_root=run_root)[0]
+    assert run(spec, payload=payload_factory()).status == 'succeeded'
+    path = spec.run_dir / 'execution.json'
+    record = read_json(path)
+    attempt_path = spec.run_dir / 'attempts' / record['attempt'] / 'outcome.json'
+    if damage == 'missing-attempt':
+        attempt_path.unlink()
+    elif damage == 'mismatched-attempt':
+        write_json(attempt_path, {**record, 'candidate_status': 'failed'})
+    elif damage == 'typed-attempt':
+        write_json(attempt_path, {**record, 'evidence_complete': 1})
+    elif damage == 'bad-schema':
+        write_json(path, {**record, 'schema': 999})
+    else:
+        write_json(path, {**record, 'attempt': '../peer'})
+    before = file_bytes(run_root)
+    row = read_run(spec)
+    assert row['status'] == 'unknown' and not row['evidence_complete']
+    assert row['scientific_status'] == 'succeeded'
+    assert file_bytes(run_root) == before

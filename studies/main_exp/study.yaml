@@ -3,7 +3,6 @@ origin: foreign
 description: Historical main 4ccb28d recipe, four seeds, 80000-step curves with archived data/model and native RPipe training
 recipe: recipe.py
 flow: {study_phases: true, prepare_shared: false}
-freeze: true
 provenance:
   include: [runtime-requirements.txt, docs/REFERENCE_CURVES.json, docs/EXPECTED_DATA.json]
 experiment:

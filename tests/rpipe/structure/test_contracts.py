@@ -61,3 +61,59 @@ def test_run_spec_identity_fields_cannot_disagree_with_effective_config(
     with pytest.raises(AdmissionError):
         replace(spec, **{field: value})
     assert not run_root.exists()
+
+
+@pytest.mark.parametrize('relative', ['.', '.tmp/forbidden-run', 'src/rpipe/generated'])
+def test_run_root_cannot_overlap_the_library_checkout(source_study, relative):
+    from pathlib import Path
+    from rpipe.api import plan
+    from rpipe.structure.contracts import AdmissionError
+
+    checkout = Path(__file__).resolve().parents[3]
+    with pytest.raises(AdmissionError, match='source'):
+        plan(source_study, run_root=checkout / relative)
+
+
+@pytest.mark.parametrize('marker', ['git_directory', 'git_file', 'pyproject'])
+def test_run_root_protects_whole_study_project_not_just_study_folder(tmp_path, marker):
+    from rpipe.api import plan
+    from rpipe.structure.contracts import AdmissionError
+
+    project = tmp_path / 'host'
+    source = project / 'studies' / 'example'
+    source.mkdir(parents=True)
+    (source / 'study.yaml').write_text('study: example\n', encoding='utf-8')
+    (source / 'experiment_config.yaml').write_text('algorithm: {mode: train}\n', encoding='utf-8')
+    if marker == 'git_directory':
+        (project / '.git').mkdir()
+    elif marker == 'git_file':
+        (project / '.git').write_text('gitdir: external-managed-worktree\n', encoding='utf-8')
+    else:
+        (project / 'pyproject.toml').write_text('[project]\nname="host"\n', encoding='utf-8')
+    output = project / 'outputs'
+    with pytest.raises(AdmissionError, match='source'):
+        plan(source, run_root=output)
+    assert not output.exists()
+
+
+def test_source_project_protection_is_rechecked_before_writing(source_study, run_root):
+    from rpipe.api import plan, make
+    from rpipe.structure.contracts import AdmissionError
+
+    specs = plan(source_study, run_root=run_root)
+    (run_root.parent / '.git').write_text('gitdir: new-checkout-marker\n', encoding='utf-8')
+    with pytest.raises(AdmissionError, match='source'):
+        make(specs)
+    assert not run_root.exists()
+
+
+def test_run_root_alias_into_library_source_is_rejected(source_study, tmp_path):
+    from pathlib import Path
+    from rpipe.api import plan
+    from rpipe.structure.contracts import AdmissionError
+
+    library = Path(__file__).resolve().parents[3] / 'src' / 'rpipe'
+    alias = tmp_path / 'source-alias'
+    alias.symlink_to(library, target_is_directory=True)
+    with pytest.raises(AdmissionError, match='source'):
+        plan(source_study, run_root=alias / 'never-written')

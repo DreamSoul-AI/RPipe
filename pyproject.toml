@@ -78,7 +78,6 @@ markers = [
   "module_algorithm: structure.algorithm",
   "module_system: structure.system",
   "module_artifact: structure.artifact",
-  "module_make: structure.make",
   "module_cli: flow.cli",
   "module_runner: flow runner / execute",
   "module_process: flow process / collect",

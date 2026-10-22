@@ -165,13 +165,13 @@ class System:
 
 class SystemFactory:
     @staticmethod
-    def build(system_config: SystemConfig, assets_dir: Path | str) -> System:
-        return _build_native(system_config, Path(assets_dir))
+    def build(system_config: SystemConfig, assets_dir: Path | str, *, logger: Logger | None = None) -> System:
+        return _build_native(system_config, Path(assets_dir), logger=logger)
 
 
-def _build_native(system_config: SystemConfig, assets_dir: Path) -> System:
+def _build_native(system_config: SystemConfig, assets_dir: Path, *, logger: Logger | None = None) -> System:
     device = str(system_config.setting('device', 'cpu'))
-    logger = Logger(assets_dir)
+    logger = logger if logger is not None else Logger(assets_dir)
     deterministic = bool(system_config.setting('deterministic', False))
     return System(
         device=device,

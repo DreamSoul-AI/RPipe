@@ -53,8 +53,8 @@ def test_phase_failure_and_close_failure_preserve_first_error(
     payload = payload_factory(fail=phase, close_error='secondary close failure')
     outcome = run(plan(source_study, run_root=run_root)[0], payload=payload)
     assert outcome.status == 'failed'
-    assert f'{phase} primary failure' in str(outcome.error)
-    assert 'secondary close failure' in str(outcome.cleanup_errors)
+    assert outcome.error['type'] == 'ValueError'
+    assert outcome.cleanup_errors[0]['type'] == 'RuntimeError'
     assert outcome.quality is None
     assert payload.calls == expected
 

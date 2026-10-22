@@ -6,30 +6,51 @@ from pathlib import Path
 from typing import Any
 import json
 
-from .contracts import AdmissionError, RunSpec, SourceMismatch
-from .artifacts import contained, identity, read_json, validate_source
+from .contracts import AdmissionError, RunSpec, SourceMismatch, project_execution
+from .artifacts import contained, identity, read_execution, read_json, safe_error_record, validate_source
+
+
+_TERMINAL = {'succeeded', 'failed', 'cancelled', 'unknown'}
 
 
 def read_run(spec: RunSpec) -> dict[str, Any]:
     validate_source(spec)
     path = contained(spec.result_path, spec.run_root)
-    if not path.exists():
-        return {'id': spec.id, 'status': 'missing', 'evidence_complete': False,
-                'busy': (spec.run_dir / '.execution').exists()}
-    try:
-        result = read_json(path)
-    except (OSError, ValueError, TypeError) as exc:
-        raise SourceMismatch(f'invalid result for {spec.id}: {exc}') from exc
-    if result.get('identity') != identity(spec):
-        raise SourceMismatch(f'result identity differs: {spec.id}')
-    if (not isinstance(result.get('status'), str)
-            or result['status'] not in {'succeeded', 'failed', 'cancelled', 'unknown'}
-            or result.get('quality') is not None and not isinstance(result['quality'], bool)
-            or not isinstance(result.get('evidence_complete'), bool)):
-        return {**result, 'status': 'unknown', 'quality': None,
-                'evidence_complete': False, 'metadata_status': 'invalid',
-                'busy': (spec.run_dir / '.execution').exists()}
-    return {**result, 'busy': (spec.run_dir / '.execution').exists()}
+    result = {}
+    if path.exists():
+        try:
+            result = read_json(path)
+        except (OSError, ValueError, TypeError, RecursionError) as exc:
+            raise SourceMismatch(f'invalid result for {spec.id}: {exc}') from exc
+        if result.get('identity') != identity(spec):
+            raise SourceMismatch(f'result identity differs: {spec.id}')
+        if (not isinstance(result.get('status'), str) or result['status'] not in _TERMINAL
+                or result.get('quality') is not None and not isinstance(result['quality'], bool)
+                or not isinstance(result.get('evidence_complete'), bool)):
+            return {**result, 'status': 'unknown', 'quality': None,
+                    'evidence_complete': False, 'metadata_status': 'invalid',
+                    'busy': (spec.run_dir / '.execution').exists()}
+    busy = contained(spec.run_dir / '.execution', spec.run_root).exists()
+    execution_path = contained(spec.run_dir / 'execution.json', spec.run_root)
+    if execution_path.exists():
+        try:
+            record, complete = read_execution(spec)
+        except SourceMismatch:
+            raise
+        except (OSError, ValueError, TypeError, RecursionError) as exc:
+            return {**result, 'id': spec.id, 'status': 'unknown', 'quality': None,
+                    'evidence_complete': False, 'busy': busy, 'metadata_status': 'invalid',
+                    'execution_error': safe_error_record(exc)}
+        return project_execution(record, result, busy=busy, complete=complete)
+    # Existing result-only records stay readable without silently signing old attempts.
+    attempts = contained(spec.run_dir / 'attempts', spec.run_root)
+    unindexed = attempts.is_dir() and any(attempts.iterdir())
+    return {**result, 'id': spec.id,
+            'status': 'unknown' if busy or not result and unindexed else result.get('status', 'missing'),
+            'quality': result.get('quality'),
+            'scientific_status': result.get('status', 'missing'),
+            'evidence_complete': bool(result.get('evidence_complete') and not busy), 'busy': busy,
+            **({'execution_status': 'legacy_unindexed'} if unindexed else {})}
 
 
 def read_legacy(run_dir: Path | str) -> dict[str, Any]:
@@ -50,7 +71,7 @@ def aggregate(specs) -> dict[str, Any]:
             row = read_run(spec)
         except (OSError, ValueError) as exc:
             row = {'id': spec.id, 'status': 'invalid', 'evidence_complete': False,
-                   'error': {'type': type(exc).__name__, 'message': str(exc)}}
+                   'error': safe_error_record(exc)}
         group = spec.experiment
         run_key = (spec.source_digest, spec.version, spec.id)
         duplicate = run_key in seen or (group, spec.seed) in seeds
@@ -86,7 +107,7 @@ def aggregate(specs) -> dict[str, Any]:
 def logs(spec: RunSpec) -> str:
     validate_source(spec)
     folder = contained(spec.assets_dir / 'logs', spec.run_root)
-    paths = list(folder.glob('*.log')) if folder.is_dir() else []
+    paths = list(folder.glob('*.log')) + list(folder.glob('events*.jsonl')) if folder.is_dir() else []
     paths += list((spec.run_dir / 'attempts').glob('*/worker.log'))
     return '\n'.join(contained(p, spec.run_root).read_text(encoding='utf-8', errors='replace')
                      for p in sorted(paths) if p.is_file())
@@ -94,8 +115,11 @@ def logs(spec: RunSpec) -> str:
 
 def report(specs) -> str:
     body = aggregate(specs)
-    lines = ['| Run | Status | Evidence complete |', '| --- | --- | --- |']
-    lines += [f"| {r['id']} | {r['status']} | {r.get('evidence_complete', False)} |" for r in body['runs']]
+    lines = ['| Run | Execution | Scientific | Derived | Quality | Evidence complete |',
+             '| --- | --- | --- | --- | --- | --- |']
+    lines += [f"| {r['id']} | {r['status']} | {r.get('scientific_status', 'missing')} | "
+              f"{r.get('derived_status', 'not_run')} | {r.get('quality')} | {r.get('evidence_complete', False)} |"
+              for r in body['runs']]
     return '\n'.join(lines) + '\n'
 
 

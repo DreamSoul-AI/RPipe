@@ -164,19 +164,36 @@ def write_learning_curves(
 
 
 
-def export_tensorboard(study_dir: Path | str, destination: Path | str) -> Path:
+def export_tensorboard(study_dir: Path | str, destination: Path | str, *,
+                       run_ids: list[str] | tuple[str, ...] | None = None) -> Path:
     """Export one immutable JSONL trajectory snapshot, separately from formal results."""
     from urllib.parse import quote
     from rpipe.structure.readout import _jsonl_curve_series
-    from rpipe.structure.artifacts import kinds
+    from rpipe.structure.artifacts import contained, kinds
+    from rpipe.structure.contracts import validate_run_root
     RUNS_DIRNAME = "runs"
 
     study, dest = Path(study_dir).resolve(), Path(destination).resolve()
+    validate_run_root(Path(__file__).resolve().parent, dest)
     if dest.is_relative_to(study) or study.is_relative_to(dest):
         raise ValueError('TensorBoard destination must be separate from the Study')
+    selected = None
+    if run_ids is not None:
+        if (not isinstance(run_ids, (list, tuple)) or not run_ids
+                or any(not isinstance(name, str) or name in {'', '.', '..'}
+                       or any(char in name for char in '/\\\x00:*?"<>|') for name in run_ids)
+                or len(set(run_ids)) != len(run_ids)):
+            raise ValueError('TensorBoard selection requires distinct safe Run ids')
+        selected = set(run_ids)
     series = []
-    for path in sorted((study / RUNS_DIRNAME).glob(f'*/assets/{kinds.TRACKER_JSONL}')):
+    seen = set()
+    runs = contained(study / RUNS_DIRNAME, study)
+    for path in sorted(runs.glob(f'*/assets/{kinds.TRACKER_JSONL}')):
         run = path.parents[2].name
+        if selected is not None and run not in selected:
+            continue
+        path = contained(path, study)
+        seen.add(run)
         for split, names in _jsonl_curve_series(path).items():
             for name, row in names.items():
                 if row['unit'] == 'observation' or any(
@@ -185,6 +202,8 @@ def export_tensorboard(study_dir: Path | str, destination: Path | str) -> Path:
                     raise ValueError(f'{run}/{split}/{name}: TensorBoard needs integer optimizer_step/epoch; use JSONL plots for fractional or unknown coordinates')
                 tag = '/'.join((row['unit'], quote(split, safe=''), quote(name, safe='')))
                 series.append((run, tag, row))
+    if selected is not None and selected - seen:
+        raise ValueError('selected Run has no JSONL scalar trajectory')
     if not series:
         raise ValueError('no JSONL scalar trajectories to export')
     from torch.utils.tensorboard import SummaryWriter

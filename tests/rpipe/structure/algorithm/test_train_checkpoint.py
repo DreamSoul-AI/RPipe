@@ -197,7 +197,7 @@ def test_resume_rejects_changed_native_sampler_budget(tmp_path: Path):
         data = Data(
             name='toy',
             source='x',
-            loaders={},
+            loaders={'test': torch.utils.data.DataLoader(dataset, batch_size=4)},
             meta={'train_size': 32, 'batch_size': 4, 'seed': 0},
         )
         data._train_set = dataset
@@ -246,6 +246,9 @@ def test_resume_latest_skips_when_budget_already_done(tmp_path: Path):
     second, _ = _run(tmp_path, mapping)
     assert second['epochs'] == 1
     assert second['steps'] == first['steps']
+    assert first['resume_count'] == 0 and first['resume_path'] is None
+    assert second['resume_count'] == 1 and second['resume_path'] == 'latest'
+    assert second['resume_step'] == first['steps']
 
 
 def test_eval_algorithm_loads_best(tmp_path: Path):
@@ -284,6 +287,7 @@ def test_eval_algorithm_loads_best(tmp_path: Path):
     assert out['mode'] == 'eval'
     assert 'accuracy' in out
     assert out['resume_stem'] == 'best'
+    assert out['resume_count'] == 1 and out['resume_path'] == 'best'
 
 
 def test_eval_algorithm_missing_checkpoint_fails(tmp_path: Path):
@@ -337,6 +341,7 @@ def test_epoch_budget_stops_even_when_accumulation_drops_tail_batches(tmp_path):
 
         def iter_batches(self, split):
             if split != 'train':
+                yield torch.ones(2, 2), torch.zeros(2, dtype=torch.long)
                 return
             self.calls += 1
             assert self.calls <= 3, 'unbounded epoch loop'

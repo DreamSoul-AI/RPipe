@@ -9,7 +9,7 @@ import pytest
 
 pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
               pytest.mark.structure_layer, pytest.mark.module_algorithm,
-              pytest.mark.cost(cost_class='c2'), pytest.mark.result_type('categorical', detail='summary')]
+              pytest.mark.result_type('categorical', detail='summary')]
 
 
 def _equal(left, right):
@@ -63,19 +63,23 @@ def _recovery(tmp_path, unit, device, period, stop, eval_period=1, interrupt_ste
 
 
 @pytest.mark.parametrize('unit,period,stop', [('step', 1, 0), ('step', 2, 0), ('epoch', 1, 0), ('epoch', 2, 0), ('epoch-tail', 2, 0), ('step', 1, 3)])
+@pytest.mark.cost(cost_class='c2')
 def test_native_resume_matches_continuous_in_fresh_processes(tmp_path, unit, period, stop):
     _recovery(tmp_path, unit, 'cpu', period, stop)
 
 
 @pytest.mark.parametrize('eval_period,stop,interrupt_step', [(3, 0, 2), (1, 3, 4)])
+@pytest.mark.cost(cost_class='c2')
 def test_resume_retains_partial_metric_segment_and_terminal_early_stop(tmp_path, eval_period, stop, interrupt_step):
     _recovery(tmp_path, 'step', 'cpu', 1, stop, eval_period, interrupt_step)
 
 
+@pytest.mark.cost(cost_class='c2')
 def test_resume_at_last_batch_completes_epoch_without_losing_remaining_budget(tmp_path):
     _recovery(tmp_path, 'step', 'cpu', 2, 0, 2, 3, finite=True)
 
 
+@pytest.mark.cost(cost_class='c2')
 def test_custom_metric_runtime_is_not_marked_as_exact_resume(tmp_path):
     import torch
 
@@ -85,6 +89,7 @@ def test_custom_metric_runtime_is_not_marked_as_exact_resume(tmp_path):
 
 
 @pytest.mark.gpu
+@pytest.mark.cost(cost_class='c3')
 def test_cuda_resume_matches_continuous_in_fresh_processes(tmp_path):
     import torch
 
