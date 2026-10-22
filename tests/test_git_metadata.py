@@ -1,10 +1,15 @@
 """Local test manifests identify ordinary, packed and linked Git checkouts."""
 import shutil
 import subprocess
+import importlib.util
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import conftest as records
+
+_spec = importlib.util.spec_from_file_location('rpipe_test_recorder', Path(__file__).with_name('conftest.py'))
+records = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(records)
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.cost(cost_class='c2'),
@@ -19,7 +24,7 @@ def test_manifest_git_sha_handles_real_git_layouts(tmp_path, monkeypatch, layout
     hooks.mkdir()
     def git(*args):
         return subprocess.check_output(
-            ['git', '-c', f'core.hooksPath={hooks}', '-c', 'commit.gpgsign=false',
+            ['git', '-c', f'safe.directory={repo}', '-c', f'core.hooksPath={hooks}', '-c', 'commit.gpgsign=false',
              '-c', 'user.name=metadata-test', '-c', 'user.email=metadata@example.invalid', *args],
             cwd=repo if repo.exists() else tmp_path, text=True, stderr=subprocess.PIPE).strip()
     git('init', '--quiet', str(repo))

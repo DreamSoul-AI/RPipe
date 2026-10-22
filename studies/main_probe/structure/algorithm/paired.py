@@ -39,19 +39,16 @@ def sha(path: Path) -> str:
 
 
 def save_json(path: Path, body: Any) -> None:
-    from rpipe.structure.api.artifact_api import atomic_write_text
+    from rpipe.structure.artifacts import atomic_write_text
 
     atomic_write_text(path, json.dumps(body, ensure_ascii=False, indent=2) + '\n')
 
 
 def source_manifest() -> dict[str, str]:
-    from rpipe.structure.api.artifact_api import source_files
-    from rpipe.structure.api.make_api import load_study_yaml
+    from rpipe.api import source_digest
 
     study = Path(__file__).resolve().parents[2]
-    # Reuse the canonical source contract: generated Run archives are artifacts.
-    # Their byte integrity is independently checked by MainArchive.verify_exports.
-    return source_files(study, load_study_yaml(study))
+    return {'source_digest': source_digest(study)}
 
 
 @contextlib.contextmanager
@@ -73,7 +70,7 @@ class MainArchive:
         self.original_root = workspace / 'original'
         self.archive = workspace / 'source-main-98648f3'
         manifest = []
-        for entry in subprocess.check_output(['git', 'ls-tree', '--full-tree', '-r', '-z', MAIN], cwd=ROOT).split(b'\0'):
+        for entry in subprocess.check_output(['git', '-c', 'safe.directory=' + str(ROOT), 'ls-tree', '--full-tree', '-r', '-z', MAIN], cwd=ROOT).split(b'\0'):
             if not entry:
                 continue
             attributes, filename = entry.split(b'\t', 1)
@@ -81,7 +78,7 @@ class MainArchive:
             if kind != 'blob':
                 continue
             name = filename.decode('utf-8')
-            payload = subprocess.check_output(['git', 'cat-file', 'blob', blob], cwd=ROOT)
+            payload = subprocess.check_output(['git', '-c', 'safe.directory=' + str(ROOT), 'cat-file', 'blob', blob], cwd=ROOT)
             target = self.archive / name
             if target.exists():
                 if target.read_bytes() != payload:
@@ -173,14 +170,14 @@ class MainArchive:
 
 
 def runtime_config(device: str) -> Any:
-    from rpipe.structure.api.system_api import SystemConfig
+    from rpipe.structure.contracts import SystemConfig
     return SystemConfig.from_mapping({'device': device, 'deterministic': True,
                                      'cudnn_benchmark': False, 'cudnn_deterministic': True,
                                      'cudnn_allow_tf32': False, 'matmul_allow_tf32': False})
 
 
 def seed_runtime(device: str) -> Any:
-    from rpipe.structure.api.system_api import apply_runtime
+    from rpipe.payloads.runtime import apply_runtime
     config = runtime_config(device)
     apply_runtime(SEED, config)
     return config
@@ -301,16 +298,16 @@ class Observations:
 
 
 def native_data(workspace: Path, name: str, assets: Path) -> Any:
-    from rpipe.structure.api.data_api import DataConfig
-    from rpipe.structure.api.data_api import DataFactory
+    from rpipe.structure.contracts import DataConfig
+    from rpipe.payloads.data import DataFactory
     return DataFactory.build(DataConfig.from_mapping({'name': name, 'source': 'torch', 'config': {
         'batch_size': 250, 'test_batch_ratio': 4, 'pin_memory': True, 'num_workers': 0, 'augment': True}}),
         workspace / 'native-data', seed=SEED, origin='foreign')
 
 
 def native_model(data: Any, name: str, assets: Path) -> Any:
-    from rpipe.structure.api.model_api import ModelConfig
-    from rpipe.structure.api.model_api import ModelFactory
+    from rpipe.structure.contracts import ModelConfig
+    from rpipe.payloads.models import ModelFactory
     return ModelFactory.build(ModelConfig.from_mapping({'name': name, 'source': 'custom_torch'}),
                               assets, data_meta=data.meta)
 
@@ -362,11 +359,11 @@ def mapping() -> dict[str, Any]:
 def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[Any, Any, Any, Any, Any]) -> dict[str, Any]:
     bootstrap()
     import torch
-    from rpipe.structure.api.algorithm_api import AlgorithmConfig
-    from rpipe.structure.api.algorithm_api import TrainAlgorithm
-    from rpipe.structure.api.algorithm_api import EvalAlgorithm
-    from rpipe.structure.api.algorithm_api import AlgorithmTracker
-    from rpipe.structure.api.system_api import SystemFactory
+    from rpipe.structure.contracts import AlgorithmConfig
+    from rpipe.payloads.train import TrainAlgorithm
+    from rpipe.payloads.evaluation import EvalAlgorithm
+    from rpipe.payloads.tracker import AlgorithmTracker
+    from rpipe.payloads.checkpoints import SystemFactory
     prepared = json.loads((workspace / 'PREPARED.json').read_text(encoding='utf-8'))
     if prepared.get('passed') is not True:
         raise ValueError('CPU preparation must pass before training')
@@ -380,7 +377,7 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
     if len(pairs) != len(set(pairs)) or any(name not in DATA or model not in MODELS for name, model in pairs):
         raise ValueError('combinations must contain unique supported data/model pairs')
     result: dict[str, Any] = {'started_at_utc': datetime.now(timezone.utc).isoformat(), 'main_commit': MAIN,
-        'dev_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'device': device, 'torch': torch.__version__, 'seed': 0,
+        'dev_commit': subprocess.check_output(['git', '-c', 'safe.directory=' + str(ROOT), 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'device': device, 'torch': torch.__version__, 'seed': 0,
         'expected_combinations': pairs, 'full_eight_combination_matrix_selected': len(pairs) == 8,
         'scope': 'full_matrix' if len(pairs) == 8 else 'diagnostic_subset',
         'recipe': mapping(), 'control_changed_from_main_default': ['deterministic=true', 'benchmark=false', 'CUBLAS_WORKSPACE_CONFIG=:4096:8', 'cudnn_allow_tf32=false', 'matmul_allow_tf32=false'],

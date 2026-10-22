@@ -1,7 +1,6 @@
 """Manual historical/current stage calibration, invoked by recipe.py, not a hook."""
 from __future__ import annotations
 
-from rpipe.structure.api.artifact_api import shared_paths
 
 import argparse
 import hashlib
@@ -39,20 +38,22 @@ def correct_samples(accuracy, count):
 
 
 def main(recipe, argv):
-    from rpipe.structure.api.artifact_api import atomic_write_text
+    from rpipe.structure.artifacts import atomic_write_text
 
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--run-root', type=Path, required=True)
     parser.add_argument('--data', choices=['MNIST', 'CIFAR10'], default='CIFAR10')
     parser.add_argument('--model', choices=['cnn', 'resnet18'], required=True)
     parser.add_argument('--steps', type=int, default=800)
     parser.add_argument('--order', choices=['old-first', 'current-first'], default='old-first')
     args = parser.parse_args(argv)
+    args.run_root = recipe.external_root(args.run_root)
     expected = json.loads((recipe.STUDY / 'docs/EXPECTED_DATA.json').read_text(encoding='utf-8'))
     raw_hashes = {}
     for name, sha in expected.items():
         name = name.replace('\\', '/')
         if name.startswith('data/' + args.data + '/'):
-            path = recipe.STUDY / 'shared' / name
+            path = args.run_root / 'shared' / name
             if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != sha:
                 parser.error(f'missing or changed raw data: {path}')
             raw_hashes[name] = sha
@@ -64,16 +65,16 @@ def main(recipe, argv):
     recipe.bootstrap()
     os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
     import torch
-    from rpipe.structure.api.algorithm_api import AlgorithmConfig
-    from rpipe.structure.api.algorithm_api import TrainAlgorithm
-    from rpipe.structure.api.algorithm_api import AlgorithmTracker
-    from rpipe.structure.api.data_api import DataConfig
-    from rpipe.structure.api.data_api import DataFactory
-    from rpipe.structure.api.model_api import ModelConfig
-    from rpipe.structure.api.model_api import ModelFactory
-    from rpipe.structure.api.system_api import SystemConfig
-    from rpipe.structure.api.system_api import SystemFactory
-    from rpipe.structure.api.system_api import apply_runtime
+    from rpipe.structure.contracts import AlgorithmConfig
+    from rpipe.payloads.train import TrainAlgorithm
+    from rpipe.payloads.tracker import AlgorithmTracker
+    from rpipe.structure.contracts import DataConfig
+    from rpipe.payloads.data import DataFactory
+    from rpipe.structure.contracts import ModelConfig
+    from rpipe.payloads.models import ModelFactory
+    from rpipe.structure.contracts import SystemConfig
+    from rpipe.payloads.checkpoints import SystemFactory
+    from rpipe.payloads.runtime import apply_runtime
 
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
@@ -81,14 +82,14 @@ def main(recipe, argv):
         'cudnn_deterministic': True, 'cudnn_benchmark': False,
         'cudnn_allow_tf32': False, 'matmul_allow_tf32': False})
     ident = 'speed-' + time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8]
-    output = recipe.REPO / '.tmp' / ident
-    output.mkdir()
-    archive = recipe.install(shared_paths(recipe.STUDY)['data'], 0)
+    output = args.run_root / 'validation' / ident
+    output.mkdir(parents=True, exist_ok=False)
+    archive = recipe.install(args.run_root / 'shared' / 'data', 0, archive_root=output / 'source-4ccb28d')
     report = {'measurement_id': ident, 'historical_commit': recipe.COMMIT,
-        'current_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=recipe.REPO, text=True).strip(),
+        'current_commit': subprocess.check_output(['git', '-c', 'safe.directory=' + str(recipe.REPO), 'rev-parse', 'HEAD'], cwd=recipe.REPO, text=True).strip(),
         'script_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         'recipe_sha256': hashlib.sha256(Path(recipe.__file__).read_bytes()).hexdigest(),
-        'data_manifest_sha256': hashlib.sha256((recipe.STUDY / 'docs/DATA_MANIFEST.json').read_bytes()).hexdigest(),
+        'data_manifest_sha256': hashlib.sha256((args.run_root / 'shared' / 'DATA_MANIFEST.json').read_bytes()).hexdigest(),
         'torch': torch.__version__, 'device': torch.cuda.get_device_name(),
         'data': args.data, 'raw_sha256': raw_hashes, 'model': args.model, 'seed': 0, 'steps': args.steps,
         'sampler_scheduler_steps': 80000, 'batch': 250, 'test_size': 10000,
@@ -97,9 +98,7 @@ def main(recipe, argv):
         'scope': 'serial real train/test/checkpoint; first segment warmup; no probe input hashing or snapshots',
         'memory_scope': 'cumulative PyTorch peaks from setup through each phase; excludes context/driver/other processes',
         'output_dir_local_only': str(output), 'sides': {}}
-    from rpipe.structure.api.artifact_api import source_files
-    from rpipe.structure.api.make_api import load_study_yaml
-    report['source_hashes'] = source_files(recipe.STUDY, load_study_yaml(recipe.STUDY))
+    report['source_hashes'] = recipe.source_manifest()
 
     def sync():
         torch.cuda.synchronize()
@@ -125,7 +124,7 @@ def main(recipe, argv):
         apply_runtime(0, controls)
         torch.cuda.reset_peak_memory_stats()
         start = time.perf_counter()
-        datasets = archive.datasets(shared_paths(recipe.STUDY)['data'], args.data)
+        datasets = archive.datasets(args.run_root / 'shared' / 'data', args.data)
         module = archive.model.make_model(args.model).to('cuda')
         initial = recipe._state_cpu(module)
         optimizer = archive.model.make_optimizer(module.parameters(), args.model)
@@ -229,10 +228,10 @@ def main(recipe, argv):
             'old_correct_samples': correct_samples(left['test']['test/Accuracy'], report['test_size']),
             'current_correct_samples': correct_samples(right['test']['test/Accuracy'], report['test_size'])})
     report['numeric_segments'] = diffs
-    report['source_unchanged'] = report['source_hashes'] == source_files(recipe.STUDY, load_study_yaml(recipe.STUDY))
+    report['source_unchanged'] = report['source_hashes'] == recipe.source_manifest()
     report['passed'] = report['source_unchanged'] and report['initial_state']['exact'] and report['final_state']['within_gate'] and all(
         d['loss_absolute_difference'] <= 1e-6 and d['old_correct_samples'] == d['current_correct_samples'] for d in diffs)
-    target = recipe.STUDY / 'docs/speed_measurements' / (ident + '.json')
+    target = output / 'REPORT.json'
     target.parent.mkdir(exist_ok=True)
     atomic_write_text(target, json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(json.dumps({'report': str(target), 'passed': report['passed']}, ensure_ascii=False), flush=True)

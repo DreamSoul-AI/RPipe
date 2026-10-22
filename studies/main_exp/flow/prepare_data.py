@@ -26,7 +26,7 @@ import tarfile
 import urllib.request
 from urllib.parse import urlsplit
 
-from rpipe.structure.api.system_api import domestic_endpoint
+from rpipe.payloads.origin import domestic_endpoint
 
 
 STUDY = Path(__file__).resolve().parents[1]
@@ -126,7 +126,7 @@ def download(url: str, destination: Path, md5: str) -> dict[str, str]:
 
 
 def reuse_caches(data_root: Path, expected: dict[str, str], cache_roots: list[Path]) -> dict[str, str]:
-    from rpipe.structure.api.artifact_api import link_input
+    from rpipe.structure.artifacts import link_input
     copied = {}
     for relative, expected_hash in expected.items():
         destination = data_root / relative
@@ -231,21 +231,26 @@ def split_counts(data_root: Path) -> dict[str, dict[str, int]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from rpipe.structure.api.artifact_api import atomic_write_text
+    from rpipe.structure.artifacts import atomic_write_text
 
-    from rpipe.structure.api.artifact_api import cache_lock, shared_paths
+    from rpipe.structure.artifacts import cache_lock
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--data-root', type=Path, default=shared_paths(STUDY)['data'])
-    parser.add_argument('--manifest', type=Path, default=STUDY / 'docs' / 'DATA_MANIFEST.json')
+    parser.add_argument('--data-root', type=Path, required=True)
+    parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--expected-manifest', type=Path,
                         default=STUDY / 'docs' / 'EXPECTED_DATA.json')
     parser.add_argument('--cache-root', type=Path, action='append', default=[])
     parser.add_argument('--verify-only', action='store_true', help='validate complete raw files without downloads')
+    parser.add_argument('--download', action='store_true', help='explicitly allow missing raw files to be downloaded')
     args = parser.parse_args(argv)
     data_root = args.data_root.resolve()
+    checkout = STUDY.parents[1]
+    if any(path.is_relative_to(checkout) or checkout.is_relative_to(path)
+           for path in (data_root, args.manifest.resolve())):
+        parser.error('data and manifest output roots must be separate from the source checkout')
     expected = expected_files(args.expected_manifest)
     reused, downloads = {}, []
-    if not args.verify_only:
+    if args.download and not args.verify_only:
         with cache_lock(data_root):
             reused = reuse_caches(data_root, expected, args.cache_root)
             downloads = prepare_mnist(data_root, expected) + prepare_cifar(data_root, expected)

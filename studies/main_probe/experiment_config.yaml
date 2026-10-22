@@ -1,4 +1,4 @@
-version: main-probe-v030-20261013-final
+version: main-probe-rpipe-refactor-20261021
 data:
   source: main_probe
   config:
@@ -45,3 +45,5 @@ model:
   name: linear
 experiment: main_probe
 description: Paired original/current probe, one data/model combination
+
+historical_version: main-probe-v030-20261013-final

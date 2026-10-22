@@ -20,13 +20,12 @@ SOURCE = 'historical_4ccb28d'
 HORIZON = 80000
 DATA_NAMES = ('MNIST', 'CIFAR10')
 MODEL_NAMES = ('linear', 'mlp', 'cnn', 'resnet18')
-ARCHIVE_ROOT = REPO / '.tmp' / 'historical-source-4ccb28d'
-_ARCHIVE: Any = None
+_ARCHIVES: dict[Path, Any] = {}
 
 
 def bootstrap() -> None:
-    """Load the repository and temporary dependencies without shell env setup."""
-    for path in (REPO / 'src', REPO / '.tmp' / 'runtime'):
+    """Load the source package and initialize the selected scientific runtime."""
+    for path in (REPO / 'src',):
         value = str(path)
         if value not in sys.path:
             sys.path.insert(0, value)
@@ -34,12 +33,15 @@ def bootstrap() -> None:
     import numpy  # noqa: F401
 
 
-def export_source() -> dict[str, Any]:
+def export_source(archive_root: Path) -> dict[str, Any]:
     """Export tracked blobs, refusing to overwrite a different existing file."""
-    from rpipe.structure.api.artifact_api import atomic_write_text
+    archive_root = Path(archive_root).resolve()
+    if archive_root.is_relative_to(REPO) or REPO.is_relative_to(archive_root):
+        raise ValueError('archive output must be separate from the source checkout')
+    from rpipe.structure.artifacts import atomic_write_text
 
     tree = subprocess.check_output(
-        ['git', 'ls-tree', '--full-tree', '-r', '-z', COMMIT], cwd=REPO
+        ['git', '-c', 'safe.directory=' + str(REPO), 'ls-tree', '--full-tree', '-r', '-z', COMMIT], cwd=REPO
     )
     blobs = []
     for entry in tree.split(b'\0'):
@@ -53,7 +55,7 @@ def export_source() -> dict[str, Any]:
     # Windows process creation dominated archive preparation when every blob
     # used its own cat-file process. Git's batch protocol preserves raw bytes.
     request = ''.join(oid + '\n' for _, oid in blobs).encode('ascii')
-    stream = subprocess.check_output(['git', 'cat-file', '--batch'], input=request, cwd=REPO)
+    stream = subprocess.check_output(['git', '-c', 'safe.directory=' + str(REPO), 'cat-file', '--batch'], input=request, cwd=REPO)
     offset = 0
     rows = []
     for name, oid in blobs:
@@ -72,7 +74,7 @@ def export_source() -> dict[str, Any]:
         if len(payload) != size or stream[offset:offset + 1] != b'\n':
             raise ValueError(f'truncated Git batch blob for {name}')
         offset += 1
-        target = ARCHIVE_ROOT / name
+        target = archive_root / name
         if target.exists():
             if target.read_bytes() != payload:
                 raise ValueError(f'archived source differs from Git: {target}')
@@ -93,8 +95,8 @@ def export_source() -> dict[str, Any]:
                      'sha256': hashlib.sha256(payload).hexdigest(), 'bytes': len(payload)})
     if offset != len(stream):
         raise ValueError('unexpected trailing Git batch output')
-    manifest = {'commit': COMMIT, 'root': str(ARCHIVE_ROOT), 'files': rows}
-    atomic_write_text(ARCHIVE_ROOT / 'SOURCE_MANIFEST.json', json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    manifest = {'commit': COMMIT, 'root': str(archive_root), 'files': rows}
+    atomic_write_text(archive_root / 'SOURCE_MANIFEST.json', json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     return manifest
 
 
@@ -111,12 +113,13 @@ def _working_directory(directory: Path):
 class Archive:
     """Keep old top-level imports out of the process's normal module namespace."""
 
-    def __init__(self) -> None:
+    def __init__(self, archive_root: Path) -> None:
+        self.archive_root = Path(archive_root)
         bootstrap()
         import torch
 
         benchmark = torch.backends.cudnn.benchmark
-        self.manifest = export_source()
+        self.manifest = export_source(self.archive_root)
         roots = ('config', 'module', 'dataset', 'model', 'metric', 'train_model')
         is_old = lambda name: any(name == root or name.startswith(root + '.') for root in roots)
         saved = {name: value for name, value in sys.modules.items() if is_old(name)}
@@ -124,9 +127,9 @@ class Archive:
             del sys.modules[name]
         old_argv, old_path = sys.argv, list(sys.path)
         try:
-            sys.path.insert(0, str(ARCHIVE_ROOT / 'src'))
+            sys.path.insert(0, str(self.archive_root / 'src'))
             sys.argv = ['train_model.py']
-            with _working_directory(ARCHIVE_ROOT / 'src'):
+            with _working_directory(self.archive_root / 'src'):
                 self.config = importlib.import_module('config')
                 self.module = importlib.import_module('module')
                 self.dataset = importlib.import_module('dataset')
@@ -170,11 +173,11 @@ class Archive:
         return datasets(self, data_root, data_name)
 
 
-def load_archive() -> Archive:
-    global _ARCHIVE
-    if _ARCHIVE is None:
-        _ARCHIVE = Archive()
-    return _ARCHIVE
+def load_archive(archive_root: Path | str) -> Archive:
+    root = Path(archive_root).resolve()
+    if root not in _ARCHIVES:
+        _ARCHIVES[root] = Archive(root)
+    return _ARCHIVES[root]
 
 
 class Observation:

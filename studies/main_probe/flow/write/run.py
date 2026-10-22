@@ -10,16 +10,17 @@ from pathlib import Path
 def write_observed_run(root, *, snapshots, best, data, model, implementation):
     import json
     import torch
-    from rpipe.structure.api.artifact_api import artifact_layout, write_config, write_result
-    from rpipe.structure.api.artifact_api import atomic_write_text
+    from types import SimpleNamespace
+    from rpipe.structure.artifacts import write_config, write_json as write_result
+    from rpipe.structure.artifacts import atomic_write_text
 
     root = Path(root)
     if root.parent.name != 'runs':
         raise ValueError('observed Run must be under a runs directory')
     if root.exists():
         raise FileExistsError(f'preserve existing probe Run: {root}')
-    layout = artifact_layout(root.parent.parent, root.name)
-    layout.ensure()
+    layout = SimpleNamespace(config_path=root / 'config.yaml', assets_dir=root / 'assets', result_path=root / 'result.json')
+    layout.assets_dir.mkdir(parents=True)
     config = {'id': root.name, 'seed': 0, 'data': {'name': data}, 'model': {'name': model},
               'algorithm': {'mode': 'train', 'num_steps': 60},
               'description': f'observed {implementation} probe; normalized state key prefixes'}
@@ -50,7 +51,7 @@ def write_observed_run(root, *, snapshots, best, data, model, implementation):
 def run(ctx):
     """Write observed artifacts and validate them before the outer result commits."""
     import torch
-    from rpipe.structure.api.artifact_api import compare_runs, write_compare
+    from rpipe.api import compare_runs, write_compare
     from ...structure.algorithm.paired import save_json
 
     workspace = ctx.state['algorithm'].workspace
