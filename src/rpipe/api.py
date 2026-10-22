@@ -104,7 +104,7 @@ def process(specs) -> dict:
 
 def compare_runs(*args, study_dir=None, **kwargs):
     """Explicit scientific directory/checkpoint comparison; may load trusted tensors."""
-    from .payloads.comparison import compare_runs as compare_files
+    from .structure.comparison import compare_runs as compare_files
     if study_dir is not None:
         from .flow.study import _recipe_pickle_module
         kwargs['checkpoint_reader'] = _recipe_pickle_module(study_dir)
@@ -112,5 +112,5 @@ def compare_runs(*args, study_dir=None, **kwargs):
 
 
 def write_compare(path, body):
-    from .payloads.comparison import write_compare as write_comparison
+    from .structure.comparison import write_compare as write_comparison
     return write_comparison(path, body)

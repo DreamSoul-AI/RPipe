@@ -13,7 +13,7 @@ import uuid
 from rpipe.structure.contracts import AdmissionError, Budget, Cancellation, RunSpec, SourceMismatch, control_from_config
 from rpipe.structure.artifacts import ArtifactLayout, identity, load_config, read_json, write_json
 from rpipe.structure.execution import Cancelled, error_record, execute
-from rpipe.structure.payload import PayloadContext
+from rpipe.structure.execution import RunContext
 
 from .stages import pipeline
 from .study import RecipeContext, apply_recipe, _recipe_pickle_module, run_study_phase
@@ -42,7 +42,7 @@ class WorkerFailure(Exception):
         super().__init__(record.get('message', 'scientific worker failed'))
 
 
-class ProcessPayload:
+class ProcessRun:
     """Default science runs in an owned child, never on a read/plan import."""
 
     def __init__(self, spec, budget):
@@ -161,7 +161,7 @@ def run(spec, *, payload=None, budget=None, cancellation=None):
     budget = budget or Budget()
     budget.validate()
     if payload is None:
-        payload = ProcessPayload(spec, budget)
+        payload = ProcessRun(spec, budget)
         def ready(ctx):
             configure(ctx)
             ctx.state['budget'] = budget
@@ -177,15 +177,15 @@ def worker(request: Path, output: Path) -> int:
     ctx, payload = None, None
     try:
         spec = RunSpec(**body['spec'])
-        ctx = PayloadContext(spec=spec, cancellation=Cancellation(), layout=ArtifactLayout(spec))
+        ctx = RunContext(spec=spec, cancellation=Cancellation(), layout=ArtifactLayout(spec))
         configure(ctx)
         # Imports become scientific execution, outside the read/plan path.
         if ctx.config.get('algorithm', {}).get('source') == 'transformers_trainer':
-            from rpipe.payloads.huggingface import HuggingFacePayload
-            payload = HuggingFacePayload()
+            from rpipe.flow.huggingface import HuggingFaceRun
+            payload = HuggingFaceRun()
         else:
-            from rpipe.payloads.native import NativePayload
-            payload = NativePayload()
+            from rpipe.flow.native import NativeRun
+            payload = NativeRun()
         result = pipeline(payload, ctx)
     except BaseException as exc:
         primary = error_record(exc)

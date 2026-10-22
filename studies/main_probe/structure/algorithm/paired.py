@@ -177,7 +177,7 @@ def runtime_config(device: str) -> Any:
 
 
 def seed_runtime(device: str) -> Any:
-    from rpipe.payloads.runtime import apply_runtime
+    from rpipe.structure.system.runtime import apply_runtime
     config = runtime_config(device)
     apply_runtime(SEED, config)
     return config
@@ -299,7 +299,7 @@ class Observations:
 
 def native_data(workspace: Path, name: str, assets: Path) -> Any:
     from rpipe.structure.contracts import DataConfig
-    from rpipe.payloads.data import DataFactory
+    from rpipe.structure.data.factory import DataFactory
     return DataFactory.build(DataConfig.from_mapping({'name': name, 'source': 'torch', 'config': {
         'batch_size': 250, 'test_batch_ratio': 4, 'pin_memory': True, 'num_workers': 0, 'augment': True}}),
         workspace / 'native-data', seed=SEED, origin='foreign')
@@ -307,7 +307,7 @@ def native_data(workspace: Path, name: str, assets: Path) -> Any:
 
 def native_model(data: Any, name: str, assets: Path) -> Any:
     from rpipe.structure.contracts import ModelConfig
-    from rpipe.payloads.models import ModelFactory
+    from rpipe.structure.model.factory import ModelFactory
     return ModelFactory.build(ModelConfig.from_mapping({'name': name, 'source': 'custom_torch'}),
                               assets, data_meta=data.meta)
 
@@ -360,10 +360,10 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
     bootstrap()
     import torch
     from rpipe.structure.contracts import AlgorithmConfig
-    from rpipe.payloads.train import TrainAlgorithm
-    from rpipe.payloads.evaluation import EvalAlgorithm
-    from rpipe.payloads.tracker import AlgorithmTracker
-    from rpipe.payloads.checkpoints import SystemFactory
+    from rpipe.structure.algorithm.train import TrainAlgorithm
+    from rpipe.structure.algorithm.evaluation import EvalAlgorithm
+    from rpipe.structure.algorithm.tracker import AlgorithmTracker
+    from rpipe.structure.system.factory import SystemFactory
     prepared = json.loads((workspace / 'PREPARED.json').read_text(encoding='utf-8'))
     if prepared.get('passed') is not True:
         raise ValueError('CPU preparation must pass before training')

@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from pathlib import Path, PureWindowsPath
 from threading import Event
 from types import MappingProxyType
-from typing import Protocol
 
 import hashlib
 import json
@@ -453,10 +452,3 @@ class RunOutcome:
     error: dict[str, Any] | None = None
     cleanup_errors: tuple[dict[str, Any], ...] = ()
     cancelled: bool = False
-
-
-class Payload(Protocol):
-    def prepare(self, ctx: Any) -> None: ...
-    def execute(self, ctx: Any) -> None: ...
-    def collect(self, ctx: Any) -> dict[str, Any]: ...
-    def close(self, ctx: Any) -> None: ...

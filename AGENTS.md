@@ -45,6 +45,7 @@
 ## 四、实施与验证
 
 - 先复用现有实现或标准库，改动对应真实调用方、外部输入与失败路径。不为假设需求增加抽象、空目录和辅助框架
+- RPipe实现只分structure和flow两柱。data/model/algorithm/system等组件归structure，阶段装配与执行顺序归flow；不得新增平级payloads或在structure内另藏同名大包。包根只保留公开入口与版本信息
 - 宿主科学包保持领域公共结构，只有Study采用RPipe声明与薄适配。六阶段默认实现直接复用，实际有不同职责才增加hook
 - 测试镜像本仓源码，通过标签表达unit/integration/e2e、location/content/physical、成本、结果类型与重要性。只测本仓合同和失败路径，不复制别仓内部测试与脚本
 - 每个测试进程使用独立临时目录，不把真实数据/旧Run当清理fixture。数值对照逐项写明数据、模型/规模、设备、精度、依赖、seed和来源，不用退出成功、通过数或seed相同替代科学判断

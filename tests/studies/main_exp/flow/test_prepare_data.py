@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from rpipe.payloads.origin import domestic_endpoint
+from rpipe.structure.system.origin import domestic_endpoint
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.flow_layer, pytest.mark.module_data,

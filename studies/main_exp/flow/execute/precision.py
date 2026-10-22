@@ -84,16 +84,16 @@ def _worker(recipe, args):
 
     import torch
     from rpipe.structure.contracts import AlgorithmConfig
-    from rpipe.payloads.evaluation import EvalAlgorithm
-    from rpipe.payloads.metrics import MetricBundle
-    from rpipe.payloads.tracker import AlgorithmTracker
+    from rpipe.structure.algorithm.evaluation import EvalAlgorithm
+    from rpipe.structure.algorithm.metrics import MetricBundle
+    from rpipe.structure.algorithm.tracker import AlgorithmTracker
     from rpipe.structure.contracts import DataConfig
-    from rpipe.payloads.data import DataFactory
+    from rpipe.structure.data.factory import DataFactory
     from rpipe.structure.contracts import ModelConfig
-    from rpipe.payloads.models import ModelFactory
+    from rpipe.structure.model.factory import ModelFactory
     from rpipe.structure.contracts import SystemConfig
-    from rpipe.payloads.checkpoints import SystemFactory
-    from rpipe.payloads.runtime import apply_runtime
+    from rpipe.structure.system.factory import SystemFactory
+    from rpipe.structure.system.runtime import apply_runtime
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
     recipe.install(args.run_root / 'shared' / 'data', 0, archive_root=args.output / 'source-4ccb28d')

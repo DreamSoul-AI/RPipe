@@ -85,7 +85,6 @@ markers = [
   "module_plan: pure declaration planning",
   "module_execution: execution ownership and lifecycle",
   "module_readout: read-only evidence and aggregation",
-  "module_payload: selected scientific payload lifecycle",
   "runtime: runtime budget",
   "memory: memory budget",
   "gpu: requires a real GPU",

@@ -72,8 +72,8 @@ def tensor_study(source_study):
         'model: {name: linear, source: custom_torch}\n'
         'algorithm: {source: custom_torch, num_steps: 2, lr: 0.05, save_best: true, '
         'eval_period: 1, checkpoint: latest}\nsystem: {device: cpu, deterministic: true}\n', encoding='utf-8')
-    (source_study / 'recipe.py').write_text('''from rpipe.payloads.data import Data, DataRegistry
-from rpipe.payloads.runtime import make_generator
+    (source_study / 'recipe.py').write_text('''from rpipe.structure.data.factory import Data, DataRegistry
+from rpipe.structure.system.runtime import make_generator
 
 def register(ctx):
     def build(config, assets, seed=None):

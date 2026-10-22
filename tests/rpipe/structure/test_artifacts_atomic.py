@@ -417,8 +417,8 @@ def test_owned_stream_retains_original_enter_value_and_exit_suppression(suppress
 @pytest.mark.parametrize('writer', ['atomic', 'logger', 'tracker-start', 'tracker-append'])
 def test_owned_writers_keep_raw_handle_without_entering_proxy(tmp_path, monkeypatch, writer):
     """Write ownership uses close only; proxy context entry may select another object."""
-    from rpipe.payloads.tracker import AlgorithmTracker
-    from rpipe.payloads.logger import Logger
+    from rpipe.structure.algorithm.tracker import AlgorithmTracker
+    from rpipe.structure.system.logger import Logger
     from rpipe.structure.artifacts import atomic_write_text
     logger, tracker = Logger(tmp_path / 'log'), AlgorithmTracker(tmp_path / 'tracker')
     tracker.append('train', values={'Loss': 2.0})

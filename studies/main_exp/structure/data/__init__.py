@@ -7,7 +7,7 @@ from ..api import COMMIT, SOURCE, DATA_NAMES, Observation
 def register(archive, data_root, *, seed, sampler_steps):
     import numpy as np
     import torch
-    from rpipe.payloads.data import Data, DataRegistry
+    from rpipe.structure.data.factory import Data, DataRegistry
 
     register_seed = int(seed)
 
