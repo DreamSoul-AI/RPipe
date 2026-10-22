@@ -1,3 +1,19 @@
+## 2026-10-22 分支与 worktree 清理
+
+按本次人工授权盘点并清理已合分支。最新清理基线为 `origin/dev` 的 `3c1d5a745ef5883b8ef5e3bb23945bdc556b4e1e`（PR #225/#226）；后续从此基线累计合入 dev 的 PR。该实际 dev 提交的 Unit Tests / Package Check 均成功。本次不切换当前工作分支，不更新本地 dev/main，不提交、推送代码或合并 PR。
+
+| **对象** | **核验与处理** |
+| --- | --- |
+| `codex/structure-artifacts` | 保留本地及远端，HEAD `e45e96c`。相对最新 dev 落后 39 个、独有 5 个提交；`git cherry` 均为未匹配补丁。`9dd7d2b` 的模型快照返回简化在新路径 `src/rpipe/payloads/models.py` 中仍未实施；另外 4 个提交保留 PR222 验收、剩余提案与停止自动任务的交接事实。旧路径及提案不能直接当作最新架构方案实施。 |
+| `codex/debt-test-evidence` (`7bbfe8b`) | 已为 dev 祖先；PR #223 合入后被 #224 回退，不重新应用其行为。删除本地及远端分支；技术债 worktree 转为原提交的 detached HEAD，完整保留 `.tmp/` 的原始失败、测试与 CI 证据。 |
+| `codex/docs-architecture-rpipe-20261021` (`538a2b9`) | 已为 dev 祖先，PR #225 已合；删除本地及远端分支。 |
+| `codex/refactor-rpipe-20261021` (`66f03a4`) | 已为 dev 祖先，PR #226 已合；删除本地及远端分支。重构 worktree 有忽略内容，自动审批拒绝递归移除，改为原提交的 detached HEAD，完整保留目录。 |
+| `revert/pr-223` (`9e34276`) | 已为 dev 祖先，PR #224 已合，最终 head 的三项 CI 成功；删除本地及远端分支，移除无未提交、未跟踪及忽略文件的临时 worktree。 |
+
+已核对三个附属 worktree 的已跟踪及未跟踪状态均干净，检查时未发现 Python/pytest/uv 进程；删除远端分支前再次核对远端 SHA 未变化。使用普通 `git branch -d`，未 force push、未删 Run/数据/结果/provenance；两个保留目录仍登记为 detached worktree。远端剩余 `main`、`dev`、`codex/structure-artifacts`。本地 dev 落后 origin/dev 708 个提交，main 落后 origin/main 142 个提交，本次不自动推进。
+
+本次只做仓库维护与记录，未运行代码测试；本条记录留在当前分支工作区，尚未提交。下方 2026-10-18 及以前内容为原始历史记录。
+
 > 当前（2026-10-18 01:11）：wrap-up收口；此前无待提交tracked改动，新增交接说明按主题提交并仅推codex/structure-artifacts。
 > 结论：现有行为/API/架构/布局合同内安全瘦身已到头；79文件8904行，净少228行，未登记/失效0。
 > P1：唯一proposal§七待批，维持现有恢复/诊断，不实施、不新开PR；下一步建议等监督安排正常正确性bug修复。
