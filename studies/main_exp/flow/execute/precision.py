@@ -54,8 +54,7 @@ def main(recipe, argv):
                     command.append('--tf32')
                 if index == 0:
                     command.append('--profile')
-                with (output / 'worker.log').open('w', encoding='utf-8') as log:
-                    completed = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=180)
+                completed = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, timeout=180)
                 path = output / 'diagnosis.json'
                 body = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {'error': 'missing diagnosis'}
                 return {'exit_code': completed.returncode, 'output_local_only': str(output), **body}

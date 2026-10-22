@@ -69,6 +69,8 @@ def test_eval_run_loads_sibling_train_best(tmp_path: Path):
     )
     assert out['mode'] == 'eval'
     assert 'accuracy' in out
+    assert out['resume_count'] == 1 and out['step'] == 4
+    assert Path(out['resume_path']).resolve() == found.resolve()
 
 
 @pytest.mark.parametrize('current_checkpoint', [True, False], ids=['current-best', 'missing-current-best'])

@@ -13,7 +13,6 @@ import hashlib
 import json
 import math
 from pathlib import Path
-import re
 import sys
 
 # Import NumPy before lazy Torch imports for this Windows runtime.
@@ -110,6 +109,78 @@ def close(left, right):
     return finite(left) and finite(right) and abs(left - right) <= TOLERANCE
 
 
+def read_diagnostics(root, run_id, attempt):
+    folder = root / 'assets' / 'logs'
+    paths, errors = [], []
+    for name in ('events.jsonl', 'events.1.jsonl', 'events.2.jsonl', 'events.3.jsonl'):
+        path = folder / name
+        try:
+            if path.is_file():
+                paths.append(path)
+        except OSError as exc:
+            errors.append(f'diagnostic {name} unavailable: {type(exc).__name__}')
+    if paths or errors:
+        events = []
+        for path in paths:
+            try:
+                lines = path.read_text(encoding='utf-8').splitlines()
+            except (OSError, UnicodeError) as exc:
+                errors.append(f'diagnostic {path.name} unreadable: {type(exc).__name__}')
+                continue
+            for number, line in enumerate(lines, 1):
+                try:
+                    row = json.loads(line)
+                except (ValueError, RecursionError):
+                    errors.append(f'diagnostic {path.name} line {number} is invalid JSON')
+                    continue
+                if not isinstance(row, dict):
+                    errors.append(f'diagnostic {path.name} line {number} is not an object')
+                    continue
+                if row.get('task_id') == run_id and (attempt is None or row.get('attempt_id') == attempt):
+                    events.append(row)
+        return {'format': 'jsonl', 'present': bool(events),
+                'resume_count': sum(row.get('event') == 'checkpoint.restored' for row in events), 'errors': errors}
+    legacy = folder / 'run.log'
+    try:
+        text = legacy.read_text(encoding='utf-8') if legacy.is_file() else ''
+    except (OSError, UnicodeError) as exc:
+        text = ''
+        errors.append(f'legacy diagnostics unreadable: {type(exc).__name__}')
+    return {'format': 'legacy' if text else 'missing', 'present': bool(text),
+            'resume_count': sum('[resume]' in line for line in text.splitlines()), 'errors': errors}
+
+
+def read_execution_projection(root, result):
+    from rpipe.structure.artifacts import contained
+    from rpipe.structure.contracts import project_execution
+
+    busy = True
+    try:
+        owner = root / '.execution'
+        busy = owner.exists() or owner.is_symlink()
+        index = root / 'execution.json'
+        if not index.exists() and not index.is_symlink():
+            return {**result, 'status': 'unknown' if busy else 'legacy' if result else 'missing',
+                    'scientific_status': result.get('status', 'missing'), 'derived_status': 'not_run',
+                    'evidence_complete': False, 'busy': busy,
+                    'execution_status': 'legacy_unindexed' if result else 'missing'}
+        record = read_json(contained(index, root))
+        if not isinstance(record.get('identity'), dict) or record['identity'] != result.get('identity'):
+            raise ValueError('execution and scientific result identities differ')
+        attempt = record.get('attempt')
+        complete = (isinstance(attempt, str) and len(attempt) == 32
+                    and all(char in '0123456789abcdef' for char in attempt))
+        if complete:
+            outcome = read_json(contained(root / 'attempts' / attempt / 'outcome.json', root))
+            complete = (json.dumps(record, sort_keys=True, allow_nan=False)
+                        == json.dumps(outcome, sort_keys=True, allow_nan=False))
+        projection = project_execution(record, result, busy=busy, complete=complete)
+        projection['execution_status'] = projection.get('metadata_status', record.get('phase'))
+        return projection
+    except (OSError, ValueError, TypeError, RecursionError):
+        return {**project_execution({}, result, busy=busy, complete=False), 'execution_status': 'invalid'}
+
+
 def inspect_run(study, entry, data, model, mode, seed, *, expected_source=None):
     root = study / 'runs' / str(entry['run_dir'])
     if not root.resolve().is_relative_to((study / 'runs').resolve()):
@@ -118,33 +189,45 @@ def inspect_run(study, entry, data, model, mode, seed, *, expected_source=None):
     result = read_json(result_path) if result_path.is_file() else {}
     trajectory = read_tracker(root)
     errors = list(trajectory['errors'])
-    log_path = root / 'assets' / 'logs' / 'run.log'
-    log = log_path.read_text(encoding='utf-8') if log_path.is_file() else ''
-    resume_lines = [line for line in log.splitlines() if '[resume]' in line]
+    diagnostics = read_diagnostics(root, entry['id'], result.get('attempt'))
+    errors.extend(diagnostics['errors'])
+    execution = read_execution_projection(root, result)
+    if result.get('status') == 'succeeded' and not execution['evidence_complete']:
+        errors.append('scientific result lacks complete closed execution evidence')
+    execute = result.get('execute') if isinstance(result.get('execute'), dict) else {}
     metrics = result.get('metrics') or {}
     row = {'id': entry['id'], 'seed': seed, 'data': data, 'model': model, 'mode': mode,
-           'status': result.get('status', 'started' if log else 'pending'),
+           'status': (execution['status'] if execution['status'] != 'missing'
+                      else 'started' if diagnostics['present'] else 'pending'),
+           'scientific_status': result.get('status', 'missing'),
+           'derived_status': execution['derived_status'], 'execution_status': execution['execution_status'],
+           'evidence_complete': execution['evidence_complete'], 'busy': execution['busy'],
+           'identity': result.get('identity') or {}, 'execute': execute,
            'result_path': str(result_path), 'points': len(trajectory['x']),
            'last_optimizer_step': trajectory['x'][-1] if trajectory['x'] else None,
            'optimizer_steps': trajectory['x'], 'accuracy_pct': trajectory['values'],
            'tracker_history_count': len(trajectory['history']),
-           'resume_event_count': len(resume_lines), 'metrics': metrics,
+           'resume_event_count': diagnostics['resume_count'], 'diagnostic_format': diagnostics['format'],
+           'metrics': metrics,
            'errors': errors, 'audit': {}}
     if mode == 'train':
         if trajectory['x'] != STEPS[:len(trajectory['x'])]:
             errors.append('train test curve is not an uninterrupted step200..80000 prefix')
-        if resume_lines:
-            errors.append('train log contains resume event')
         if any(r.get('step') != (index + 1) * 240 for index, r in enumerate(trajectory['rows'])):
             errors.append('train/test internal batch counts differ from 200+40 per evaluation')
-    if row['status'] == 'succeeded':
+    if row['scientific_status'] == 'succeeded':
         if expected_source is not None:
             identity = result.get('identity') or {}
             if (identity.get('id') != entry['id'] or identity.get('source_digest') != expected_source
                     or identity.get('version') != study.name):
                 errors.append('result does not match the current source and research version identity')
-        if not log:
-            errors.append('succeeded result has no run.log')
+        if not diagnostics['present']:
+            errors.append('succeeded result has no matching Run diagnostics')
+        count = execute.get('resume_count')
+        if type(count) is not int or count < 0:
+            errors.append('succeeded result lacks a valid scientific resume_count')
+        if mode == 'train' and (count != 0 or 'resume_path' not in execute or execute['resume_path'] is not None):
+            errors.append('continuous training requires an explicit zero restores and no resume_path')
         if len(trajectory['start_markers']) != 1:
             errors.append('succeeded run requires one continuous tracker start marker')
         data_snapshot = ((result.get('structure') or {}).get('data') or {})
@@ -183,6 +266,7 @@ def inspect_run(study, entry, data, model, mode, seed, *, expected_source=None):
                 errors.append('independent eval requires exactly 40 test batches')
             if not close(metrics.get('eval_accuracy'), trajectory['values'][0] if trajectory['values'] else None):
                 errors.append('independent eval result accuracy differs from tracker')
+    row['evidence_complete'] = row['evidence_complete'] and not errors
     return row
 
 
@@ -236,7 +320,8 @@ def compare(study, reference, *, partial=False):
     report['missing_runs'] = [dict(zip(('data', 'model', 'mode', 'seed'), key)) for key in expected if key not in table]
     report['run_counts'] = {mode: dict(Counter(row['status'] for row in report['runs'] if row['mode'] == mode))
                             for mode in ('train', 'eval')}
-    complete = not report['missing_runs'] and len(table) == 64 and all(row['status'] == 'succeeded' for row in table.values())
+    complete = (not report['missing_runs'] and len(table) == 64
+                and all(row['status'] == 'succeeded' and row.get('evidence_complete') for row in table.values()))
     for data in DATA_NAMES:
         for model in MODEL_NAMES:
             seeds = {seed: table[(data, model, 'train', seed)] for seed in SEEDS if (data, model, 'train', seed) in table}
@@ -244,37 +329,40 @@ def compare(study, reference, *, partial=False):
             x = sorted(set().union(*(set(value) for value in points.values()))) if points else []
             values = [[curve[step] for curve in points.values() if step in curve] for step in x]
             body = {'data': data, 'model': model, 'seeds_with_observations': sorted(seed for seed, curve in points.items() if curve),
-                    'completed_train_seeds': sorted(seed for seed, row in seeds.items() if row['status'] == 'succeeded' and not row['errors']),
+                    'completed_train_seeds': sorted(seed for seed, row in seeds.items()
+                                                    if row['status'] == 'succeeded' and row.get('evidence_complete') and not row['errors']),
                     'optimizer_steps': x, 'seed_count_by_step': [len(value) for value in values],
                     'mean_accuracy_pct': [float(np.mean(value)) for value in values],
                     'population_std_accuracy_pp': [float(np.std(value, ddof=0)) for value in values],
                     'gates_applied': False, 'gates': {}, 'passed': None}
             for seed in SEEDS:
                 train, evaluation = table.get((data, model, 'train', seed)), table.get((data, model, 'eval', seed))
-                if train and evaluation and train['status'] == evaluation['status'] == 'succeeded':
+                if train and evaluation and train.get('scientific_status') == evaluation.get('scientific_status') == 'succeeded':
                     best = train.get('best_checkpoint') or {}
                     actual = evaluation['accuracy_pct'][0] if evaluation['accuracy_pct'] else None
                     eval_step = evaluation['optimizer_steps'][0] if evaluation['optimizer_steps'] else None
-                    resume_pattern = r'\[resume\].*target=(.+?)\s+epoch=.*?\s+step=(\d+)'
-                    actual_path_pattern = r'\[split\] test.*?resume_path=(.+?)\s+step=(\d+)'
-                    log_path = study / 'runs' / str(evaluation['id']) / 'assets' / 'logs' / 'run.log'
-                    log = log_path.read_text(encoding='utf-8') if log_path.is_file() else ''
-                    matches = re.findall(resume_pattern, log)
-                    actual_paths = re.findall(actual_path_pattern, log)
-                    # Algorithm.resume logs its initial stem even when sibling
-                    # fallback succeeds. EvalAlgorithm's report extra records
-                    # the actual fallback path; use that authoritative field.
-                    source_match = (len(actual_paths) == 1 and
-                                    Path(actual_paths[0][0]).resolve() == Path(best.get('path', '')).resolve() and
-                                    int(actual_paths[0][1]) == best.get('step'))
+                    execute = evaluation.get('execute') or {}
+                    resume_path, resume_count = execute.get('resume_path'), execute.get('resume_count')
+                    resume_step = execute.get('step')
+                    train_identity, eval_identity = train.get('identity') or {}, evaluation.get('identity') or {}
+                    identities_match = (train_identity.get('id') == train['id']
+                        and eval_identity.get('id') == evaluation['id']
+                        and train_identity.get('source_digest') == eval_identity.get('source_digest') == expected_source
+                        and train_identity.get('version') == eval_identity.get('version') == study.name
+                        and train['seed'] == evaluation['seed'])
+                    single_restore = (type(resume_count) is int and resume_count == 1
+                        and type(resume_step) is int and resume_step == best.get('step'))
+                    source_match = (identities_match and isinstance(resume_path, str) and bool(resume_path)
+                        and Path(resume_path).resolve() == Path(best.get('path', '')).resolve())
                     audit = {'train_id': train['id'], 'best_step': best.get('step'), 'eval_step': eval_step,
                              'best_accuracy_pct': best.get('best_accuracy'), 'eval_accuracy_pct': actual,
                              'correct_samples': round(actual * 100) if finite(actual) else None,
                              'eval_equals_best': close(actual, best.get('best_accuracy')),
-                             'eval_step_equals_best': eval_step == best.get('step'),
-                             'logged_initial_resume_target': matches[0][0] if len(matches) == 1 else None,
-                             'reported_actual_resume_path': actual_paths[0][0] if len(actual_paths) == 1 else None,
-                             'single_resume_event_at_best_step': len(matches) == 1 and int(matches[0][1]) == best.get('step'),
+                             'eval_step_equals_best': type(eval_step) is int and eval_step == best.get('step') == resume_step,
+                             'resume_evidence_source': 'result.execute', 'scientific_resume_count': resume_count,
+                             'source_identity_matches': identities_match,
+                             'reported_actual_resume_path': resume_path,
+                             'single_resume_event_at_best_step': single_restore,
                              'eval_loads_matching_train_best': source_match}
                     audit['passed'] = bool(audit['eval_equals_best'] and audit['eval_step_equals_best'] and source_match and audit['single_resume_event_at_best_step'])
                     evaluation['best_source_audit'] = audit

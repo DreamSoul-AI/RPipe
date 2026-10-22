@@ -246,6 +246,9 @@ def test_resume_latest_skips_when_budget_already_done(tmp_path: Path):
     second, _ = _run(tmp_path, mapping)
     assert second['epochs'] == 1
     assert second['steps'] == first['steps']
+    assert first['resume_count'] == 0 and first['resume_path'] is None
+    assert second['resume_count'] == 1 and second['resume_path'] == 'latest'
+    assert second['resume_step'] == first['steps']
 
 
 def test_eval_algorithm_loads_best(tmp_path: Path):
@@ -284,6 +287,7 @@ def test_eval_algorithm_loads_best(tmp_path: Path):
     assert out['mode'] == 'eval'
     assert 'accuracy' in out
     assert out['resume_stem'] == 'best'
+    assert out['resume_count'] == 1 and out['resume_path'] == 'best'
 
 
 def test_eval_algorithm_missing_checkpoint_fails(tmp_path: Path):

@@ -198,6 +198,7 @@ def _run_stub(config: AlgorithmConfig, tracker: AlgorithmTracker) -> dict[str, A
         'steps': budget.num_steps,
         'epochs': budget.num_epochs or 1,
         'stub': True,
+        'resume_count': 0, 'resume_path': None, 'resume_step': None,
     }
 
 
@@ -473,6 +474,9 @@ def _run_supervised(
         'accuracy': accuracy,
         'best_value': algo._best_test,
         'best_metric': algo._best_metric,
+        'resume_count': resume_extra['resume_count'],
+        'resume_path': resume_extra.get('resume_path') if restored is not None else None,
+        'resume_step': restored.get('step') if restored is not None else None,
     }
     if algo._best_metric == 'Accuracy':
         summary['best_accuracy'] = algo._best_test
