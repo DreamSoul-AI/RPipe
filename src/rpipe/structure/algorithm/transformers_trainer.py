@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import torch.nn as nn
@@ -192,7 +193,7 @@ def _run_hf_trainer(
     restored = algo.resume(data, model, system, tracker, resume_extra)
     optimizer = algo.make_optimizer(module)
     inner_sched = algo.make_scheduler(optimizer, budget.scheduler_t_max())
-    spe = infer_steps_per_epoch(data) or 1
+    spe = budget.steps_per_epoch or infer_steps_per_epoch(data) or 1
     scheduler: Any
     if inner_sched is None:
         scheduler = _constant_scheduler(optimizer, budget.num_steps)
@@ -213,7 +214,7 @@ def _run_hf_trainer(
             algo._best_test = restored['best_accuracy']
     epoch = int(restored.get('epoch') or 0) if restored else 0
     steps = int(restored.get('step') or 0) if restored else 0
-    bind_step_train_loader(data, config, step=steps, budget=budget)
+    bind_step_train_loader(data, config, step=0, budget=budget)
     seed = None
     meta = getattr(data, 'meta', None)
     if isinstance(meta, dict) and meta.get('seed') is not None:
@@ -267,8 +268,15 @@ def _run_hf_trainer(
 
     tracker.begin_run((restored or {}).get('tracker'))
     recorded = tracker.progress or {}
-    step_origin = recorded.get('step', steps)
-    epoch_origin = recorded.get('epoch', epoch)
+    step_origin = steps
+    epoch_origin = float(recorded.get('epoch', epoch))
+
+    def update_progress(state: Any) -> None:
+        nonlocal epoch, steps
+        steps = step_origin + int(state.global_step)
+        position = epoch_origin + float(state.epoch or 0)
+        epoch = max(math.ceil(position), 1)
+        tracker.progress = {'step': steps, 'epoch': position}
 
     def observe(inputs: dict[str, Any], outputs: Any) -> None:
         labels = inputs.get('labels')
@@ -297,15 +305,13 @@ def _run_hf_trainer(
         def on_step_end(self, args, state, control, **kwargs):  # noqa: ANN001
             del args, kwargs
             nonlocal epoch, steps, wrote_last_ckpt
-            import math
             from rpipe.structure.system.runtime import check_cancelled
             check_cancelled(system)
+            update_progress(state)
             if budget.unit == UNIT_EPOCH:
                 return control
-            epoch = max(math.ceil(float(state.epoch or 0)), 1)
-            steps = int(state.global_step)
             extra = _hook_extra(epoch=epoch, lr=_current_lr(optimizer, lr), step=steps)
-            progress = {'step': step_origin + steps, 'epoch': epoch_origin + float(state.epoch or 0)}
+            progress = {'step': steps, 'epoch': epoch_origin + float(state.epoch or 0)}
             improved = False
             if due_period(eval_period, steps):
                 if tracker.has_samples('train'):
@@ -323,14 +329,13 @@ def _run_hf_trainer(
         def on_epoch_end(self, args, state, control, **kwargs):  # noqa: ANN001
             del args, kwargs
             nonlocal epoch, steps, wrote_last_ckpt
-            epoch = int(round(float(state.epoch or 0)))
-            steps = int(state.global_step)
+            update_progress(state)
             extra = _hook_extra(epoch=epoch, lr=_current_lr(optimizer, lr), step=steps)
             if tracker.has_samples('train'):
                 if logger is not None:
                     logger.report(tracker, 'train', extra=extra)
                 tracker.flush('train', progress={
-                    'step': step_origin + steps, 'epoch': epoch_origin + float(state.epoch or 0),
+                    'step': steps, 'epoch': epoch_origin + float(state.epoch or 0),
                 })
                 tracker.save('train')
                 tracker.reset('train')
@@ -350,8 +355,7 @@ def _run_hf_trainer(
         def on_train_end(self, args, state, control, **kwargs):  # noqa: ANN001
             del args, kwargs
             nonlocal epoch, steps
-            epoch = int(round(float(state.epoch or epoch)))
-            steps = int(state.global_step)
+            update_progress(state)
             extra = _hook_extra(epoch=epoch, lr=_current_lr(optimizer, lr), step=steps)
             extra['best_accuracy'] = algo._best_test
             if eval_period <= 0:
@@ -363,6 +367,10 @@ def _run_hf_trainer(
 
     output_dir = str(system.checkpoint_dir() / 'hf')
     args = build_training_arguments(config, output_dir=output_dir, data=data, seed=seed)
+    # Trainer starts a new session; checkpoint coordinates and the budget stay cumulative.
+    args.max_steps = budget.num_steps - step_origin
+    if budget.num_epochs is not None:
+        args.num_train_epochs = max(float(budget.num_epochs) - epoch_origin, 0.0)
     trainer = _Trainer(
         model=_ClassificationWrap(module),
         args=args,
@@ -390,11 +398,12 @@ def _summary(
         'epochs': epoch,
         'progress_unit': budget.unit,
         'train_size': data.meta.get('train_size') if getattr(data, 'meta', None) else None,
-        'train_loss': tracker.segment_mean('train').get('Loss', 0.0),
-        'accuracy': tracker.segment_mean('test').get('Accuracy', 0.0),
         'best_value': algo._best_test,
         'best_metric': getattr(algo, '_best_metric', 'Accuracy'),
     }
+    for split, metric, name in (('train', 'Loss', 'train_loss'), ('test', 'Accuracy', 'accuracy')):
+        if metric in tracker.segment_mean(split):
+            out[name] = tracker.segment_mean(split)[metric]
     if out['best_metric'] == 'Accuracy':
         out['best_accuracy'] = algo._best_test
     return out

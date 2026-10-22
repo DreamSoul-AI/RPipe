@@ -26,6 +26,48 @@ def test_stub_source_does_not_download(tmp_path: Path):
     assert not (tmp_path / 'mnist').exists()
 
 
+@pytest.mark.parametrize('linked', ['dataset', 'native-raw', 'canonical-raw'])
+def test_owned_vision_cache_cannot_publish_through_links_into_source(tmp_path, monkeypatch, file_bytes, linked):
+    from rpipe.structure.contracts import AdmissionError
+    import torchvision.datasets
+
+    source, cache = tmp_path / 'source', tmp_path / 'cache'
+    source.mkdir()
+    cache.mkdir()
+    (source / 'sentinel').write_bytes(b'original source')
+    native, canonical = cache / 'mnist' / 'MNIST' / 'raw', cache / 'MNIST' / 'raw'
+    if linked == 'dataset':
+        (cache / 'mnist').symlink_to(source, target_is_directory=True)
+    elif linked == 'native-raw':
+        native.parent.mkdir(parents=True)
+        native.symlink_to(source, target_is_directory=True)
+    else:
+        canonical.parent.mkdir(parents=True)
+        canonical.symlink_to(source, target_is_directory=True)
+        native.mkdir(parents=True)
+        (native / 'new-image').write_bytes(b'owned raw input')
+    if linked == 'native-raw':
+        canonical.mkdir(parents=True, exist_ok=True)
+        (canonical / 'new-image').write_bytes(b'owned raw input')
+    before = file_bytes(source)
+    calls = []
+
+    class Dataset:
+        def __init__(self, *args, **kwargs):
+            calls.append(kwargs)
+
+        def __len__(self):
+            return 2
+
+    monkeypatch.setattr(torchvision.datasets, 'MNIST', Dataset)
+    try:
+        with pytest.raises(AdmissionError):
+            data_api.build(DataConfig.from_mapping({'name': 'MNIST', 'source': 'torch'}), cache)
+    finally:
+        assert file_bytes(source) == before
+    assert not calls
+
+
 @pytest.mark.parametrize('mapping', [
     {'name': 'Typo', 'source': 'torch'},
     {'name': 'Typo', 'source': 'stub'},

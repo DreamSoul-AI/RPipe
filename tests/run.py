@@ -47,6 +47,12 @@ def append_event(path: Path, value: dict) -> None:
 
 def read_events(out_dir: Path) -> tuple[list[dict], list[str]]:
     events, evidence_errors, seen = [], [], set()
+    manifest_path = out_dir / 'manifest.json'
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8')) if manifest_path.exists() else {}
+    attempts = {entry['attempt'] for entry in manifest.get('attempts', [])}
+    selected = set(manifest['selected']) if 'selected' in manifest else None
+    context_fields = ('run_id', 'plan_id', 'environment_id')
+    has_context = all(field in manifest for field in context_fields)
     event_file = out_dir / 'events.jsonl'
     for number, raw in enumerate(event_file.read_bytes().splitlines() if event_file.exists() else [], 1):
         if not raw.strip():
@@ -57,6 +63,13 @@ def read_events(out_dir: Path) -> tuple[list[dict], list[str]]:
             key = (event['test_id'], event.get('attempt', 1))
             if not isinstance(key[0], str) or type(key[1]) is not int or key[1] < 1:
                 raise ValueError('invalid test_id/attempt')
+            if selected is not None and key[0] not in selected:
+                raise ValueError('unselected test_id')
+            for field in context_fields:
+                if field in manifest and (has_context or field in event) and event.get(field) != manifest[field]:
+                    raise ValueError(f'mismatched {field}')
+            if 'attempts' in manifest and (key[1] not in attempts or has_context and 'attempt' not in event):
+                raise ValueError('undeclared attempt')
             if event.get('status') not in {'passed', 'failed', 'measured', 'completed', 'error', 'skipped', 'xfail', 'xpass', 'timeout'}:
                 raise ValueError('invalid execution status')
             duration = event.get('duration_ms')

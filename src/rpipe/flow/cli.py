@@ -97,9 +97,11 @@ def main(argv=None) -> int:
                      'model': str(args.run_root.resolve() / 'shared' / 'model')}
         elif args.command == 'data':
             from rpipe.structure.artifacts import validate_source
-            validate_source(specs[0])
+            for spec in specs:
+                validate_source(spec)
             from rpipe.structure.data.profile import profile_study
-            value = profile_study(args.study_dir, shared_data_dir=args.run_root / 'shared' / 'data',
+            value = profile_study(args.study_dir, configs=[spec.to_config() for spec in specs],
+                                  shared_data_dir=args.run_root / 'shared' / 'data',
                                   profiles_dir=specs[0].study_root / 'shared' / 'data', download=args.download)
         elif args.command == 'tensorboard':
             from rpipe.structure.contracts import validate_run_root

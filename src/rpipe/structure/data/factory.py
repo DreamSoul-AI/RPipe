@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Iterator, Callable
 from rpipe.structure.contracts import DataConfig
 
-from rpipe.structure.artifacts import cache_lock, reference_tree
+from rpipe.structure.artifacts import cache_lock, reference_tree, contained
 
 from rpipe.structure.system.origin import apply_model_origin, bind_endpoint, discard_bad_archive, endpoint_for
 
@@ -336,13 +336,15 @@ def _build_torch_vision(
     cfg = dict(data_config.config)
     explicit_root = data_config.path is not None
     root = Path(data_config.path) if explicit_root else assets_dir / str(spec['root'])
+    canonical_raw = assets_dir / name / 'raw'
+    native_raw = root / name / 'raw' if name in ('MNIST', 'FashionMNIST') else root
     if explicit_root:
         if not root.is_dir():
             raise FileNotFoundError(f'missing declared data directory: {root}')
     else:
+        for output in (root, canonical_raw, native_raw):
+            contained(output, assets_dir)
         root.mkdir(parents=True, exist_ok=True)
-    canonical_raw = assets_dir / name / 'raw'
-    native_raw = root / name / 'raw' if name in ('MNIST', 'FashionMNIST') else root
     if not explicit_root and canonical_raw.is_dir():
         reference_tree(canonical_raw, native_raw)
     ctor = getattr(datasets, str(spec['ctor']))

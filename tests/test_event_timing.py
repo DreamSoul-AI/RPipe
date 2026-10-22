@@ -172,6 +172,49 @@ def test_disk_report_survives_interrupted_last_json_line_without_losing_done_cas
     assert summary['evidence_errors'] and summary['blocking'] is True
 
 
+@pytest.mark.parametrize('field,value', [('run_id', 'other-run'), ('plan_id', 'other-plan'),
+                                       ('environment_id', 'other-env'), ('attempt', 99),
+                                       ('run_id', None), ('plan_id', None),
+                                       ('environment_id', None), ('attempt', None), ('test_id', 'unselected')])
+def test_report_rejects_foreign_execution_evidence_without_losing_healthy_peer(tmp_path, field, value):
+    manifest = {'run_id': 'current', 'plan_id': 'plan', 'environment_id': 'cpu',
+                'selected': ['healthy', 'foreign'], 'required': ['healthy', 'foreign'],
+                'collection_complete': True, 'exit_status': 0,
+                'attempts': [{'attempt': 1, 'status': 'completed', 'exit_status': 0}]}
+    event = {'run_id': 'current', 'plan_id': 'plan', 'environment_id': 'cpu',
+             'attempt': 1, 'test_id': 'healthy', 'status': 'passed', 'duration_ms': 1}
+    foreign = dict(event, test_id='foreign')
+    foreign[field] = value
+    if value is None:
+        foreign.pop(field)
+    (tmp_path / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
+    events = (tmp_path / 'events.jsonl')
+    events.write_text(json.dumps(event) + '\n' + json.dumps(foreign) + '\n', encoding='utf-8')
+    before = events.read_bytes()
+    summary = records.write_report(tmp_path, 0)
+    assert summary['counts'] == {'passed': 1}
+    assert summary['missing_required'] == ['foreign']
+    assert summary['blocking'] and not summary['plan_complete'] and not summary['evidence_complete']
+    assert summary['evidence_errors'] and field in ' '.join(summary['evidence_errors'])
+    assert events.read_bytes() == before
+
+
+def test_report_accepts_declared_retry_history_with_matching_context(tmp_path):
+    manifest = {'run_id': 'current', 'plan_id': 'plan', 'environment_id': 'cpu',
+                'selected': ['flaky'], 'required': ['flaky'], 'exit_status': 0,
+                'attempts': [{'attempt': 1, 'status': 'failed', 'exit_status': 1},
+                             {'attempt': 2, 'status': 'completed', 'exit_status': 0}]}
+    events = [dict(run_id='current', plan_id='plan', environment_id='cpu', test_id='flaky',
+                   attempt=attempt, status=status, duration_ms=1)
+              for attempt, status in [(1, 'failed'), (2, 'passed')]]
+    (tmp_path / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
+    (tmp_path / 'events.jsonl').write_text(''.join(json.dumps(event) + '\n' for event in events), encoding='utf-8')
+    summary = records.write_report(tmp_path)
+    assert summary['attempt_count'] == 2 and summary['counts'] == {'passed': 1}
+    assert summary['flaky'] == ['flaky']
+    assert not summary['blocking'] and summary['plan_complete'] and summary['evidence_complete']
+
+
 def test_manifest_replace_retries_only_transient_windows_sharing_error(tmp_path, monkeypatch):
     path = tmp_path / 'manifest.json'
     path.write_text('{"old":true}')

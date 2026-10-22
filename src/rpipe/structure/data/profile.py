@@ -13,12 +13,22 @@ from typing import Any, Iterable
 
 import yaml
 
-from rpipe.structure.artifacts import _read_text, atomic_write_text
-from rpipe.structure.contracts import DataConfig
+from rpipe.structure.artifacts import _read_text, atomic_write_text, contained
+from rpipe.structure.contracts import AdmissionError, DataConfig, validate_run_root
 from rpipe.structure.data.factory import DataFactory, vision_root
 from rpipe.structure.system.origin import normalize_origin
 
 STATS_NAME = 'stats.yaml'
+
+
+def _profile_path(profiles: Path, name: str) -> Path:
+    folder = profiles / name
+    if folder.resolve() != folder:
+        raise AdmissionError('profile dataset output cannot be a directory link')
+    contained(folder, profiles)
+    path = folder / STATS_NAME
+    contained(path, folder)
+    return path
 
 
 def summarize_batches(batches: Iterable[tuple[Any, Any]]) -> dict[str, Any]:
@@ -33,7 +43,7 @@ def summarize_batches(batches: Iterable[tuple[Any, Any]]) -> dict[str, Any]:
     classes: dict[int, int] = {}
     shape: list[int] | None = None
     for images, targets in batches:
-        images = images.detach().float()
+        images = images.detach().double()
         if images.ndim != 4:
             raise ValueError(f'expected NCHW, got {tuple(images.shape)}')
         if shape is None:
@@ -91,30 +101,47 @@ def load_stats(path: Path | str, *, required: bool = False) -> dict[str, Any] | 
     return body
 
 
-def profile_study(study_dir: Path | str, *, shared_data_dir: Path | str,
+def profile_study(study_dir: Path | str, *, configs: Iterable[dict[str, Any]], shared_data_dir: Path | str,
                   profiles_dir: Path | str, download: bool = False) -> list[Path]:
-    """Profile explicit local inputs and publish profiles to an explicit output root."""
-    study = Path(study_dir)
-    declared = yaml.safe_load(_read_text(study / 'study.yaml')) or {}
-    if not isinstance(declared, dict):
-        raise ValueError('study.yaml must be a mapping')
-    origin = normalize_origin(declared.get('origin'))
+    """Profile resolved selected configs without loading a recipe or changing inputs."""
+    study = Path(study_dir).resolve()
     shared = Path(shared_data_dir)
-    written: list[Path] = []
-    for name in _data_names(declared):
+    profiles = Path(profiles_dir).resolve()
+    validate_run_root(study, shared)
+    validate_run_root(study, profiles)
+    requests: dict[str, tuple[DataConfig, str]] = {}
+    for config in configs:
+        data_config = DataConfig.from_mapping(config.get('data'))
+        name = data_config.name
         root = vision_root(name) or name
-        folder = Path(profiles_dir) / root
-        data = DataFactory.build(
-            DataConfig.from_mapping(
-                {
-                    'name': name,
-                    'source': 'torch',
-                    'config': {'batch_size': 256, 'augment': False, 'num_workers': 0, 'download': download},
-                }
-            ),
-            shared,
-            origin=origin,
-        )
+        if not isinstance(root, str) or not root or root in ('.', '..') or Path(root).name != root:
+            raise ValueError('profile data.name must identify one dataset directory')
+        data_config.source = data_config.source or 'torch'
+        if data_config.path is not None:
+            data_config.path = str((study / data_config.path).resolve())
+            if download:
+                raise ValueError('declared data paths are read-only; download into the owned shared cache')
+        folder = _profile_path(profiles, root).parent
+        declared_stats = data_config.config.get('stats_path')
+        for reference in (data_config.path, declared_stats):
+            if reference is not None:
+                path = (study / reference).resolve()
+                if folder.is_relative_to(path) or path.is_relative_to(folder):
+                    raise ValueError('profile output must be outside declared input paths')
+        # Profiles describe the full raw input; Run subsets and model normalization do not apply.
+        data_config.config.pop('train_size', None)
+        data_config.config.pop('stats_path', None)
+        data_config.config.update(batch_size=256, augment=False, num_workers=0, download=download)
+        origin = normalize_origin(config.get('origin'))
+        if root in requests and requests[root] != (data_config, origin):
+            raise ValueError(f'conflicting profile inputs for dataset {name!r}; select one Run with --id')
+        requests[root] = data_config, origin
+    if not requests:
+        raise ValueError('profiling requires at least one selected data config')
+    written: list[Path] = []
+    for root, (data_config, origin) in requests.items():
+        name = data_config.name
+        data = DataFactory.build(data_config, shared, origin=origin)
         primary = None
         try:
             splits = {}
@@ -132,7 +159,7 @@ def profile_study(study_dir: Path | str, *, shared_data_dir: Path | str,
             body = {'name': name, 'summary': _summary_line(name, splits),
                     'mean': list(train_pixel['mean']), 'std': list(train_pixel['std']),
                     'splits': splits}
-            path = folder / STATS_NAME
+            path = _profile_path(profiles, root)
             atomic_write_text(path, yaml.safe_dump(body, sort_keys=False, allow_unicode=True))
             written.append(path)
         except BaseException as exc:
@@ -156,22 +183,6 @@ def _iter_pairs(data: Any, split: str):
     for batch in data.iter_batches(split):
         if isinstance(batch, (tuple, list)) and len(batch) >= 2:
             yield batch[0], batch[1]
-
-
-def _data_names(study: dict[str, Any]) -> list[str]:
-    names: list[str] = []
-    axes = study.get('axes') if isinstance(study.get('axes'), dict) else {}
-    axis_names = axes.get('data.name')
-    if isinstance(axis_names, list):
-        names.extend(str(item) for item in axis_names)
-    fixed = study.get('fixed') if isinstance(study.get('fixed'), dict) else {}
-    data = fixed.get('data')
-    if isinstance(data, dict) and data.get('name'):
-        names.append(str(data['name']))
-    seen = list(dict.fromkeys(names))
-    if not seen:
-        raise ValueError('study.yaml has no data.name')
-    return seen
 
 
 def _summary_line(name: str, splits: dict[str, Any]) -> str:

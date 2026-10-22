@@ -12,6 +12,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
               pytest.mark.result_type('categorical', detail='summary')]
 
 
+@pytest.mark.external
 def test_hf_two_step_training_publishes_own_best_for_independent_eval(tensor_study, run_root):
     pytest.importorskip('transformers')
     pytest.importorskip('accelerate')

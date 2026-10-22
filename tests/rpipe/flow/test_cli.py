@@ -102,3 +102,41 @@ def test_cli_tensorboard_rejects_input_or_checkout_destination_before_export(
     assert main(['tensorboard', str(source_study), '--run-root', str(run_root), '--out', str(out)]) == 1
     assert not called and not out.exists()
     assert capsys.readouterr().err
+
+
+def test_cli_data_profiles_only_the_selected_effective_input(source_study, run_root, monkeypatch, capsys):
+    import json
+    import yaml
+    import torch
+    from rpipe import api
+    from rpipe.flow.cli import main
+    from rpipe.structure.data import profile
+    from rpipe.structure.data.factory import Data
+
+    (source_study / 'study.yaml').write_text(
+        'study: Profile\nfixed: {data: {name: MNIST}}\naxes:\n  data.path: [../left, ../right]\nseeds: [0]\n', encoding='utf-8')
+    (source_study / 'experiment_config.yaml').write_text(
+        yaml.safe_dump({'data': {'name': 'MNIST', 'source': 'custom'}, 'algorithm': {'mode': 'train'}}),
+        encoding='utf-8')
+    selected = api.plan(source_study, run_root=run_root)[1]
+    calls = []
+
+    def build(config, shared, **kwargs):
+        calls.append(config.to_mapping())
+        assert config.source == 'custom'
+        assert config.path == str((source_study / '../right').resolve())
+        return Data(name='MNIST', source='custom', meta={}, loaders={
+            'train': [(torch.tensor([[[[0.7, 0.8]]]]), torch.tensor([0]))],
+        })
+
+    monkeypatch.setattr(profile.DataFactory, 'build', build)
+    assert main(['data', str(source_study), '--run-root', str(run_root), '--id', selected.id]) == 0
+    captured = capsys.readouterr()
+    assert captured.err == '' and len(calls) == 1
+    written = json.loads(captured.out)
+    from pathlib import Path
+    assert yaml.safe_load(Path(written[0]).read_text(encoding='utf-8'))['mean'] == [0.75]
+    calls.clear()
+    assert main(['data', str(source_study), '--run-root', str(run_root)]) == 1
+    assert not calls
+    assert 'conflicting profile inputs' in capsys.readouterr().err

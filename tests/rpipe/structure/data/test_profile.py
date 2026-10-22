@@ -1,3 +1,4 @@
+import os
 import pytest
 
 pytestmark = [
@@ -13,7 +14,7 @@ pytestmark = [
 from pathlib import Path
 
 from rpipe.structure.data.factory import _with_recorded_stats
-from rpipe.structure.data.profile import _data_names, load_stats, summarize_batches
+from rpipe.structure.data.profile import load_stats, summarize_batches
 
 
 def test_summarize_batches_reports_shape_classes_and_mean():
@@ -31,6 +32,16 @@ def test_summarize_batches_reports_shape_classes_and_mean():
     assert body['pixel']['max'] == [1.0]
 
 
+def test_profile_retains_small_nonzero_variance_across_batches():
+    import torch
+
+    batches = [(torch.full((4, 1, 4, 4), value), torch.zeros(4, dtype=torch.long))
+               for value in (0.999, 1.0)]
+    body = summarize_batches(batches)
+    assert body['pixel']['mean'] == pytest.approx([0.9995], abs=1e-6)
+    assert body['pixel']['std'] == pytest.approx([0.0005], abs=1e-6)
+
+
 def test_recorded_stats_replace_the_builtin_table(tmp_path: Path):
     path = tmp_path / 'stats.yaml'
     path.write_text('name: MNIST\nmean: [0.1]\nstd: [0.2]\n', encoding='utf-8')
@@ -42,28 +53,6 @@ def test_recorded_stats_replace_the_builtin_table(tmp_path: Path):
     assert out['std'] == (0.2,)
     assert spec['mean'] == (0.5,)
     assert _with_recorded_stats(spec, tmp_path / 'missing.yaml') is spec
-
-
-def test_data_names_come_from_axes_and_fixed():
-    names = _data_names({'axes': {'data.name': ['MNIST', 'CIFAR10']}, 'fixed': {'data': {'name': 'MNIST'}}})
-    assert names == ['MNIST', 'CIFAR10']
-
-
-@pytest.mark.parametrize('study, expected', [
-    ({'axes': {'data.name': ['b', 'a', 'b', 'A']}, 'fixed': {'data': {'name': 'a'}}}, ['b', 'a', 'A']),
-    ({'axes': {'data.name': [1, '1', 0, '', None]}, 'fixed': {'data': {'name': 1}}}, ['1', '0', '', 'None']),
-    ({'axes': [], 'fixed': {'data': {'name': 'MNIST'}}}, ['MNIST']),
-])
-def test_data_names_keep_string_conversion_first_occurrence_and_input(study, expected):
-    import copy
-    before = copy.deepcopy(study)
-    assert _data_names(study) == expected
-    assert study == before
-
-
-def test_data_names_still_rejects_missing_names():
-    with pytest.raises(ValueError, match='study.yaml has no data.name'):
-        _data_names({'axes': {'data.name': ()}, 'fixed': {'data': {'name': 0}}})
 
 
 def test_profile_consumes_batches_incrementally_and_closes_its_data(tmp_path, monkeypatch):
@@ -95,7 +84,8 @@ def test_profile_consumes_batches_incrementally_and_closes_its_data(tmp_path, mo
     source = tmp_path / 'source'
     source.mkdir()
     (source / 'study.yaml').write_text('fixed: {data: {name: Tiny}}\n', encoding='utf-8')
-    paths = profile.profile_study(source, shared_data_dir=tmp_path / 'raw', profiles_dir=tmp_path / 'profiles')
+    paths = profile.profile_study(source, configs=[{'data': {'name': 'Tiny'}}],
+                                  shared_data_dir=tmp_path / 'raw', profiles_dir=tmp_path / 'profiles')
     assert data.closed
     assert len(paths) == 1
     import yaml
@@ -122,7 +112,8 @@ def test_profile_keeps_primary_error_when_owned_data_close_also_fails(tmp_path, 
     source.mkdir()
     (source / 'study.yaml').write_text('fixed: {data: {name: Tiny}}\n', encoding='utf-8')
     with pytest.raises(ValueError, match='NCHW') as caught:
-        profile.profile_study(source, shared_data_dir=tmp_path / 'raw', profiles_dir=tmp_path / 'profiles')
+        profile.profile_study(source, configs=[{'data': {'name': 'Tiny'}}],
+                              shared_data_dir=tmp_path / 'raw', profiles_dir=tmp_path / 'profiles')
     assert isinstance(caught.value.cleanup_errors[0], OSError)
     assert not (tmp_path / 'profiles' / 'Tiny' / 'stats.yaml').exists()
 
@@ -166,5 +157,98 @@ def test_profile_registers_iterator_with_its_data_owner_before_failure(tmp_path,
     source.mkdir()
     (source / 'study.yaml').write_text('fixed: {data: {name: Tiny}}\n', encoding='utf-8')
     with pytest.raises(ValueError, match='NCHW'):
-        profile.profile_study(source, shared_data_dir=tmp_path / 'raw', profiles_dir=tmp_path / 'profiles')
+        profile.profile_study(source, configs=[{'data': {'name': 'Tiny'}}],
+                              shared_data_dir=tmp_path / 'raw', profiles_dir=tmp_path / 'profiles')
     assert batches.closed
+
+
+def test_profile_uses_resolved_declared_input_and_source_once_for_repeated_runs(tmp_path, monkeypatch):
+    import copy
+    import torch
+    from rpipe.structure.data import profile
+    from rpipe.structure.data.factory import Data
+
+    source = tmp_path / 'source'
+    source.mkdir()
+    calls = []
+
+    def build(config, shared, **kwargs):
+        calls.append((config.to_mapping(), kwargs['origin']))
+        return Data(name=config.name, source=config.source, meta={}, loaders={
+            'train': [(torch.tensor([[[[0.2, 0.4]]]]), torch.tensor([0]))],
+        })
+
+    monkeypatch.setattr(profile.DataFactory, 'build', build)
+    first = {'origin': 'domestic', 'seed': 0, 'data': {'name': 'MNIST', 'source': 'custom',
+             'path': '../declared', 'config': {'train_size': 1, 'augment': True, 'num_workers': 2}}}
+    second = copy.deepcopy(first)
+    second['seed'] = 1
+    second['data']['config']['train_size'] = 7
+    before = copy.deepcopy([first, second])
+    written = profile.profile_study(source, configs=[first, second], shared_data_dir=tmp_path / 'raw',
+                                    profiles_dir=tmp_path / 'profiles')
+    assert [first, second] == before
+    assert len(calls) == len(written) == 1
+    config, origin = calls[0]
+    assert config['path'] == str((tmp_path / 'declared').resolve())
+    assert config['source'] == 'custom' and origin == 'domestic'
+    assert 'train_size' not in config['config']
+    assert config['config']['augment'] is False and config['config']['num_workers'] == 0
+    assert config['config']['download'] is False
+
+
+def test_profile_rejects_conflicting_inputs_before_any_build_or_write(tmp_path, monkeypatch):
+    from rpipe.structure.data import profile
+
+    calls = []
+    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: calls.append(True))
+    configs = [{'data': {'name': 'MNIST', 'path': path}} for path in ('../left', '../right')]
+    with pytest.raises(ValueError, match='conflicting profile inputs'):
+        profile.profile_study(tmp_path / 'source', configs=configs, shared_data_dir=tmp_path / 'raw',
+                              profiles_dir=tmp_path / 'profiles')
+    assert not calls and not (tmp_path / 'profiles').exists()
+
+
+def test_profile_download_flag_cannot_mutate_a_declared_input(tmp_path, monkeypatch):
+    from rpipe.structure.data import profile
+
+    calls = []
+    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: calls.append(True))
+    with pytest.raises(ValueError, match='read-only'):
+        profile.profile_study(tmp_path / 'source', configs=[{'data': {'name': 'MNIST', 'path': '../input'}}],
+                              shared_data_dir=tmp_path / 'raw', profiles_dir=tmp_path / 'profiles', download=True)
+    assert not calls and not (tmp_path / 'profiles').exists()
+
+
+@pytest.mark.parametrize('target_kind', ['source', 'input', 'peer'])
+@pytest.mark.parametrize('link_kind', ['directory', 'stats-file', pytest.param('junction',
+    marks=pytest.mark.skipif(os.name != 'nt', reason='Windows junction semantics'))])
+def test_profile_rejects_output_links_before_building_or_changing_originals(
+        tmp_path, monkeypatch, target_kind, link_kind):
+    from rpipe.structure.data import profile
+    from rpipe.structure.contracts import AdmissionError
+
+    source, inputs, profiles = (tmp_path / name for name in ('source', 'inputs', 'profiles'))
+    for path in (source, inputs, profiles):
+        path.mkdir()
+    target = source if target_kind == 'source' else inputs if target_kind == 'input' else profiles / 'peer'
+    target.mkdir(exist_ok=True)
+    sentinel = target / 'stats.yaml'
+    sentinel.write_bytes(b'original input or source')
+    folder = profiles / 'mnist'
+    if link_kind == 'junction':
+        import subprocess
+        subprocess.run(['cmd', '/c', 'mklink', '/J', str(folder), str(target)],
+                       check=True, capture_output=True)
+    elif link_kind == 'directory':
+        folder.symlink_to(target, target_is_directory=True)
+    else:
+        folder.mkdir()
+        (folder / 'stats.yaml').symlink_to(sentinel)
+    calls = []
+    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: calls.append(True))
+    with pytest.raises(AdmissionError):
+        profile.profile_study(source, configs=[{'data': {'name': 'MNIST', 'path': str(inputs)}}],
+                              shared_data_dir=tmp_path / 'raw', profiles_dir=profiles)
+    assert not calls
+    assert sentinel.read_bytes() == b'original input or source'

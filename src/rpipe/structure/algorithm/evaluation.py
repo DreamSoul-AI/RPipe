@@ -54,11 +54,8 @@ class EvalAlgorithm(Algorithm):
         report_extra['elapsed'] = format_hms(elapsed)
         if logger is not None:
             logger.info(f"eval elapsed={report_extra['elapsed']}")
-        accuracy = metrics.get('Accuracy', 0.0)
-        return {
+        result = {
             'mode': 'eval',
-            'accuracy': accuracy,
-            'best_accuracy': (restored or {}).get('best_accuracy', accuracy),
             'resume_stem': extra.get('resume_stem'),
             'resume_path': extra.get('resume_path') if restored is not None else None,
             'resume_count': extra['resume_count'],
@@ -67,6 +64,18 @@ class EvalAlgorithm(Algorithm):
             'elapsed': format_hms(elapsed),
             'elapsed_seconds': float(elapsed),
         }
+        if 'Accuracy' in metrics:
+            result['accuracy'] = metrics['Accuracy']
+        checkpoint = restored or {}
+        if checkpoint.get('best_metric', 'Accuracy') == 'Accuracy':
+            if checkpoint.get('best_accuracy') is not None:
+                result['best_accuracy'] = checkpoint['best_accuracy']
+            elif 'Accuracy' in metrics:
+                result['best_accuracy'] = metrics['Accuracy']
+        for name in ('best_metric', 'best_value'):
+            if name in checkpoint:
+                result[name] = checkpoint[name]
+        return result
 
 
 def run(control_algorithm: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:

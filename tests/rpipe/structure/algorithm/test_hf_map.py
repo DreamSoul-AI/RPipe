@@ -100,12 +100,24 @@ def test_hf_alias_forwarding_keeps_order_identity_and_epsilon_default(monkeypatc
     tail = ['weight_decay', 'warmup_ratio', 'warmup_steps', 'adam_beta1', 'adam_beta2']
     if present:
         tail.append('adam_epsilon')
-    tail += ['momentum', 'resume_from_checkpoint']
+    tail += ['resume_from_checkpoint']
     assert list(result)[-len(tail):] == tail
     assert ('adam_epsilon' in result) == present
     if present:
         assert result['adam_epsilon'] == expected
-    assert result['warmup_ratio'] is result['momentum'] is token
+    assert result['warmup_ratio'] is token
+    assert 'momentum' not in result
     assert result['max_grad_norm'] == 0.0
     assert result['resume_from_checkpoint'] == 'resume'
     assert config.extras['momentum'] is token
+
+
+def test_sgd_momentum_is_consumed_by_optimizer_and_not_training_arguments():
+    from rpipe.structure.algorithm.optim import make_optimizer
+    import torch
+
+    cfg = AlgorithmConfig.from_mapping({'source': 'transformers_trainer', 'optimizer': 'SGD',
+                                       'momentum': 0.7, 'num_steps': 1})
+    kwargs = training_arguments_kwargs(cfg, output_dir='unused')
+    assert 'momentum' not in kwargs
+    assert make_optimizer(torch.nn.Linear(1, 1), cfg).param_groups[0]['momentum'] == 0.7

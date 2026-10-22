@@ -95,6 +95,9 @@ def process(specs) -> dict:
     _one_root(specs)
     result = aggregate(specs)
     if specs:
+        for spec in specs:
+            validate_source(spec)
+            validate_input_paths(spec, output_root=spec.study_root / 'summary')
         root = specs[0].study_root
         write_json(root / 'summary' / 'process.json', result)
         from types import SimpleNamespace

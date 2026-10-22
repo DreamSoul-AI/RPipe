@@ -63,6 +63,28 @@ class _Data:
     meta = {'stub': True}
 
 
+@pytest.mark.parametrize('names, absent', [(['Loss'], 'accuracy'), (['Accuracy'], 'train_loss')])
+def test_train_summary_omits_metrics_that_were_not_requested(tmp_path, names, absent):
+    from types import SimpleNamespace
+    import torch
+    from rpipe.structure.algorithm.metrics import MetricBundle
+    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.system.factory import SystemFactory
+
+    data = SimpleNamespace(meta={}, iter_batches=lambda split: iter([
+        (torch.ones(2, 1), torch.zeros(2, dtype=torch.long)),
+    ]))
+    system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
+    try:
+        result = TrainAlgorithm(AlgorithmConfig.from_mapping({'num_steps': 1, 'resume': False})).run(
+            data, SimpleNamespace(module=torch.nn.Linear(1, 2)), system,
+            AlgorithmTracker(tmp_path, MetricBundle({'train': names, 'test': names})),
+        )
+        assert absent not in result
+    finally:
+        system.logger.close()
+
+
 def test_two_epoch_stub_train_does_not_raise(tmp_path):
     algo = TrainAlgorithm(AlgorithmConfig.from_mapping({'mode': 'train', 'num_epochs': 2}))
     tracker = AlgorithmTracker(tmp_path)

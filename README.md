@@ -31,7 +31,7 @@ rpipe status studies/_template --run-root <external-run-root>
 rpipe process studies/_template --run-root <external-run-root>
 ```
 
-默认每 Run 独立科学子进程，启动前核源码摘要、配置和自己的 train 依赖。`provenance.inputs` 可显式固定外部文件或目录清单；未固定的 path/stats_path、默认缓存及隐式 profile 分列为未验证，不自动扫描全部数据。已有 result 不原地重跑，须换显式 version；无 result 的已确认失败/取消须 `--retry`（API `retry=True`），unknown/busy 不重放。Run 级 `execution.json` 明确本次 attempt，status/report 分列整体执行、科学结果、派生分析和证据完整性，不按 mtime/UUID 猜最近一次。内存硬限制、同进程硬超时及 Windows 带 recipe/数据 worker 的硬超时仍拒绝。没有自动 GPU 分配或旧队列恢复。
+默认每 Run 独立科学子进程，启动前核源码摘要、配置和自己的 train 依赖。`provenance.inputs` 可显式固定外部文件或目录清单；未固定的 path/stats_path、默认缓存及隐式 profile 分列为未验证，不自动扫描全部数据。已有 result 不原地重跑，须换显式 version；无 result 的已确认失败/取消须 `--retry`（API `retry=True`），unknown/busy 不重放。Run 级 `execution.json` 明确本次 attempt，status/report 分列整体执行、科学结果、派生分析和证据完整性，不按 mtime/UUID 猜最近一次。内存硬限制、同进程硬超时及 Windows 启用 Study hook、recipe、数据 worker 或 HF 后端时的硬超时仍拒绝。没有自动 GPU 分配或旧队列恢复。
 
 库内实现只分两柱：`structure/`提供配置、产物、读取及data/model/algorithm/system组件，`flow/`组织默认六阶段、原生/HF组装和所属进程。旧 `structure.api/*` 等内部导入不自动恢复；调用方改用 `rpipe.api`、纯 `structure.contracts` 或明确structure领域模块。公开`run(..., payload=...)`参数保持调用兼容，不代表第三个源码层。旧Study内运行目录不会自动迁移/补签；目录对照须明确 `compare --legacy`，其Tensor/轨迹比较保留但来源标为未验证。旧GPU调度/阶段裁剪/隐式cache迁移参数不再接受；先按当前声明和显式根重新计划。精确API与兼容表见代码结构设计。
 

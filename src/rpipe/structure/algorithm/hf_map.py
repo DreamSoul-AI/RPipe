@@ -84,7 +84,7 @@ def training_arguments_kwargs(
         kwargs['gradient_accumulation_steps'] = period
     blob = algorithm_blob(config)
     for key in ('weight_decay', 'warmup_ratio', 'warmup_steps', 'adam_beta1',
-                'adam_beta2', 'adam_epsilon', 'max_grad_norm', 'momentum'):
+                'adam_beta2', 'adam_epsilon', 'max_grad_norm'):
         value = blob.get(key)
         if key == 'adam_epsilon':
             value = blob.get('eps', value)

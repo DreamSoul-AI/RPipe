@@ -452,12 +452,12 @@ def test_shared_owned_cleanup_preserves_publication_outcome(tmp_path, monkeypatc
     assert {p: (p.read_bytes(), p.stat().st_mode) for p in before} == before
 
 
-@pytest.mark.parametrize('readonly', [False, True], ids=['native-writable', 'native-readonly'])
+@pytest.mark.parametrize('readonly', [False, pytest.param(True, marks=pytest.mark.skipif(
+    os.name != 'nt', reason='Windows read-only hardlink replacement/unlink semantics'))],
+    ids=['native-writable', 'native-readonly'])
 def test_shared_native_readonly_cleanup_keeps_original_replace_error(tmp_path, monkeypatch, shared_publication_case, readonly):
     from rpipe.structure import artifacts as _atomic
 
-    if readonly and os.name != 'nt':
-        pytest.skip('Windows read-only hardlink replacement/unlink semantics')
     source, target, destination, invoke = shared_publication_case
     if readonly:
         source.chmod(0o444)

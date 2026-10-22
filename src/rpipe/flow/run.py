@@ -17,7 +17,7 @@ from rpipe.structure.execution import RunContext
 from rpipe.structure.system.logger import Logger
 
 from .stages import pipeline
-from .study import RecipeContext, apply_recipe, _recipe_pickle_module, run_study_phase
+from .study import RecipeContext, apply_recipe, _recipe_pickle_module, run_study_phase, study_phase_files
 
 _runtime_logged = False
 
@@ -63,24 +63,17 @@ class ProcessRun:
         self.response_verified = False
         self.child = None
         self.nonce = uuid.uuid4().hex
-        self.may_have_descendants = True
         if budget.memory_bytes is not None:
             raise AdmissionError('this process runner cannot enforce a hard memory limit')
-        if budget.timeout_seconds is not None:
-            cfg = spec.to_config()
-            data = cfg.get('data', {})
-            workers = (data.get('config') or {}).get('num_workers', data.get('num_workers', 0))
-            study = load_config(spec.source_dir / 'study.yaml')
-            # Windows has no portable process-tree termination. Do not promise a
-            # hard limit when arbitrary recipes or DataLoader children may escape.
-            if os.name == 'nt' and (workers or study.get('recipe')):
-                raise AdmissionError('hard timeout unavailable for Windows recipes or child data workers')
         cfg = spec.to_config()
         study = load_config(spec.source_dir / 'study.yaml')
         data = cfg.get('data', {})
         workers = (data.get('config') or {}).get('num_workers', data.get('num_workers', 0))
-        self.may_have_descendants = bool(workers or study.get('recipe')
+        self.may_have_descendants = bool(workers or study.get('recipe') or study_phase_files(spec.source_dir, study)
                                          or cfg.get('algorithm', {}).get('source') == 'transformers_trainer')
+        # Windows cannot confirm arbitrary extension or backend descendants stopped.
+        if budget.timeout_seconds is not None and os.name == 'nt' and self.may_have_descendants:
+            raise AdmissionError('hard timeout unavailable for Windows extensions or child-capable backends')
 
     def prepare(self, ctx):
         ctx.spec.assets_dir.mkdir(parents=True, exist_ok=True)
