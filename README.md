@@ -2,11 +2,11 @@
 
 RPipe（Research Pipeline）是研究项目的代码与执行模板，用声明组织比较因素和seed，把一次Run的有效配置、执行事实、结果与跨seed分析连接起来。Python包名为 `rpipe`，中文名为“研究流水线”。
 
-项目仓库：[DreamSoul-AI/RPipe](https://github.com/DreamSoul-AI/RPipe)。MIT许可见 [LICENSE.md](LICENSE.md)。源码包版本仍为0.4.1；本修复分支从dev的 `8a19c9a8018e1bdc196345aba0f2aba39710fd66` 派生，恢复structure/flow两柱边界，保持Draft等待审查。
+项目仓库：[DreamSoul-AI/RPipe](https://github.com/DreamSoul-AI/RPipe)。MIT 许可见 [LICENSE.md](LICENSE.md)。源码包元数据仍为 0.4.1；当前两柱代码试验及设计整理保持 Draft，尚未发布。
 
 ## 阅读入口
 
-| 内容 | 唯一维护位置 |
+| **内容** | **唯一维护位置** |
 | --- | --- |
 | 项目协作、规范入口和硬规则 | [AGENTS.md](AGENTS.md) |
 | 技术机制、现有方法、历史验证、来源和未知 | [研究流水线 通用调研](<docs/研究流水线 通用调研.md>) |
@@ -14,13 +14,15 @@ RPipe（Research Pipeline）是研究项目的代码与执行模板，用声明�
 | 目标目录、每个Python文件、依赖规则与测试镜像 | [研究流水线 代码结构设计](<docs/研究流水线 代码结构设计.md>) |
 | 项目研究问题、Study实验设计、数据/模型/算法/指标和停止条件 | [研究流水线 研究计划](<docs/研究流水线 研究计划.md>) |
 
-历史债务分支只作参考，不是本轮基线。旧逐事文档、报告、JSON和图片已归并或清理，Git历史中的结果只支持其固定提交和条件，不能当作新分支验收。进度维护在PR与提交说明，不继续增加报告文件。
+架构设计集中维护研究对象、质量场景、四类组件、六阶段、状态与取消、身份与产物、恢复、日志、测试和交付合同。代码结构设计登记当前 48 个包内 Python 文件、Study 接入、依赖、调用方、测试镜像及源码与输出分类。两份正文分别标明目标、当前实现和差距；设计整理完成后再按审查结论实施和测试。
 
-改版前完整文档见[固定版本docs](https://github.com/DreamSoul-AI/RPipe/tree/ed0d50be4328af3480b54de31243bf507901d033/docs)：包含概念、structure、flow、layout、测试、CI/CD、研究和发布等33份正文。按用户要求已原样恢复一套独立本地快照，连同当时README、AGENTS共35个文件，来源与字节校验清单随快照保存；交付链接见本次PR。历史正文保持原样，旧CLI和运行目录不作为当前使用合同。
+历史债务分支只作参考。Git 历史结果只支持其固定提交和条件，不能当新分支验收。进度维护在 PR 与提交说明，不增加报告文件。
+
+改版前完整文档见[固定版本 docs](https://github.com/DreamSoul-AI/RPipe/tree/ed0d50be4328af3480b54de31243bf507901d033/docs)：33 份正文及当时 README、AGENTS 共 35 个原文件已原样恢复到独立历史快照，来源与字节清单随快照保存。每份正文的归并去向见代码结构设计第八章：稳定设计进入两份设计，研究、历史证据和规范保持各自职责；旧 CLI 与运行目录不自动成为当前合同。
 
 ## 当前使用边界
 
-源码包位于 `src/rpipe/`，声明位于 `studies/`。纯 `rpipe.api.plan(study_dir, run_root=...)` 展开声明，不装载recipe或Torch、不写盘。CLI的 `plan/status/logs/report/shared` 为读取；`make` 发布配置与索引，`run/launch/run-one` 显式执行，`process` 写派生摘要，`data/tensorboard` 是显式输出操作。所有Study命令要求 `--run-root`，运行根不得包含源码或位于源码内。
+源码包位于 `src/rpipe/`，声明位于 `studies/`。`rpipe.api.plan(study_dir, run_root=...)` 不装载 recipe/Torch、不写盘。CLI 的 `plan/status/logs/report/shared` 为读取；`make` 发布配置与索引，`run/launch/run-one` 显式执行，`process` 写派生摘要，`data/tensorboard` 显式输出。常规 Study 命令要求 `--run-root`，旧目录读取另走显式 legacy 入口。使用方应选择整个 checkout 外的运行根；当前只直接拒绝与 Study 源根互含，对库源码及整个 checkout 的保护仍有差距，详见架构设计 D3。
 
 ```console
 rpipe plan studies/_template --run-root <external-run-root>
@@ -33,7 +35,7 @@ rpipe process studies/_template --run-root <external-run-root>
 
 库内实现只分两柱：`structure/`提供配置、产物、读取及data/model/algorithm/system组件，`flow/`组织默认六阶段、原生/HF组装和所属进程。旧 `structure.api/*` 等内部导入不自动恢复；调用方改用 `rpipe.api`、纯 `structure.contracts` 或明确structure领域模块。公开`run(..., payload=...)`参数保持调用兼容，不代表第三个源码层。旧Study内运行目录不会自动迁移/补签；目录对照须明确 `compare --legacy`，其Tensor/轨迹比较保留但来源标为未验证。旧GPU调度/阶段裁剪/隐式cache迁移参数不再接受；先按当前声明和显式根重新计划。精确API与兼容表见代码结构设计。
 
-本轮验证以PR中固定HEAD的CPU合同、有限原生/HF数值和离线构建记录为准；没有运行MNIST/CIFAR正式矩阵、GPU、性能或历史长曲线验收。
+既有代码验证以 PR 中固定代码 SHA 的 CPU 合同、有限原生/HF 数值和离线构建记录为准，不自动覆盖后续 HEAD。本次设计整理没有新增代码测试；正式 MNIST/CIFAR、GPU、性能及历史长曲线未验收。
 
 ## 宿主项目如何接入
 
