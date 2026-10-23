@@ -370,6 +370,27 @@ class Budget:
             raise AdmissionError('memory_bytes must be an integer')
 
 
+@dataclass(frozen=True)
+class SupervisionLimits:
+    """Explicit wall deadlines and observed RSS/output stop thresholds."""
+
+    run_seconds: float
+    batch_seconds: float
+    rss_bytes: int
+    output_bytes: int
+    poll_seconds: float = 0.1
+    cleanup_seconds: float = 2.0
+
+    def validate(self) -> None:
+        for name, value in vars(self).items():
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value <= 0):
+                raise AdmissionError(f'{name} must be finite and positive')
+        for name in ('rss_bytes', 'output_bytes'):
+            if not isinstance(getattr(self, name), int):
+                raise AdmissionError(f'{name} must be an integer')
+
+
 class Cancellation:
     def __init__(self) -> None:
         self._event = Event()

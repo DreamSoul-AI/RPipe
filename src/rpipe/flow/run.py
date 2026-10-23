@@ -95,7 +95,8 @@ class ProcessRun:
         env['PYTHONPATH'] = source + os.pathsep + env.get('PYTHONPATH', '')
         options = {'start_new_session': True} if os.name != 'nt' else {}
         child = subprocess.Popen([sys.executable, '-m', 'rpipe', '_worker', str(self.request), str(self.output)],
-                                 cwd=ctx.study_dir, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, **options)
+                                 cwd=ctx.study_dir, env=env, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, **options)
         self.child = child
         ctx.register_process(child)
         ctx.state['logger'].info('Unstructured scientific worker output was not collected',

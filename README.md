@@ -14,7 +14,7 @@ RPipe（Research Pipeline）是研究项目的代码与执行模板，用声明�
 | 目标目录、每个Python文件、依赖规则与测试镜像 | [研究流水线 代码结构设计](<docs/研究流水线 代码结构设计.md>) |
 | 项目研究问题、Study实验设计、数据/模型/算法/指标和停止条件 | [研究流水线 研究计划](<docs/研究流水线 研究计划.md>) |
 
-架构设计集中维护研究对象、质量场景、四类组件、六阶段、状态与取消、身份与产物、恢复、日志、测试和交付合同。代码结构设计登记当前 48 个包内 Python 文件、Study 接入、依赖、调用方、测试镜像及源码与输出分类。#228 在 `3da2c50` 保留文档基线；本代码 Draft 跟进实现，两份正文同步区分已实现合同、剩余边界与实际验证范围。
+架构设计集中维护研究对象、质量场景、四类组件、六阶段、状态与取消、身份与产物、恢复、日志、测试和交付合同。代码结构设计登记当前 50 个包内 Python 文件、Study 接入、依赖、调用方、测试镜像及源码与输出分类。#228 在 `3da2c50` 保留文档基线；本代码 Draft 跟进实现，两份正文同步区分已实现合同、剩余边界与实际验证范围。
 
 历史债务分支只作参考。Git 历史结果只支持其固定提交和条件，不能当新分支验收。进度维护在 PR 与提交说明，不增加报告文件。
 
@@ -32,6 +32,10 @@ rpipe process studies/_template --run-root <external-run-root>
 ```
 
 默认每 Run 独立科学子进程，启动前核源码摘要、配置和自己的 train 依赖。`provenance.inputs` 可显式固定外部文件或目录清单；未固定的 path/stats_path、默认缓存及隐式 profile 分列为未验证，不自动扫描全部数据。已有 result 不原地重跑，须换显式 version；无 result 的已确认失败/取消须 `--retry`（API `retry=True`），unknown/busy 不重放。Run 级 `execution.json` 明确本次 attempt，status/report 分列整体执行、科学结果、派生分析和证据完整性，不按 mtime/UUID 猜最近一次。内存硬限制、同进程硬超时及 Windows 启用 Study hook、recipe、数据 worker 或 HF 后端时的硬超时仍拒绝。没有自动 GPU 分配或旧队列恢复。
+
+Windows 另有显式 `api.supervise(specs, limits=SupervisionLimits(...), evidence_dir=...)` / `rpipe supervise` 批次入口：匿名 Job 监管本批协调者、worker 及后代，入组后才放行，覆盖格内和全批期限；首个失败、质量 False、证据不完整或资源触线即停后续派发。四项上限必须显式传入，没有实验默认值。RSS 与输出为周期观察停止线，可能超调，不是硬内存/磁盘配额。须使用专用外部运行根及新建独立证据根，保留原 Run 科学结果与 unknown/执行权协议；不自动 make、预留 GPU 或恢复旧队列。其他平台拒绝此入口；计量范围、文件引用和清理合同见架构设计第四章。
+
+CLI 必须同时提供 `--run-root`、`--evidence-dir`、`--run-seconds`、`--batch-seconds`、`--rss-bytes`、`--output-bytes`；`--poll-seconds` 与 `--cleanup-seconds` 控制采样间隔和有限收尾等待。当前仅以微型 CPU 合同验收监管机制；研究计划中的资源提案仍未校准或批准，不表示已授权真实实验。
 
 库内实现只分两柱：`structure/`提供配置、产物、读取及data/model/algorithm/system组件，`flow/`组织默认六阶段、原生/HF组装和所属进程。旧 `structure.api/*` 等内部导入不自动恢复；调用方改用 `rpipe.api`、纯 `structure.contracts` 或明确structure领域模块。公开`run(..., payload=...)`参数保持调用兼容，不代表第三个源码层。旧Study内运行目录不会自动迁移/补签；目录对照须明确 `compare --legacy`，其Tensor/轨迹比较保留但来源标为未验证。旧GPU调度/阶段裁剪/隐式cache迁移参数不再接受；先按当前声明和显式根重新计划。精确API与兼容表见代码结构设计。
 
