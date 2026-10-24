@@ -94,14 +94,15 @@ class ProcessRun:
         source = str(Path(__file__).resolve().parents[2])
         env['PYTHONPATH'] = source + os.pathsep + env.get('PYTHONPATH', '')
         options = {'start_new_session': True} if os.name != 'nt' else {}
+        # Finish the parent record before competing for the worker's zero-wait log lock.
+        ctx.state['logger'].info('Unstructured scientific worker output collection is disabled',
+                                 event='logging.unstructured_record', operation='worker_stdout',
+                                 drop_reason='raw_output_not_authorized')
         child = subprocess.Popen([sys.executable, '-m', 'rpipe', '_worker', str(self.request), str(self.output)],
                                  cwd=ctx.study_dir, env=env, stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, **options)
         self.child = child
         ctx.register_process(child)
-        ctx.state['logger'].info('Unstructured scientific worker output was not collected',
-                                 event='logging.unstructured_record', operation='worker_stdout',
-                                 drop_reason='raw_output_not_authorized')
         deadline = time.monotonic() + self.budget.timeout_seconds if self.budget.timeout_seconds else None
         while child.poll() is None:
             if ctx.cancellation.is_set() or (deadline is not None and time.monotonic() >= deadline):

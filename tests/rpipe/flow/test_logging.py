@@ -13,11 +13,16 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
 
 
 @pytest.mark.parametrize('worker_fails', [False, True, 'close'])
-def test_noisy_worker_is_not_persisted_and_events_keep_child_identity(source_study, run_root, monkeypatch, worker_fails):
+@pytest.mark.parametrize('held_parent_log', [False, True])
+def test_noisy_worker_is_not_persisted_and_events_keep_child_identity(
+        source_study, run_root, tmp_path, monkeypatch, worker_fails, held_parent_log):
     from rpipe.api import plan, run
+    from rpipe.structure.artifacts import cache_lock
+    from rpipe.structure.system.logger import Logger
     module = importlib.import_module('rpipe.flow.run')
     native_popen = subprocess.Popen
     children = []
+    gate = tmp_path / 'parent-policy-recorded'
     script = '''
 import sys
 from pathlib import Path
@@ -32,15 +37,35 @@ class Tiny:
     def close(self, ctx):
         # CLOSE_FAILURE
 native.NativeRun = Tiny
+# START_GATE
 raise SystemExit(worker(Path(sys.argv[1]), Path(sys.argv[2])))
 '''
+    if held_parent_log:
+        script = script.replace('# START_GATE', '''import time
+deadline = time.monotonic() + 10
+while not Path(sys.argv[3]).exists():
+    if time.monotonic() >= deadline: raise TimeoutError('parent policy not recorded')
+    time.sleep(.01)
+''')
+        write = Logger._write_file
+        def held_write(logger, record):
+            if record['event'] == 'logging.unstructured_record' and record.get('operation') == 'worker_stdout':
+                with cache_lock(logger.path.parent, timeout=0):
+                    write(logger, record)
+                    gate.touch()
+                    # A spawned worker runs entirely while this parent record owns the lock.
+                    if children:
+                        children[-1].wait(timeout=10)
+            else:
+                write(logger, record)
+        monkeypatch.setattr(Logger, '_write_file', held_write)
     script = script.replace('# FAILURE', "raise ValueError('token=PRIVATE_WORKER_EXCEPTION')" if worker_fails is True else 'pass')
     script = script.replace('# CLOSE_FAILURE', "raise RuntimeError('token=PRIVATE_WORKER_CLEANUP')" if worker_fails == 'close' else 'pass')
     class TinyWorker(native_popen):
         def __init__(self, args, **kwargs):
             assert kwargs['stdout'] == subprocess.DEVNULL
             assert kwargs['stderr'] == subprocess.STDOUT
-            super().__init__([sys.executable, '-B', '-c', script, *args[-2:]], **kwargs)
+            super().__init__([sys.executable, '-B', '-c', script, *args[-2:], str(gate)], **kwargs)
             children.append(self)
     monkeypatch.setattr(module.subprocess, 'Popen', TinyWorker)
     spec = plan(source_study, run_root=run_root)[0]
