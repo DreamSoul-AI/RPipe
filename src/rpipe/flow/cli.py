@@ -12,7 +12,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog='rpipe')
     parser.add_argument('--version', action='version', version=__version__)
     commands = parser.add_subparsers(dest='command', required=True)
-    for name in ('plan', 'make', 'run', 'study', 'launch', 'run-one', 'status', 'logs', 'report', 'process', 'shared', 'data', 'tensorboard'):
+    for name in ('plan', 'make', 'run', 'study', 'launch', 'run-one', 'supervise', 'status', 'logs', 'report', 'process', 'shared', 'data', 'tensorboard'):
         command = commands.add_parser(name)
         command.add_argument('study_dir', type=Path)
         if name == 'run-one': command.add_argument('run_id')
@@ -27,6 +27,15 @@ def main(argv=None) -> int:
             command.add_argument('--timeout', type=float)
             command.add_argument('--memory-bytes', type=int)
             command.add_argument('--retry', action='store_true')
+        if name == 'supervise':
+            command.add_argument('--evidence-dir', type=Path, required=True)
+            command.add_argument('--run-seconds', type=float, required=True)
+            command.add_argument('--batch-seconds', type=float, required=True)
+            command.add_argument('--rss-bytes', type=int, required=True)
+            command.add_argument('--output-bytes', type=int, required=True)
+            command.add_argument('--poll-seconds', type=float, default=0.1)
+            command.add_argument('--cleanup-seconds', type=float, default=2.0)
+            command.add_argument('--retry', action='store_true')
     compare = commands.add_parser('compare')
     compare.add_argument('left', type=Path)
     compare.add_argument('right', type=Path)
@@ -39,11 +48,15 @@ def main(argv=None) -> int:
     worker = commands.add_parser('_worker', help=argparse.SUPPRESS)
     worker.add_argument('request', type=Path)
     worker.add_argument('output', type=Path)
+    commands.add_parser('_supervisor-coordinator', help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     try:
         if args.command == '_worker':
             from .run import worker as execute_worker
             return execute_worker(args.request, args.output)
+        if args.command == '_supervisor-coordinator':
+            from .supervision import coordinator
+            return coordinator()
         from rpipe import api
         if args.command == 'compare':
             if not args.legacy:
@@ -63,6 +76,10 @@ def main(argv=None) -> int:
             return 0
         if args.run_root is None:
             parser.error('--run-root is required; old Study directories are never implicitly migrated')
+        if args.command == 'supervise':
+            limits = api.SupervisionLimits(args.run_seconds, args.batch_seconds, args.rss_bytes,
+                                          args.output_bytes, args.poll_seconds, args.cleanup_seconds)
+            limits.validate()
         specs = api.plan(args.study_dir, run_root=args.run_root, version=args.study_version)
         selected = getattr(args, 'run_id', None) or args.selected_id
         if selected:
@@ -73,6 +90,10 @@ def main(argv=None) -> int:
                       'run_dir': str(s.run_dir), 'train_id': s.train_id} for s in specs]
         elif args.command == 'make':
             value = api.make(specs)
+        elif args.command == 'supervise':
+            value = api.supervise(specs, limits=limits, evidence_dir=args.evidence_dir, retry=args.retry)
+            print(json.dumps(value, default=str))
+            return 0 if value['status'] == 'succeeded' else 1
         elif args.command in ('run', 'study', 'launch', 'run-one'):
             if args.command in ('run', 'study'):
                 api.make(specs)

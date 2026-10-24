@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .structure.contracts import AdmissionError, BusyError, SourceMismatch, Budget, Cancellation, RunOutcome, RunSpec
+from .structure.contracts import AdmissionError, BusyError, SourceMismatch, Budget, Cancellation, RunOutcome, RunSpec, SupervisionLimits
 from .structure.artifacts import (Ownership, cache_lock, identity, load_config, source_digest,
                                   validate_input_paths, validate_source, write_config, write_json)
 from .structure.plan import expand
@@ -27,6 +27,15 @@ def run(spec: RunSpec, *, payload=None, budget: Budget | None = None,
 
 def cancel(cancellation: Cancellation) -> None:
     cancellation.request()
+
+
+def supervise(specs, *, limits: SupervisionLimits, evidence_dir: Path | str,
+              cancellation: Cancellation | None = None, retry: bool = False) -> dict:
+    """Supervise an explicitly bounded Windows batch; no experimental defaults."""
+    from .flow.supervision import supervise as supervise_batch
+
+    return supervise_batch(specs, limits=limits, evidence_dir=evidence_dir,
+                           cancellation=cancellation, retry=retry)
 
 
 def make(specs) -> dict:
