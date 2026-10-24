@@ -44,6 +44,26 @@ def save_json(path: Path, body: Any) -> None:
     atomic_write_text(path, json.dumps(body, ensure_ascii=False, indent=2) + '\n')
 
 
+@contextlib.contextmanager
+def owned(resource: Any, close: Any = None):
+    """Release a local resource without replacing its primary failure."""
+    primary = None
+    try:
+        yield resource
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        cleanup = close if close is not None else getattr(resource, 'close', None)
+        if callable(cleanup):
+            try:
+                cleanup()
+            except BaseException as error:
+                if primary is None:
+                    raise
+                primary.cleanup_errors = (*getattr(primary, 'cleanup_errors', ()), error)
+
+
 def source_manifest() -> dict[str, str]:
     from rpipe.api import source_digest
 
@@ -312,14 +332,14 @@ def native_model(data: Any, name: str, assets: Path) -> Any:
                               assets, data_meta=data.meta)
 
 
-def observe_native(data: Any, module: Any) -> tuple[dict[str, Observations], list[Any]]:
+@contextlib.contextmanager
+def observe_native(data: Any, module: Any):
     observations = {'train': Observations(), 'test': Observations()}
     original_iter = data.iter_batches
     def batches(split: str):
         for images, targets in original_iter(split):
             observations[split].batch(images, targets)
             yield images, targets
-    data.iter_batches = batches
     base = data._train_set
     class Indexed:
         def __len__(self):
@@ -327,11 +347,17 @@ def observe_native(data: Any, module: Any) -> tuple[dict[str, Observations], lis
         def __getitem__(self, index):
             observations['train'].index(index)
             return base[index]
-    data._train_set = Indexed()
     def core_hook(_module: Any, args: Any) -> None:
         observations['train' if module.training else 'test'].core(args[0])
-    handle = module.net.register_forward_pre_hook(core_hook)
-    return observations, [handle]
+    def restore():
+        data.iter_batches = original_iter
+        data._train_set = base
+    with owned(data, restore):
+        data.iter_batches = batches
+        data._train_set = Indexed()
+        handle = module.net.register_forward_pre_hook(core_hook)
+        with owned(handle, handle.remove):
+            yield observations
 
 
 def observed_original(loader: Any, observation: Observations):
@@ -431,28 +457,28 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
             def old_core_hook(_module: Any, args: Any):
                 obs_old['train' if old.training else 'test'].core(args[0])
             old_hook = old.model.register_forward_pre_hook(old_core_hook)
-            iterator = enumerate(observed_original(loaders['train'], obs_old['train']))
-            logger = archive.metric.make_logger(str(cell / 'original_tensorboard'), **archive.config.cfg['log'],
-                                               tag=archive.config.cfg['tag'], metric=archive.config.cfg['metric'])
-            old_snaps = {}
-            old_best = None
-            for step in (30, 60):
-                archive.train_model.train(iterator, old, optimizer, scheduler, logger)
-                if archive.config.cfg['step'] != step:
-                    raise ValueError(f'original train stopped at {archive.config.cfg["step"]}, expected {step}')
-                archive.train_model.test(observed_original(loaders['test'], obs_old['test']), old, logger)
-                snapshot = {'step': step, 'model': model_state(old), 'optimizer': cpu_tree(optimizer.state_dict()),
-                            'scheduler': copy.deepcopy(scheduler.state_dict()), 'rng': rng(device),
-                            'observations': {split: item.result() for split, item in obs_old.items()},
-                            'train': {key.split('/')[1]: value for key, value in logger.mean.items() if key.startswith('train/')},
-                            'test': {key.split('/')[1]: value for key, value in logger.mean.items() if key.startswith('test/')}}
-                old_snaps[step] = snapshot
-                torch.save(snapshot, cell / f'original_step_{step}.pt')
-                if logger.compare('test'):
-                    old_best = snapshot
-                logger.reset()
-            old_hook.remove()
-            logger.writer.close()
+            with owned(old_hook, old_hook.remove):
+                iterator = enumerate(observed_original(loaders['train'], obs_old['train']))
+                logger = archive.metric.make_logger(str(cell / 'original_tensorboard'), **archive.config.cfg['log'],
+                                                   tag=archive.config.cfg['tag'], metric=archive.config.cfg['metric'])
+                with owned(logger.writer):
+                    old_snaps = {}
+                    old_best = None
+                    for step in (30, 60):
+                        archive.train_model.train(iterator, old, optimizer, scheduler, logger)
+                        if archive.config.cfg['step'] != step:
+                            raise ValueError(f'original train stopped at {archive.config.cfg["step"]}, expected {step}')
+                        archive.train_model.test(observed_original(loaders['test'], obs_old['test']), old, logger)
+                        snapshot = {'step': step, 'model': model_state(old), 'optimizer': cpu_tree(optimizer.state_dict()),
+                                    'scheduler': copy.deepcopy(scheduler.state_dict()), 'rng': rng(device),
+                                    'observations': {split: item.result() for split, item in obs_old.items()},
+                                    'train': {key.split('/')[1]: value for key, value in logger.mean.items() if key.startswith('train/')},
+                                    'test': {key.split('/')[1]: value for key, value in logger.mean.items() if key.startswith('test/')}}
+                        old_snaps[step] = snapshot
+                        torch.save(snapshot, cell / f'original_step_{step}.pt')
+                        if logger.compare('test'):
+                            old_best = snapshot
+                        logger.reset()
             if old_best is None:
                 raise ValueError('original Loss-best was not selected')
             torch.save(old_best, cell / 'original_best.pt')
@@ -468,12 +494,10 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
                 torch.cuda.set_rng_state_all(initial_rng['cuda'])
             current_init = model_state(model.module)
             current_init_rng = rng(device)
-            obs_new, handles = observe_native(data, model.module)
-            algorithm = CapturedTrain(AlgorithmConfig.from_mapping(mapping()))
-            algorithm.observations = obs_new
-            summary = algorithm.run(data, model, system, tracker)
-            for handle in handles:
-                handle.remove()
+            with observe_native(data, model.module) as obs_new:
+                algorithm = CapturedTrain(AlgorithmConfig.from_mapping(mapping()))
+                algorithm.observations = obs_new
+                summary = algorithm.run(data, model, system, tracker)
             new_best = cpu_tree(system.load_checkpoint('best'))
             current_best_path = str(system.checkpoint_dir() / 'best.pt')
             del model, data, system, tracker
@@ -489,37 +513,39 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
             eval_loaders = archive.dataset.make_data_loader(datasets, {'train': 250, 'test': 1000})
             eval_logger = archive.metric.make_logger(str(cell / 'original_eval_tensorboard'), **archive.config.cfg['log'],
                                                      tag=archive.config.cfg['tag'], metric=archive.config.cfg['metric'])
-            old_eval_observation = Observations()
-            archive.test_model.test(observed_original(eval_loaders['test'], old_eval_observation), eval_old, eval_logger)
-            old_eval = {key.split('/')[1]: value for key, value in eval_logger.mean.items() if key.startswith('test/')}
-            eval_logger.writer.close()
+            with owned(eval_logger.writer):
+                old_eval_observation = Observations()
+                archive.test_model.test(observed_original(eval_loaders['test'], old_eval_observation), eval_old, eval_logger)
+                old_eval = {key.split('/')[1]: value for key, value in eval_logger.mean.items() if key.startswith('test/')}
             config = seed_runtime(device)
             eval_assets = cell / 'current_eval' / 'assets'
-            eval_data = native_data(workspace, name, eval_assets)
-            eval_model = native_model(eval_data, model_name, eval_assets)
-            eval_observations, eval_handles = observe_native(eval_data, eval_model.module)
-            eval_system = SystemFactory.build(config, eval_assets)
-            eval_tracker = AlgorithmTracker(eval_assets)
-            eval_mapping = mapping()
-            eval_mapping.update(mode='eval', resume_from=current_best_path)
-            eval_summary = EvalAlgorithm(AlgorithmConfig.from_mapping(eval_mapping)).run(eval_data, eval_model, eval_system, eval_tracker)
-            for handle in eval_handles:
-                handle.remove()
-            new_eval = eval_tracker.segment_mean('test')
-            raw = {'old_init': old_init, 'old_init_rng': old_init_rng,
-                'current_init': current_init, 'current_init_rng': current_init_rng,
-                'old_snaps': old_snaps, 'current_snaps': algorithm.snapshots,
-                'old_best': old_best, 'new_best': new_best,
-                'eval_model_state': model_state(eval_model.module),
-                'old_eval': old_eval, 'new_eval': new_eval,
-                'old_eval_observation': old_eval_observation.result(),
-                'eval_observations': {key: item.result() for key, item in eval_observations.items()},
-                'obs_old': {key: item.result() for key, item in obs_old.items()},
-                'obs_new': {key: item.result() for key, item in obs_new.items()},
-                'summary': summary, 'eval_summary': eval_summary,
-                'elapsed_seconds': time.monotonic() - cell_start,
-                'gpu_peak_allocated_bytes': torch.cuda.max_memory_allocated(torch.device(device)) if device.startswith('cuda') else None,
-                'gpu_peak_reserved_bytes': torch.cuda.max_memory_reserved(torch.device(device)) if device.startswith('cuda') else None}
+            with contextlib.ExitStack() as resources:
+                eval_data = resources.enter_context(owned(native_data(workspace, name, eval_assets)))
+                eval_model = resources.enter_context(owned(native_model(eval_data, model_name, eval_assets)))
+                eval_observations = resources.enter_context(observe_native(eval_data, eval_model.module))
+                eval_system = SystemFactory.build(config, eval_assets)
+                resources.enter_context(owned(eval_system.logger))
+                eval_tracker = AlgorithmTracker(eval_assets)
+                eval_mapping = mapping()
+                eval_mapping.update(mode='eval', resume_from=current_best_path)
+                eval_summary = EvalAlgorithm(AlgorithmConfig.from_mapping(eval_mapping)).run(eval_data, eval_model, eval_system, eval_tracker)
+                new_eval = eval_tracker.segment_mean('test')
+                raw = {'old_init': old_init, 'old_init_rng': old_init_rng,
+                    'current_init': current_init, 'current_init_rng': current_init_rng,
+                    'old_snaps': old_snaps, 'current_snaps': algorithm.snapshots,
+                    'old_best': old_best, 'new_best': new_best,
+                    'eval_model_state': model_state(eval_model.module),
+                    'old_eval': old_eval, 'new_eval': new_eval,
+                    'old_eval_observation': old_eval_observation.result(),
+                    'eval_observations': {key: item.result() for key, item in eval_observations.items()},
+                    'obs_old': {key: item.result() for key, item in obs_old.items()},
+                    'obs_new': {key: item.result() for key, item in obs_new.items()},
+                    'summary': summary, 'eval_summary': eval_summary,
+                    'elapsed_seconds': time.monotonic() - cell_start,
+                    'gpu_peak_allocated_bytes': torch.cuda.max_memory_allocated(torch.device(device)) if device.startswith('cuda') else None,
+                    'gpu_peak_reserved_bytes': torch.cuda.max_memory_reserved(torch.device(device)) if device.startswith('cuda') else None}
+            if not eval_system.logger.diagnostics_complete:
+                native[2].logger.diagnostics_complete = False
             torch.save(raw, cell / 'OBSERVATIONS.pt')
             result['runs'].append({'data': name, 'model': model_name, 'summary': summary,
                                   'elapsed_seconds': raw['elapsed_seconds'],

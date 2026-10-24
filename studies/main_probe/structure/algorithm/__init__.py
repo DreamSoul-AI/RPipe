@@ -27,13 +27,25 @@ def register(ctx, pair):
             super().__init__(config)
             self.workspace = workspace
             self.report = None
+            self.cleanup_errors = ()
             self.initial_rng = engine.rng(device)
 
         def run(self, data, model, system, tracker):
-            self.report = engine.run_pair(workspace, device, pair,
-                (data, model, system, tracker, self.initial_rng))
+            try:
+                self.report = engine.run_pair(workspace, device, pair,
+                    (data, model, system, tracker, self.initial_rng))
+            except BaseException as error:
+                self.cleanup_errors = getattr(error, 'cleanup_errors', ())
+                raise
             row = self.report['runs'][0]
             return dict(row['summary'], elapsed_seconds=row['elapsed_seconds'])
+
+        def close(self):
+            errors, self.cleanup_errors = self.cleanup_errors, ()
+            if errors:
+                error = RuntimeError('probe resource cleanup failed')
+                error.errors = tuple(errors)
+                raise error from errors[0]
 
     DataRegistry.register(pair[0], 'main_probe', build_data)
     AlgorithmRegistry.register('train', 'main_probe', PairedAlgorithm)
