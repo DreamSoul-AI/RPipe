@@ -25,6 +25,8 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    env:
+      RPIPE_PACKAGE_EVIDENCE_ROOT: ${{ runner.temp }}/rpipe-package-evidence
 
     steps:
       - name: Checkout repository
@@ -36,11 +38,17 @@ jobs:
           python-version: "3.10"
           cache: pip
 
+      - name: Prepare evidence directory
+        shell: bash
+        run: mkdir -p "$RPIPE_PACKAGE_EVIDENCE_ROOT"
+
       - name: Install build frontend
-        run: python -m pip install --upgrade build
+        shell: bash
+        run: python -m pip install --upgrade build 2>&1 | tee "$RPIPE_PACKAGE_EVIDENCE_ROOT/build-frontend.log"
 
       - name: Build wheel and source distribution
-        run: python -m build
+        shell: bash
+        run: python -m build 2>&1 | tee "$RPIPE_PACKAGE_EVIDENCE_ROOT/build.log"
 
       - name: Verify installed wheel CLI and CPU workflow
         shell: bash
@@ -51,8 +59,8 @@ jobs:
           else
             package_python="$PWD/.tmp/wheel-env/bin/python"
           fi
-          "$package_python" -m pip install dist/*.whl
-          "$package_python" tests/package_smoke.py --workspace "$RUNNER_TEMP/rpipe-wheel-smoke"
+          "$package_python" -m pip install dist/*.whl 2>&1 | tee "$RPIPE_PACKAGE_EVIDENCE_ROOT/wheel-install.log"
+          "$package_python" tests/package_smoke.py --workspace "$RUNNER_TEMP/rpipe-wheel-smoke" 2>&1 | tee "$RPIPE_PACKAGE_EVIDENCE_ROOT/wheel-smoke.log"
 
       - name: Verify source distribution installation and CLI
         shell: bash
@@ -63,8 +71,21 @@ jobs:
           else
             package_python="$PWD/.tmp/sdist-env/bin/python"
           fi
-          "$package_python" -m pip install dist/*.tar.gz
-          "$package_python" tests/package_smoke.py --workspace "$RUNNER_TEMP/rpipe-sdist-smoke"
+          "$package_python" -m pip install dist/*.tar.gz 2>&1 | tee "$RPIPE_PACKAGE_EVIDENCE_ROOT/sdist-install.log"
+          "$package_python" tests/package_smoke.py --workspace "$RUNNER_TEMP/rpipe-sdist-smoke" 2>&1 | tee "$RPIPE_PACKAGE_EVIDENCE_ROOT/sdist-smoke.log"
+
+      - name: Upload package check evidence
+        if: always()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-evidence-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: |
+            ${{ env.RPIPE_PACKAGE_EVIDENCE_ROOT }}/
+            ${{ runner.temp }}/rpipe-wheel-smoke/
+            ${{ runner.temp }}/rpipe-sdist-smoke/
+          if-no-files-found: error
+          retention-days: 7
 
   package-gate:
     name: Build package
