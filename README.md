@@ -16,7 +16,7 @@ RPipe（Research Pipeline）是研究项目的代码与执行模板，用声明�
 
 架构设计集中维护研究对象、质量场景、四类组件、六阶段、状态与取消、身份与产物、恢复、日志、测试和交付合同。代码结构设计登记当前 50 个包内 Python 文件、Study 接入、依赖、调用方、测试镜像及源码与输出分类。[#228](https://github.com/DreamSoul-AI/RPipe/pull/228) 保留 `3da2c50bb8db70fbeb78f07029dd4c8cc28012de` 的设计基线，[#229](https://github.com/DreamSoul-AI/RPipe/pull/229) 跟进实现，集成代码固定为 `a32bdd110dda51986148369ea3358cc41544eb6c`。两份正文分别维护已实现合同、剩余边界与实际验证范围。
 
-历史债务分支只作参考。Git 历史结果只支持其固定提交和条件，不能当新分支验收。进度维护在 PR 与提交说明，不增加报告文件。
+历史债务分支只作参考。Git 历史结果只支持其固定提交和条件，不能当新分支验收。开发决定与演进进入开发记录，实际执行从运行记录定位，PR 与提交引用对应记录，不新增同义报告。
 
 改版前完整文档见[固定版本 docs](https://github.com/DreamSoul-AI/RPipe/tree/ed0d50be4328af3480b54de31243bf507901d033/docs)：33 份正文及当时 README、AGENTS 共 35 个原文件已原样恢复到独立历史快照，来源与字节清单随快照保存。每份正文的归并去向见代码结构设计第八章：稳定设计进入两份设计，研究、历史证据和规范保持各自职责；旧 CLI 与运行目录不自动成为当前合同。
 
@@ -54,3 +54,13 @@ CLI 必须同时提供 `--run-root`、`--evidence-dir`、`--run-seconds`、`--ba
 DreamSoul项目与规范从 [组织入口](https://github.com/DreamSoul-AI)、[公司资料入口](https://dreamsoul.feishu.cn/drive/folder/HFFFfNlvelicdsd46PCcrVZ2n4g) 及 [规范索引](https://dreamsoul.feishu.cn/docx/UmU1d2EwLoeET5xCJChcOKPknyb) 定位，具体链接以AGENTS的当前入口为准，不依赖某台机器路径。文档设计采用 [CPU内存清理样板](https://github.com/DreamSoul-AI/cpu-memory-cleanup/tree/6938f10447b250958856a845fc5448aa1185b52d) 的粒度，从质量场景推导职责和文件边界。
 
 文档交付与代码跟进分别经独立 PR 指向 dev。#230 维护交付与验收计划，#231/#232 跟进固定输入、异常清理和资源监管；合并、发布、实验执行和其他项目接入分别按明确授权推进。
+
+## 研发维护与文档现状
+
+Python 3.10+ 与 PyTorch 等依赖见 [pyproject.toml](pyproject.toml)，安装后的 CLI 入口为 `rpipe`。目录入口：[产品或库源码](src/rpipe/)、[研究声明与适配](studies/)、[测试](tests/)、[当前文档](docs/)。运行与测试按本 README、相关设计和实际配置选择，不把历史命令视为新的实验授权。
+
+已有通用调研、架构设计、代码结构设计和研究计划，入口见上表。文献调研、开发计划、缺陷记录、开发记录与运行记录尚未建立独立当前入口，待按实际研究与开发进展补齐。现有研究计划不能替代开发计划，通用调研不能替代文献调研；历史结果仍按各文档的来源和版本解释。
+
+现有专项文件沿用历史“项目名 文档类型”名称，通过上表定位，作为本仓现阶段的命名例外登记；新建或后续迁移采用 AGENTS.md 的“文档类型 [English Name] 项目名称.md”，改名时同步所有消费者与引用，不自动批量迁移。
+
+本地测试入口为 [tests/run.py](tests/run.py)。先按其参数选择有界 CPU 合同与外部结果根，不能用测试代替真实数据、GPU 或完整研究验收。
