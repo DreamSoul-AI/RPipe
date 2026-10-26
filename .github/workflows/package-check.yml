@@ -14,8 +14,6 @@ jobs:
         - windows-latest
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
-    env:
-      RPIPE_PACKAGE_EVIDENCE_ROOT: ${{ runner.temp }}/rpipe-package-evidence
     steps:
     - name: Checkout repository
       uses: actions/checkout@v7
@@ -26,7 +24,11 @@ jobs:
         cache: pip
     - name: Prepare evidence directory
       shell: bash
-      run: mkdir -p "$RPIPE_PACKAGE_EVIDENCE_ROOT"
+      run: 'mkdir -p "$RUNNER_TEMP/rpipe-package-evidence"
+
+        echo "RPIPE_PACKAGE_EVIDENCE_ROOT=$RUNNER_TEMP/rpipe-package-evidence" >> "$GITHUB_ENV"
+
+        '
     - name: Install build frontend
       shell: bash
       run: python -c "print('controlled pre-build failure'); raise SystemExit(9)" 2>&1 | tee "$RPIPE_PACKAGE_EVIDENCE_ROOT/build-frontend.log"
@@ -49,7 +51,7 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: package-evidence-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
-        path: '${{ env.RPIPE_PACKAGE_EVIDENCE_ROOT }}/
+        path: '${{ runner.temp }}/rpipe-package-evidence/
 
           ${{ runner.temp }}/rpipe-wheel-smoke/
 

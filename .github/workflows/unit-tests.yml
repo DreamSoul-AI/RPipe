@@ -8,9 +8,6 @@ jobs:
     name: CPU tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    env:
-      RPIPE_TEST_RESULTS_ROOT: ${{ runner.temp }}/rpipe-test-evidence
-      RPIPE_ARCHIVE_PROBE_MODE: ${{ runner.os == 'Linux' && 'failure' || 'timeout' }}
     strategy:
       fail-fast: false
       matrix:
@@ -29,7 +26,11 @@ jobs:
         cache: pip
     - name: Prepare evidence directory
       shell: bash
-      run: mkdir -p "$RPIPE_TEST_RESULTS_ROOT"
+      run: 'mkdir -p "$RUNNER_TEMP/rpipe-test-evidence"
+
+        echo "RPIPE_TEST_RESULTS_ROOT=$RUNNER_TEMP/rpipe-test-evidence" >> "$GITHUB_ENV"
+
+        '
     - name: Install package and pytest
       shell: bash
       run: python -m pip install pytest==8.4.2 2>&1 | tee "$RPIPE_TEST_RESULTS_ROOT/install.log"
@@ -51,9 +52,11 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: cpu-evidence-${{ matrix.os }}-py${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
-        path: ${{ env.RPIPE_TEST_RESULTS_ROOT }}/
+        path: ${{ runner.temp }}/rpipe-test-evidence/
         if-no-files-found: error
         retention-days: 7
+    env:
+      RPIPE_ARCHIVE_PROBE_MODE: ${{ matrix.os == 'ubuntu-latest' && 'failure' || 'timeout' }}
   unit-gate:
     name: Unit tests
     needs: unit
