@@ -37,21 +37,49 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      - name: Prepare evidence directory
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/rpipe-test-evidence"
+          echo "RPIPE_TEST_RESULTS_ROOT=$RUNNER_TEMP/rpipe-test-evidence" >> "$GITHUB_ENV"
+
       - name: Install package and pytest
-        run: python -m pip install -e ".[dev,tensorboard]" "huggingface_hub==1.33.0" "datasets==5.0.0" "httpx==0.28.1" requests aiohttp Pillow
+        shell: bash
+        run: >-
+          python -m pip install -e ".[dev,tensorboard]" "huggingface_hub==1.33.0" "datasets==5.0.0" "httpx==0.28.1" requests aiohttp Pillow
+          2>&1 | tee "$RPIPE_TEST_RESULTS_ROOT/install.log"
 
       - name: Run core unit tests
-        run: python tests/run.py --core
+        shell: bash
+        run: >-
+          python tests/run.py --core -- --basetemp "${{ runner.temp }}/pytest-core"
+          2>&1 | tee "$RPIPE_TEST_RESULTS_ROOT/core.log"
 
       - name: Run native CPU integration and end-to-end flows
+        shell: bash
         run: >-
-          python tests/run.py --all --cost-class c1 --cost-class c2 --
+          python tests/run.py --all --plan-id offline-integration --cost-class c1 --cost-class c2 --
           -m "(integration or e2e) and not external and not gpu and not slow"
+          --basetemp "${{ runner.temp }}/pytest-integration"
+          2>&1 | tee "$RPIPE_TEST_RESULTS_ROOT/integration.log"
 
       - name: Read back optional TensorBoard events (CPU, offline)
+        shell: bash
         run: >-
-          python tests/run.py --all --cost-class c1 --
+          python tests/run.py --all --plan-id tensorboard-roundtrip --cost-class c1 --
           tests/rpipe/flow/test_exports_curves.py::test_tensorboard_real_event_roundtrip
+          --basetemp "${{ runner.temp }}/pytest-tensorboard"
+          2>&1 | tee "$RPIPE_TEST_RESULTS_ROOT/tensorboard.log"
+
+      - name: Upload CPU test evidence
+        if: always()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@v7
+        with:
+          name: cpu-evidence-${{ matrix.os }}-py${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: ${{ runner.temp }}/rpipe-test-evidence/
+          if-no-files-found: error
+          retention-days: 7
 
   unit-gate:
     name: Unit tests

@@ -1,5 +1,5 @@
 # study.yaml — copy studies/_template/ → studies/<your_study>/
-# 对照根 README.md 的 Study 指南 §1–§3。格子由 make 展开，不要手写 runs/。
+# 对照根 README.md 的“Study 使用与执行边界”。格子由 make 展开，不要手写 runs/。
 
 study: my_study
 origin: domestic              # foreign：官方数据与 Hugging Face；domestic：国内镜像。Study 只定一次

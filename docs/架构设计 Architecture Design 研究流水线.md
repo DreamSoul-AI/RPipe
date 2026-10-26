@@ -1,8 +1,4 @@
-**研究流水线 架构设计**
-
-更新日期：2026 年 10 月 23 日。项目：[RPipe](https://github.com/DreamSoul-AI/RPipe)，中文名“研究流水线”。状态：设计 #228 与代码 #229 已依次合入 dev。设计基线为 `3da2c50bb8db70fbeb78f07029dd4c8cc28012de`，当前实现固定为 `a32bdd110dda51986148369ea3358cc41544eb6c`。本文“当前”指该实现，目标及剩余限制另行标明。固定验证摘要见通用调研，命令与完整记录见对应 PR。包版本仍为 `0.4.1`，未发布。
-
-本文维护概念、质量场景、职责接口、状态、运行部署、科学执行、持久化及测试交付合同。[代码结构设计](<研究流水线 代码结构设计.md>)维护目录、Python 文件、依赖与调用方落位，[通用调研](<研究流水线 通用调研.md>)维护机制比较、来源和历史验证，[研究计划](<研究流水线 研究计划.md>)维护各 Study 的问题、实验设计和科学判据。
+更新日期：2026年10月27日。本文维护当前确认采用的架构方向、可观察合同与取舍。当前实现的支持边界与目标未落地处明确标注，实际待办见开发计划，采用经过和验证结果只进入日期记录。
 
 # 一、设计依据与范围
 
@@ -10,25 +6,13 @@
 
 RPipe 服务于研究者声明比较因素、组织多 seed 执行、读取结果并复核结论的闭环。设计顺序为：用户旅程与科学边界 → 质量场景 → 状态和资源归属 → 职责接口 → 源码依赖与运行部署 → 验证。目录是职责的落位，不能替代这条推导链。
 
-两柱来自 RPipe 原有概念及已确认约束：`structure` 提供建构与计算能力，`flow` 决定阶段装配和执行顺序。data/model/algorithm/system 本来就属于 structure，没有将它们集中到平级 `payloads` 的职责依据，也不能在 structure 内另藏同名总包。公共 API 的兼容参数 `payload` 只表示一次注入的运行实现，不构成架构层或文件划分依据。
+本项目采用两柱：`structure` 提供建构与计算能力，`flow` 决定阶段装配和执行顺序。data/model/algorithm/system 本来就属于 structure，没有将它们集中到平级 `payloads` 的职责依据，也不能在 structure 内另藏同名总包。公共 API 的兼容参数 `payload` 只表示一次注入的运行实现，不构成架构层或文件划分依据。
 
-DreamSoul 的软件架构资料提供质量驱动、黑盒合同、多视图和取舍方法；CPU 内存清理样板提供小项目描述粒度，均未规定新增载荷层、服务容器或完整建模体系。旧版详细文档提供研究概念、四类组件、六阶段和失败保全依据；旧调度器、旧目录与固定八子包要求须重新评估，不能随正文恢复重新生效。
+模块边界由变化原因、状态所有者和失败影响推导。继续采用本机协调与文件合同，避免为没有确认的集群调度、外部服务或插件生态增加持久化状态。具体模块映射和允许依赖在代码结构设计维护。
 
-## （二）规范与参考资料
+## （二）设计方法与依据
 
-以下正文于 2026 年 10 月 23 日从 README 关联的 DreamSoul 资料入口、[规范总索引](https://dreamsoul.feishu.cn/docx/UmU1d2EwLoeET5xCJChcOKPknyb)（修订 6）和[工具与教程总索引](https://dreamsoul.feishu.cn/docx/VSQ5dlJl3o0hbIxrEhUc8qKEnBc)（修订 7）定位。修订号限定核对范围，后续变更应重读正文。
-
-| **资料与核对修订** | **采用位置** | **性质与边界** |
-| --- | --- | --- |
-| [代码规范](https://dreamsoul.feishu.cn/docx/FKrsdHO9bolq4YxV2KAcosghnme)，3 | 第三、五、六章的职责、依赖、校验和最小抽象 | 研发规范；精简不意味着去掉失败保全 |
-| [多人协作代码开发规范](https://dreamsoul.feishu.cn/docx/WihCdOtlqoeYjaxrpeXckFomnCh)，25 | 第十一章合同评审及固定副本 | 当前任务保持 Draft、禁止合并的要求优先 |
-| [测试规范 代码](https://dreamsoul.feishu.cn/docx/KE4IdW6EWoKdvExSkdvcjTJFnsf)，53 | 第十章五维标签、计划、逐项证据与漏测阻断 | 建议成本起点不是已校准阈值 |
-| [全局 日志规范](https://dreamsoul.feishu.cn/docx/RBlFdcSSBo93q9x6p8kcdU6wnYb)，145 | 第九章事件、上下文、隐私及故障隔离 | 已接入 JSONL；实际限额和保留边界另列 |
-| [CI CD 执行规范](https://dreamsoul.feishu.cn/docx/NrJ4d0WVGo9t4uxAVwScFTBVnRb)，30 | 第十一章实际 SHA、制品和放行边界 | 配置流水线不等于运行通过或准许发布 |
-| [通用调研规范](https://dreamsoul.feishu.cn/docx/YcWIdE4INoLqoLxR5O8cbl7hnTf)，2；[飞书文档规范](https://dreamsoul.feishu.cn/docx/DdmxdrNvBo9AMXxkAYmc4EJ6nwe)，38 | 资料分工、版本、历史与正文格式 | 调研、设计、实施和验证分列；本地修改不自动同步云端 |
-| 软件架构设计：[通用调研](https://dreamsoul.feishu.cn/docx/Mi7ndASFzoUojxxhMpYcvohqngc)，10；[大纲](https://dreamsoul.feishu.cn/docx/AeAWdEHzxoP26YxYxjscGAJjnBg)，3；[端侧智能体案例](https://dreamsoul.feishu.cn/docx/S5D6d5lt8oEiyZxxUDOc3VNunDe)，6；[来源索引](https://dreamsoul.feishu.cn/docx/HJ96dXxD7oKKzdxk77QcHjljnYd)，3 | 需求推导、黑盒合同、状态、多视图与取舍 | 方法调研与案例，不是公司代码架构模板；未逐项重读索引中的原始标准和论文 |
-| [CPU 内存清理样板](https://github.com/DreamSoul-AI/cpu-memory-cleanup/tree/6938f10447b250958856a845fc5448aa1185b52d)的架构、代码结构及通用调研 | 质量场景、状态归属、取消与未知、逐文件说明 | 固定提交的目标设计，不作为 RPipe 实现证明 |
-| [RPipe 改版前 docs](https://github.com/DreamSoul-AI/RPipe/tree/ed0d50be4328af3480b54de31243bf507901d033/docs) | 全文概念与合同恢复，归并去向见代码结构设计 | 原件独立保留；历史数字只属于原提交和条件 |
+采用质量场景、职责黑盒、状态归属、静态依赖和运行时序联合描述。同一合同分别落实到科学状态、执行事实与派生结果，避免由单一退出码判完成。工程机制依据见 [通用调研](<通用调研 General Research 研究流水线.md>)，科学比较依据见 [文献调研](<文献调研 Literature Review 研究流水线.md>)。共用规范从根 AGENTS 定位，实际阅读及版本核对进入运行记录，不在架构正文维护逐轮采用流水。
 
 ## （三）系统边界
 
@@ -97,37 +81,34 @@ train/eval 在计划中配对：忽略 algorithm.mode 和说明性字段后，�
 
 职责不要求逐个建包、基类或服务，优先现有函数及少量对象。
 
-| **职责及落位** | **输入 → 输出** | **状态与失败边界** | **缺少的后果／持续成本** |
+| **职责** | **输入 → 输出** | **状态与失败边界** | **缺少的后果／持续成本** |
 | --- | --- | --- | --- |
-| api/cli 入口 | 请求 → 规格、执行或读取结果 | 只持有请求和呈现，准入错误可抛出 | 多入口重复判断／兼容维护 |
-| structure.plan | 声明、配置 → 有序规格 | 不写盘/加载后端，RunSpec 只读观察源码根标记 | 畸形条件进入计算／字段及 ID 兼容 |
-| structure.execution | 规格、注入实现、预算及取消 → 执行观察 | RunContext、attempt、执行权、首错与终态；不选后端 | 双执行或错误成功／收尾合同 |
-| structure.artifacts | 身份、显式路径、内容 → 保护读写 | owner token、缓存锁、原子文件；不判科学质量 | 覆盖和串读／格式与平台兼容 |
-| structure 四领域 | 配置及明确依赖 → 对象、测量、checkpoint | 各组件拥有本次对象与资源 | 科学能力散落流程／后端及恢复合同 |
-| flow | 组件与 Study 扩展 → 阶段及进程响应 | 本次装配、私有加载、句柄和 nonce | 时序分散、取消无归属／阶段及进程协议 |
-| readout/comparison | 明确 Run/受信目录 → 状态、统计、差异 | 无执行权，坏输入不修写，深比较才加载 Tensor | 混算来源、读取重跑／缺失及格式解释 |
-| flow.exports | 已有轨迹、目标 → 图或 TensorBoard | 只拥有本次文件和 figure | 输出污染源码／格式及范围维护 |
+| 用例入口 | 请求 → 规格、执行或读取结果 | 只持有请求和呈现，准入错误可抛出 | 多入口重复判断／兼容维护 |
+| 声明与计划 | 声明、配置 → 有序规格 | 不写盘/加载后端，RunSpec 只读观察源码根标记 | 畸形条件进入计算／字段及 ID 兼容 |
+| 执行权与生命周期 | 规格、注入实现、预算及取消 → 执行观察 | RunContext、attempt、执行权、首错与终态；不选后端 | 双执行或错误成功／收尾合同 |
+| 身份与受保护产物 | 身份、显式路径、内容 → 保护读写 | owner token、缓存锁、原子文件；不判科学质量 | 覆盖和串读／格式与平台兼容 |
+| 四类科学能力 | 配置及明确依赖 → 对象、测量、checkpoint | 各组件拥有本次对象与资源 | 科学能力散落流程／后端及恢复合同 |
+| 流程编排 | 组件与 Study 扩展 → 阶段及进程响应 | 本次装配、私有加载、句柄和 nonce | 时序分散、取消无归属／阶段及进程协议 |
+| 只读观察与比较 | 明确 Run/受信目录 → 状态、统计、差异 | 无执行权，坏输入不修写，深比较才加载 Tensor | 混算来源、读取重跑／缺失及格式解释 |
+| 派生导出 | 已有轨迹、目标 → 图或 TensorBoard | 只拥有本次文件和 figure | 输出污染源码／格式及范围维护 |
 
-## （二）源码依赖视图
+## （二）逻辑依赖与运行调用
 
 ```mermaid
 flowchart TB
-    A[api / CLI 入口] --> P[structure.plan]
-    A --> F[flow.run / stages / study]
-    A --> R[structure.readout]
-    F --> E[structure.execution]
-    F --> N[flow.native / huggingface]
-    N --> D[structure.data / model / algorithm / system]
-    E --> T[structure.artifacts]
-    R --> T
-    P --> C[structure.contracts]
-    T --> C
-    D --> C
+    Entry[用例入口] --> Plan[声明与计划]
+    Entry --> Orchestration[阶段装配与所属进程]
+    Entry --> Read[只读观察与比较]
+    Orchestration --> Execution[执行权与生命周期]
+    Orchestration --> Science[数据 模型 算法 系统能力]
+    Execution --> Storage[身份与受保护产物]
+    Read --> Storage
+    Plan --> Contract[纯配置与规格合同]
+    Storage --> Contract
+    Science --> Contract
 ```
 
-图二表示静态导入及类型依赖，不是进程或完整时序。structure 不导入 flow/api；contracts 不导入实现；plan 只依赖纯合同；readout 不依赖执行及科学组件。科学目录比较是显式重操作，不给普通读端增加 Torch 依赖。
-
-执行时 execution 通过 flow 注入的方法调用具体运行实现，属于依赖反转，不需要 Payload 总包。算法合作取消归 system.runtime，不能借此反向依赖 NativeRun。领域间只传实际需要的元数据、设备与 checkpoint 接口，具体方向见代码结构设计。
+图二表示职责间允许的依赖，不是进程拓扑或完整调用时序。只读观察不依赖执行，计划不加载科学实现，执行机制通过流程注入的方法调用科学实现。运行时回调不代表允许源码反向依赖。具体 Python 模块、静态导入图及检查方法集中于代码结构设计第四章。
 
 ## （三）公共用例
 
@@ -234,8 +215,6 @@ RSS 为各 Job 成员当前工作集之和，共享页可能重复计入，短�
 
 触发后先请求所属协调者取消，有限等待后终止所属 Job，并核确认成员清空。错误不覆盖首次触发；资源或清理未确认时为 unknown，已有 Run owner 不由外层抢占、释放或重写，已发布科学结果保留。监管报告与 Run 执行/科学状态分别解释，不能仅凭进程退出或一个批次成功字段判科学门通过。
 
-进程所有权、匿名 Job 与入组后放行模式参考 CPU 内存清理项目 `17c5363f06b548a63a47b98efcd118476cfedcb7` 的 scripts/run-tests.py（SHA-256 `5a956b54826ae9688017f446bf467c9bb9736a09aaa0fbe9bf46fc00f72797de`），不是第一章旧固定设计样板已提供此实现。仅复用机制，不导入另一项目脚本；其提交内存上限不转称 RSS 硬限。测试用秒级期限、微型文件和自建 CPU 子孙进程，覆盖入组前拒绝、各阶段阻塞、首败停批、取消、观察/清理失败及无关进程存活；不使用正式 Study、数据或 GPU。研究计划中的资源数值继续作为待确认提案，不在这里另立实验参数。
-
 # 五、六阶段、上下文与 Study 扩展
 
 ## （一）阶段合同与时序
@@ -253,7 +232,7 @@ RSS 为各 Job 成员当前工作集之和，共享页可能重复计入，短�
 
 main_probe 的 prepare.before 在科学准备开始前核对已加载 RPipe 模块及包搜索路径属于本 checkout，并逐项核对所选数据集的固定原始文件 SHA-256。固定清单沿用 main_exp 的 EXPECTED_DATA.json，通过 Study 的 provenance.inputs 固定其字节哈希；缺失或不符时不建立探针工作区、归档源码、派生缓存或模型。共享根中的未消费文件保持原样，只引用清单成员。Native 的 runtime/system 初始化仍早于此 hook，此校验不表示尚未创建任何 Run 记录。
 
-配对探针自己建立的 writer、hook、Data 与独立评估 logger 在成功、失败和取消时均按所属作用域释放，观察用的临时 Data 绑定恢复原状；外层传入的 native 对象仍由 NativeRun 收尾。首要异常和全部已取得资源的清理异常分别保留，清理失败通过外层 close 协议影响最终状态，取消伴随清理失败应为 failed。独立评估 logger 的诊断缺口传递给外层 logger，只降低证据完整性，不改变科学质量。针对性 CPU 测试使用微型文件、替身算法和故障注入；它们不证明正式数值对照或 GPU 资源监管达标。
+配对探针自己建立的 writer、hook、Data 与独立评估 logger 在成功、失败和取消时均按所属作用域释放，观察用的临时 Data 绑定恢复原状；外层传入的 native 对象仍由 NativeRun 收尾。首要异常和全部已取得资源的清理异常分别保留，清理失败通过外层 close 协议影响最终状态，取消伴随清理失败应为 failed。独立评估 logger 的诊断缺口传递给外层 logger，只降低证据完整性，不改变科学质量。验收必须分别覆盖微型故障合同和研究数值，前者不能替代后者。
 
 ## （二）上下文交接
 
@@ -297,7 +276,7 @@ recipe 在 Study 内并提供 register，通过 RecipeContext 注册领域工厂
 
 data 命令按当前选中的有效配置生成 profile，保留 data.source/path 及 origin，相对路径按 Study 解析，不加载 recipe。统计完整原始输入，不应用 Run 的 train_size、增强或已有归一化统计；同一输出数据集有不同输入时在构造/写入前拒绝，可用 --id 选择一个 Run。下载须 --download，显式 data.path 仍只读；输出数据集目录拒绝目录链接，stats 文件解析后须留在该数据集目录，不能改写同根 peer，默认 raw 缓存的原生/规范别名也不得越出自己的共享根。profile 逐批以 float64 累加，避免 float32 低方差抵消；持有批次数不随总数据增长，失败也关闭本次 Data/迭代器。make 不自动准备数据或 profile；类别数/批尺寸和实际大数据成本仍由调用方控制。
 
-原生模型包括 linear/mlp/cnn、resnet10/resnet18/resnet 别名、wresnet28x2/wresnet28x8/wresnet 别名。形状优先 model.config 的 data_size/target_size，其次 data.meta 和默认形状。参数初始化为科学实现，目录整理不得暗改。InputNorm 训练增强只在 training 时启用，可由配置关闭，eval 不复用训练增强。旧文档列 HF/timm/diffusers/vLLM 等生态不代表当前已有全部工厂，真实消费者出现再补领域适配。
+原生模型包括 linear/mlp/cnn、resnet10/resnet18/resnet 别名、wresnet28x2/wresnet28x8/wresnet 别名。形状优先 model.config 的 data_size/target_size，其次 data.meta 和默认形状。参数初始化为科学实现，目录整理不得暗改。InputNorm 训练增强只在 training 时启用，可由配置关闭，eval 不复用训练增强。未注册的后端不属于当前能力，有真实消费者时再设计领域适配。
 
 ## （三）Algorithm、进度与评测
 
@@ -386,7 +365,7 @@ aggregate 保留成功、缺失、invalid、busy；可恢复 I/O/值错误成为
 
 读取按用途区分三种事实：缺失、已取得但不可解析/不合法、合法值。关键 config、identity 和所需 checkpoint 严格失败；可选诊断或展示允许带原因降级，不得将坏记录当作“没有失败”或拿显示占位符继续计算。已有纯类型值优先来自计划，结果只能补充已验证字段。可恢复解析/I/O 异常在负责边界处理，编程错误继续暴露；不能新增一个吞所有异常的安全读取框架。当前各读端实现尚不完全统一，迁移旧辅助函数时须保留其调用方的严格/可选语义。
 
-曲线导出使用当前 index；TensorBoard 默认扫描实际 runs 轨迹，可显式 run_ids（CLI --id）选择，不再忽略选择。新目标事先不存在，不能与 Study 输出重叠；CLI 另核 Study/库/checkout 和已知输入（含默认缓存）保护，底层直接导出入口只知道自身库/checkout 与传入的 Study 输出，调用方须保护其其它输入。整数坐标/单位可表达，分数 epoch/observation 不悄悄取整；缺选中轨迹或逃逸链接在创建目标前失败，不改科学 result。
+曲线导出使用当前 index；TensorBoard 默认扫描实际 runs 轨迹，可显式 run_ids（CLI --id）选择。新目标事先不存在，不能与 Study 输出重叠；CLI 另核 Study/库/checkout 和已知输入（含默认缓存）保护，底层直接导出入口只知道自身库/checkout 与传入的 Study 输出，调用方须保护其其它输入。整数坐标/单位可表达，分数 epoch/observation 不悄悄取整；缺选中轨迹或逃逸链接在创建目标前失败，不改科学 result。
 
 # 九、日志、故障上下文与安全
 
@@ -466,26 +445,28 @@ tests/run.py/conftest 维护唯一协议。计划含 plan_id、选择条件、�
 
 | **工作流** | **实际声明** | **边界与不足** |
 | --- | --- | --- |
-| unit-tests.yml | Ubuntu/Windows × Python 3.10/3.13，core、离线 integration/e2e、TensorBoard 回读，Unit tests 汇总门 | 4 CPU 矩阵，不含正式研究/GPU/全部外网；无失败中断证据 always 上传 |
-| package-check.yml | Ubuntu/Windows，Python 3.10，构建、分别安装 wheel/sdist 并 package_smoke，Build package 汇总门 | 2 包矩阵；构建不代替安装，合成小例不外推真实研究 |
+| unit-tests.yml | Ubuntu/Windows × Python 3.10/3.13，core、离线 integration/e2e、TensorBoard 回读，Unit tests 汇总门 | 4 CPU 矩阵，不含正式研究/GPU/全部外网；always 尝试归档统一回执和命令日志，保留7天 |
+| package-check.yml | Ubuntu/Windows，Python 3.10，构建、分别安装 wheel/sdist 并 package_smoke，Build package 汇总门 | 2 包矩阵；构建/安装日志及已生成smoke工作区归档7天，构建不代替安装，合成小例不外推真实研究 |
 | branch-flow.yml | PR 到 dev，main 仅接受 dev 来源 | 只验方向，不是架构审查或合并授权 |
 
 依赖部分 pin、部分范围未固定，保存实际解析版本和制品摘要。目标先受影响低成本关键合同，再有限集成及安装，昂贵设备/网络矩阵仅明确计划运行。策略、保护规则和发布修改单独审查。
+
+上传动作在成功、失败或可继续收尾的取消路径执行，缺文件报错，单次上传最多5分钟。不同矩阵、Actions run/attempt与检出SHA使用不同artifact名称；7天保留期届满后不承诺平台下载可用。测试仍使用既有manifest/events/report，打包仍使用SMOKE_RESULT及日志，不另建结果协议。Bash的pipefail保留tee之前的失败，上传成功不改变作业和汇总门的失败状态。
 
 HEAD 改变后重核受影响验证。纯文档变动可说明代码未变并引用固定代码 SHA 的结果，不能冒称新 HEAD 已跑。静态、本地 CPU、有限数值、远端 CI、安装、真实研究和性能分列，未跑/取消/skip/缺失如实写。
 
 ## （二）兼容、发布和下游
 
-旧内部 import、CLI 和运行目录破坏点见代码结构设计。元数据 0.4.1 不代表新发布或旧 API 全兼容；发布前核版本、迁移、依赖及制品身份。本轮文档收尾保持 Draft，合并及发布另按明确授权推进。#228/#229 的既有集成不代表已发布或扩大科学验收范围。CI 通过不等于审查或授权，自查不冒充独立审查。
+公共API以代码结构设计登记的入口为准。发布须核版本、迁移、依赖、制品身份与调用方兼容，元数据版本不能代替发布验收。文档审阅、代码集成和发布分别授权，CI通过不等于审查或授权，自查不冒充独立审查。
 
-dayan/SD/量化内嵌副本按完整固定提交整体同步 src/rpipe 与 MIT，记录全 SHA、成员和哈希，不用浮动 dev、逐文件补丁或下游私改。修复在 RPipe 验证，另行授权再同步及验证宿主，dayan 已按此方式接入并合入其 dev，有限 CPU 结果与固定 SHA 见[验证摘要](<研究流水线 通用调研.md#四历史验证与可复查边界>)。SD、量化尚未同步。本轮只订正文档，不修改下游。回退同时考虑输入/输出和接入兼容，保留新数据与旧 Run 身份。
+dayan/SD/量化内嵌副本按完整固定提交整体同步 src/rpipe 与 MIT，记录全 SHA、成员和哈希，不用浮动 dev、逐文件补丁或下游私改。修复在 RPipe 验证，下游同步与宿主验收另行授权。接入进展与实际验收只在日期记录维护。回退同时考虑输入/输出和接入兼容，保留新数据与旧 Run 身份。
 
 # 十二、取舍与演进触发
 
 | **决定** | **缺少会怎样** | **成本与重评条件** |
 | --- | --- | --- |
 | 两柱、四领域归 structure | 能力混入时序并反向依赖 NativeRun | 持续依赖检查；新职责先在已有柱定位，不增 payloads |
-| 纯合同/计划/执行/产物/读端为少量模块 | 查询牵连启动和科学栈 | 不恢复八子包全部门面；有独立变化与实际调用方才拆 |
+| 纯合同/计划/执行/产物/读端为少量模块 | 查询牵连启动和科学栈 | 有独立变化与实际调用方才拆，不建立空门面 |
 | 默认科学子进程 | 全局状态/崩溃/取消污染协调者 | 启动及监督成本；同进程注入可降低成本但少硬隔离 |
 | owner 与 cache_lock 分开 | 缓存释放被当实验结束 | 两协议分别验证，不自动抢占未知 owner |
 | 协调者唯一发布正式结果 | hook/worker/读端竞写终态 | 多文件需保守投影；小型执行记录补缺口，不建事件总线 |
@@ -497,18 +478,18 @@ dayan/SD/量化内嵌副本按完整固定提交整体同步 src/rpipe 与 MIT�
 
 Mermaid 分别表达依赖、运行和状态，足够本项目使用；未建立全套 UML/C4/arc42/OCL 或正式 ATAM 评估。图可渲染不表示业务正确。
 
-# 十三、实施差距及设计放行
+# 十三、支持边界与实施约束
 
-| **差距** | **目标与后续修改边界** | **必须核对** |
+| **合同标识** | **采用的职责与机制** | **保留边界** |
 | --- | --- | --- |
 | D1 收尾一致性，P1 | execution/outcome 明确索引与纯投影、owner 最后释放、显式安全重试已实现 | 多文件崩溃窗口仍保守 unknown，无自动接管/重放 |
 | D2 日志，P1/P2 | JSONL、脱敏、容量/保留、单路隔离及生产者关联已实现 | 同步 I/O 无硬期限；空闲保留和真实长程限额未校准 |
 | D3 输入身份及源根保护，P1/P2 | RunSpec/写前核 Study、库和可定位 checkout；显式 inputs pins、输入重叠保护、环境观察已实现 | 未固定输入仍 unverified；不承诺任意外部宿主/模型全部字节身份 |
-| D4 测试协议，P1/P2 | 计划/required、attempt、环境、批次预算超时、重试及报告重建已实现 | 只监督自有 pytest 根；本轮禁止改 workflow，失败证据 always 上传仍未实现 |
+| D4 测试协议，P1/P2 | 计划/required、attempt、环境、批次预算超时、重试及报告重建已实现 | 只监督自有 pytest 根；平台强制终止、runner丢失或上传服务失败时，always步骤仍不能保证归档完整 |
 | D5 接受字段与兼容，P2 | freeze 明确拒绝、run_description 消费、flow 键和 bool 严格校验已实现 | prepare_shared=True 明确拒绝，False 保留兼容；不恢复旧冻结归档 |
-| D6 资源平台，P1/P2 | 默认 Budget 的硬内存/注入超时限制保留；显式 Windows supervise 提供所属树期限及 RSS/输出观察 | 仅微型 CPU 验收，非硬 RSS/存储配额；GPU 预留、正式研究与长程预算尚待确认 |
+| D6 资源平台，P1/P2 | 默认 Budget 的硬内存/注入超时限制保留；显式 Windows supervise 提供所属树期限及 RSS/输出观察 | 非硬 RSS/存储配额；GPU预留不在当前能力，正式研究与长程预算需独立准入 |
 | D7 profile/导出，P2 | profile 逐批归约并关闭 Data、显式统计严格校验、实际来源记录和导出选择已实现 | 没有真实大数据 profile/性能实验，底层导出调用方保护未知输入 |
 
-代码跟进核对：两柱及四领域未新增层；执行/科学/派生和证据分列；新合同已同步调用方、镜像与上述限制。#228 的固定设计与 #229 的实现已依次集成。本轮在独立文档 Draft 中订正交付状态，保留 D1–D7 合同及限制，不修改实现、工作流、设置、凭据或下游。
+D1–D7 是实现合同与保留边界，不是待实施任务的重复清单。具体待办、前置与验收进入 [开发计划](<开发计划 Development Plan 研究流水线.md>)，活动缺陷见 [缺陷记录](<缺陷记录 Bug Report 研究流水线.md>)，已完成演进与运行证据分别进入日期记录。
 
-验证结论绑定对应 PR 的完整代码 SHA、命令、环境及实际结果。静态、本地 CPU、远端 CI、安装与真实实验分别陈述。已执行 CI 矩阵之外的平台/版本、正式 MNIST/CIFAR、GPU、长程性能和多机仍待验收，dayan 的有限 CPU 接入不外推至其他宿主或 HF 精确恢复。
+实际验证范围从运行记录定位，不在设计正文复述。未实现目标与待测条件由开发计划和研究计划分别维护。

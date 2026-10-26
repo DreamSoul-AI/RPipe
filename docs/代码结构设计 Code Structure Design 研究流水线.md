@@ -1,24 +1,20 @@
-**研究流水线 代码结构设计**
+更新日期：2026年10月27日。本文维护当前确认采用的源码结构方向、模块职责、依赖与公开入口。实际现状与目标的差距单列，不将尚未实现部分记为现有能力。
 
-更新日期：2026 年 10 月 23 日。项目：[RPipe](https://github.com/DreamSoul-AI/RPipe)。状态：设计 #228 与实现 #229 已依次合入 dev。设计基线为 `3da2c50bb8db70fbeb78f07029dd4c8cc28012de`，当前实现固定为 `a32bdd110dda51986148369ea3358cc41544eb6c`，本轮只维护文档。源码包版本 `0.4.1`，固定验收 SHA 与验证范围写代码 PR，目录存在不等于验证通过。
-
-本文回答代码放哪里、每个 Python 文件做什么、如何依赖、调用方与测试放哪里，以及源码和产物如何区分。行为合同、状态、科学语义、日志、测试协议和 CI/CD 只维护于[架构设计](<研究流水线 架构设计.md>)；来源与历史证据见[通用调研](<研究流水线 通用调研.md>)，实验设计见[研究计划](<研究流水线 研究计划.md>)。
-
-# 一、设计原则和现状范围
+# 一、结构方向与适用边界
 
 ## （一）两柱与文件粒度
 
 RPipe 实现只分 `structure/` 和 `flow/`。structure 包含声明、配置、执行与产物机制、读取及 data/model/algorithm/system 科学组件；flow 包含阶段、后端装配、Study 加载、所属进程和 CLI。包根只保留入口、版本，不设平级 payloads，也不把它整体塞进 structure。
 
-原则来自改版前[代码总览](https://github.com/DreamSoul-AI/RPipe/blob/ed0d50be4328af3480b54de31243bf507901d033/docs/code/code.md)和已确认两柱约束。DreamSoul 资料的采用范围、正文链接及修订号见架构设计第一章；CPU 内存清理样板提供逐文件和测试映射的描述方法，不能作为替换 RPipe 领域结构的理由。
+依据架构的质量场景与状态所有权，将通用计算能力和执行时序分开。跨Run不共享可变训练状态，计划与读端不因引用类型而加载科学实现，宿主算法包不被迫采用研究模板的内部结构。
 
-旧版 structure 的固定八子包、层内 api 门面和逐文件登记，是需要分别评价的组织决定。保留职责清楚、可追溯登记与依赖限制；不为了复刻目录而恢复 control/artifact/make 的全部转发层。目前它们的有效职责落在 contracts/plan/execution/artifacts/api。该粒度已随 #229 集成，后续按真实职责、调用方和验证证据评估调整。
+声明合同、展开、执行权、产物及读取各有实际消费者，因此分别落在contracts、plan、execution、artifacts、readout。稳定公共用例集中在api，领域计算保持data/model/algorithm/system的职责。只有接口或变化原因独立时才增加模块，不为目录对称增加转发门面。
 
 一个文件围绕实际变化和调用方组织；真实重复才提取辅助函数，同一职责过大或独立变化再拆。新生态名称、六阶段名称和测试标签都不自动产生包，不建空目录、utils 总包或通用插件框架。
 
-## （二）目录版本和目标差距
+## （二）当前设计与实现差距
 
-第二至第五章列当前结构及持续边界。Run 级 execution.json、结构化 events 日志、测试计划协议已在原 execution/artifacts/readout、system/logger、flow/run 和 tests/run.py/conftest 实现，没有新增包或独立框架；限制与未实现能力见架构设计第十三章。
+第二至第七章给出当前确认采用的模块结构及其实现映射，逐文件登记是定位工具，不将文件数量设为优化目标。共享状态、外部I/O、发布、取消和清理边界不得因拆文件改变。未落实的能力在本章与开发计划登记，不把现状缺口描述成目标设计。
 
 # 二、仓库与包目录
 
@@ -42,10 +38,15 @@ RPipe/
 │   └── main_exp/
 ├── tests/                          # 产品/Study 镜像、辅助数据及研发入口
 └── docs/
-    ├── 研究流水线 通用调研.md
-    ├── 研究流水线 架构设计.md
-    ├── 研究流水线 代码结构设计.md
-    └── 研究流水线 研究计划.md
+    ├── 通用调研 General Research 研究流水线.md
+    ├── 架构设计 Architecture Design 研究流水线.md
+    ├── 代码结构设计 Code Structure Design 研究流水线.md
+    ├── 开发计划 Development Plan 研究流水线.md
+    ├── 缺陷记录 Bug Report 研究流水线.md
+    ├── 开发记录 Development Record/
+    ├── 运行记录 Run Record/
+    ├── 文献调研 Literature Review 研究流水线.md
+    └── 研究计划 Research Plan 研究流水线.md
 ```
 
 `.tmp/` 是忽略的本地工作区，不是交付结构。build/dist、环境、缓存、测试结果和研究运行根不进入源码树设计。法律许可保留，不计作技术文档。不新增修复、进度、交接、测试说明或 Study 计划等重复正文。
@@ -137,7 +138,7 @@ src/rpipe/
 | `structure/readout.py` | read_run/read_legacy、aggregate/logs/report/compare；轨迹加载、曲线摘要、train/eval 配对与差值 | 只读，不 import 执行/科学后端；api、exports 及 Study 分析使用。旧辅助读端不等于核心准入来源 |
 | `structure/comparison.py` | compare_runs/format_compare/write_compare；Tensor、复杂数、大整数、checkpoint 和轨迹深比较 | 显式重操作，可延迟读受信 Torch；只接注入 checkpoint reader，不反向导入 flow 或猜 Study 根 |
 
-contracts.py 同时保留旧科学配置与新执行数据类，artifacts.py 同时包含布局、身份和发布原语。它们不是必须永远保持大小的“万能模块”；当前没有为目录对称而继续拆分。若协议独立演进或修改互相干扰，先说明实际调用方及收益，再在同柱内拆分，不恢复多层空 api。
+contracts.py 同时提供科学配置与执行数据类，artifacts.py 同时包含布局、身份和发布原语。它们不是必须永远保持大小的“万能模块”；当前没有为目录对称而继续拆分。若协议独立演进或修改互相干扰，先说明实际调用方及收益，再在同柱内拆分，不恢复多层空 api。
 
 ## （三）structure/data
 
@@ -227,6 +228,25 @@ system.source 当前是配置/元信息，不选择任意系统后端；设备 .
 
 `.importlinter` 声明四条合同：structure 不依赖 flow/api；contracts 不依赖实现；plan 不依赖磁盘/执行/读端/科学；readout 不依赖执行/科学。Import Linter 未安装时不宣称该工具通过。现有 AST 边界测试可查静态 import，包括函数内导入；动态字符串与导入副作用还需行为验证，不能互相替代。
 
+```mermaid
+flowchart TB
+    A[api / CLI 入口] --> P[structure.plan]
+    A --> F[flow.run / stages / study]
+    A --> R[structure.readout]
+    F --> E[structure.execution]
+    F --> N[flow.native / huggingface]
+    N --> D[structure.data / model / algorithm / system]
+    E --> T[structure.artifacts]
+    R --> T
+    P --> C[structure.contracts]
+    T --> C
+    D --> C
+```
+
+上图表示静态导入及类型依赖，不是进程或完整时序。structure 不导入 flow/api；contracts 不导入实现；plan 只依赖纯合同；readout 不依赖执行及科学组件。科学目录比较是显式重操作，不给普通读端增加 Torch 依赖。
+
+执行时 execution 通过 flow 注入的方法调用具体运行实现，属于依赖反转，不需要 Payload 总包。算法合作取消归 system.runtime，不能借此反向依赖 NativeRun。领域间只传实际需要的元数据、设备与 checkpoint 接口，具体方向见代码结构设计。
+
 ## （二）公共 Python 用例
 
 | **入口** | **签名与返回** | **调用约束** |
@@ -282,7 +302,7 @@ studies/<name>/
 
 | **位置** | **源码职责和消费关系** |
 | --- | --- |
-| `_template/study.yaml`、`experiment_config.yaml` | 最小合成声明，直接复用默认运行，无 recipe 和空阶段树 |
+| `_template/study.yaml`、`experiment_config.yaml` | MNIST/CUDA 的 20 epoch 示例声明，直接复用默认阶段，无 recipe；不是离线 CPU smoke，不应直接当作本轮验证执行 |
 | `main_probe/study.yaml`、`experiment_config.yaml`、`recipe.py` | 声明配对探针及注册研究算法，选择自己的显式 version/输入 |
 | `main_probe/structure/algorithm/__init__.py`、`paired.py` | 研究专用配对算法与接入；作用域清理自有 writer、hook、Data 和评估 logger，恢复临时绑定，经 close 上报清理失败；使用实际 structure 接口，不实现第二执行框架 |
 | `main_probe/flow/prepare/__init__.py`、`run.py`、`data.py`、`inputs.py` | before/run 接入；科学准备前核固定原始数据哈希与已加载 RPipe 来源，只引用清单成员，清理本地准备对象；运行产物进入外部根 |
@@ -301,7 +321,7 @@ studies/<name>/
 | `main_exp/flow/process/__init__.py`、`run.py`、`curves.py` | 研究分析/曲线；恢复来源读 result.execute 实际观察并核原判据，JSONL/旧日志仅诊断，不写回通用科学结果 |
 | `main_exp/docs/EXPECTED_DATA.json`、`REFERENCE_CURVES.json` | 人工维护并有实际消费者的静态科学输入，当前暂留旧路径，见第六章 |
 
-所有 Study 的问题、方法、数据、模型、指标、停止条件和预算只维护于项目研究计划。这里仅登记适配，不复制研究判据或历史运行数字。当前 main_exp/main_probe 不是已通过真实矩阵的声明。
+所有 Study 的问题、方法、数据、模型、指标、停止条件和预算只维护于项目研究计划。这里仅登记适配，不复制研究判据或历史运行数字。main_exp/main_probe的声明存在不等于研究判据满足，实际状态从运行记录定位。
 
 ## （三）变更必须到达的消费者
 
@@ -399,7 +419,7 @@ run_root 必须由调用方给定。RunSpec/validate_source 解析真实路径�
 | flow | rpipe/flow/test_cli.py、test_run.py、test_native.py、test_huggingface.py、test_stages.py、test_study.py、test_study_recipe.py、test_exports*.py | 参数、所有权、装配、加载、阶段、显式输出 |
 | Study | tests/studies/main_probe/、main_exp/、mnist_train_size/、mnist_native_vs_hf/ | main_probe 镜像准备准入、配对清理及最终状态；原 flow 下两个真实数据场景已迁位；CPU 替身与故障注入不等于正式数据/GPU矩阵 |
 
-保持完整有效目录骨架及实际行为落点，不强制“一源码恰一测试文件”。同模块多个独立合同可后缀分文件，不递归生成占位测试；无对应源码的 tests/rpipe/structure/make 空包及未使用 module_make marker 已移除。
+保持完整有效目录骨架及实际行为落点，不强制“一源码恰一测试文件”。同模块多个独立合同可后缀分文件，不递归生成占位测试。
 
 工厂测试使用 test_factory_data/model/algorithm/system 等不同 basename，当前 pytest 导入方式下避免同名模块冲突。后续若变导入模式，先核收集身份和安装环境，不为树对称重新制造冲突。五维标签、数值上下文、计划和结果协议只在架构设计第十章维护。
 
@@ -424,58 +444,15 @@ pyproject 使用 setuptools 的 src 布局，包发现只含 rpipe*，CLI 是 rp
 
 仓库当前无 MANIFEST.in，不为文档结构增加打包文件。实际 wheel/sdist 成员、许可、安装入口和源码树外旅程由 package 检查确认。Study、测试与运行产物不是通用包内实现；具体 sdist 是否包含文件以真实制品清单核对，不只凭 packages.find 推断。
 
-pytest marker 中仍有 module_api/control/artifact 等实际用例沿用的历史分类，不表示对应旧源码目录恢复；准确 target 优先实际模块。未为迁移清理其它依赖元数据或改变导入模式；测试身份以最终 nodeid 和 manifest 为准。
+pytest marker 中仍有 module_api/control/artifact 等实际用例沿用的历史分类，不表示对应旧源码目录恢复；准确 target 优先实际模块。测试身份以最终nodeid和manifest为准，不以标签名称推定源码目录。
 
-# 八、历史内容归并与兼容
+# 八、实施差距与验收衔接
 
-## （一）旧 33 份正文的去向
+本设计是当前确认采用的结构方向。职责或允许依赖改变先回到架构核对，目录和文件划分按真实消费者更新，不用历史目录或删行数量证明设计优越。
 
-历史基线为 `ed0d50be4328af3480b54de31243bf507901d033`，33 份 docs 加当时 README/AGENTS 共 35 个原文件已独立恢复并核 Git blob 字节，原目录和正文不改写。以下路径相对于该提交 docs；[固定版本入口](https://github.com/DreamSoul-AI/RPipe/tree/ed0d50be4328af3480b54de31243bf507901d033/docs)可完整查阅。归并按合同主题，不复制上百万字节逐事记录。
-
-| **原正文（数量）** | **仍有价值的内容及当前去向** | **历史或过期边界** |
+| **设计要求** | **实现差距与处理入口** | **验收范围** |
 | --- | --- | --- |
-| code/code.md、concept.md（2） | 两柱、Study/Experiment/Run、能力与取值 → 架构一至三章、本文一二章 | 旧入口及目录不自动恢复 |
-| code/structure.md（1） | 四类组件、配置、工厂、tracker/Hook、优化器/恢复、产物权限 → 架构二、五至八章；本文三四章 | 固定八包及跨层全经 api 不作为当前硬规则 |
-| code/flow.md（1） | 阶段数据流、state 交接、失败、recipe、来源、对比 → 架构三至五、八章；本文四五章 | 旧 Runner、wait/GPU/脚本调度不是当前能力 |
-| code/layout.md（1） | 源码/产物、写入者、共享输入、测试镜像 → 本文二、六七章 | Study 内历史 runs/cache 不迁移或回签 |
-| development/artifact_consistency_design.md（1） | 严格与可选读取、首错保全、原子/并发、共享锁、晚导入、日志/输出安全 → 架构四、五、七至十章 | 已合 PR 逐项状态留原件，旧实现细节对照当前来源后采用 |
-| development/testing.md、cicd.md（2） | 测试维度、协议、结果、安装与交付 → 架构十、十一章；本文七章 | 旧规范副本以本次 DreamSoul 正文为准，不复制本仓专用测试到下游 |
-| development/structure_simplification_proposal.md（1） | 真实复杂度、恢复合同、粒度收益和风险 → 架构十二、十三章；本文一、三章 | proposal 不是已批准实现，不靠文件数评价架构 |
-| development/research.md（1） | 研究计划与实现分工、条件和证据边界 → 架构二、七、十章及现有研究计划 | 不在两份设计复制完整研究方法或计划 |
-| development/brainstorm.md、feedback.md（2） | 候选机制/监控/预算及用户约束 → 仍有效的取舍进入架构十二、十三章，机制比较归通用调研 | 未选想法不转成已实现功能或自动任务 |
-| development/bugs.md、handover.md、maintenance_archive_2026-10-15.md、record.md（4） | 历史修复依据保全；可持续失败合同归架构四、五、八至十章 | 逐事授权、旧提交绿项和运行位置只留历史，不当当前授权/验收 |
-| issue/cross_project_shared.md、experiment_monitoring.md、README.md（3） | 共享输入独立性、监控成本、显式 TensorBoard → 架构八、九、十二章；本文六七章 | 调研不等于启用外部服务；旧目录索引由当前导航替代 |
-| releases/v0.3.0.md、v0.3.1.md、v0.4.0.md、v0.4.1.md（4） | 发布及兼容历史保留固定原件，当前交付合同归架构十一章/本章 | 不复用旧版本通过数当新分支证据 |
-| research/README.md、literature.md（2） | 研究导航、来源和比较归现有通用调研/研究计划 | 不在设计重复论文综述 |
-| research/Research Plan RPipe.md、研究计划 RPipe.md（2） | 科学问题、矩阵和历史条件由现有唯一中文研究计划承接 | 不恢复中英两份并行正本，不凭迁位重签历史数字 |
-| research/standards/README.md、research_plan_standard_en.md、research_plan_template_en.md、文献调研规范 Literature Review Standard.md、研究计划模板 Research Plan Template.md、研究计划规范 Research Plan Standard.md（6） | 规范来源与历史版本原件保留，当前用 AGENTS/架构资料链接定位正式正文 | 不把历史公司规范副本重新复制进项目或改成 RPipe 技术事实 |
+| 普通执行与显式监管能力分明 | 只提供已登记平台能力；硬RSS/磁盘、任意后代控制与GPU分配不在当前支持内 | 不支持时拒绝或明确未知，不以采样值冒充硬限 |
+| 公共入口与产物合同可交付 | 发布版本、迁移及安装制品仍需独立准备，见DP5 | API、CLI、实际wheel/sdist与源码树外旅程分别验证 |
 
-计数 33。两份设计吸收稳定合同与文件落位，研究材料、历史证据和规范各归其原职责；“两份设计全面”不等于把所有日志、计划和规范塞入两份正文。独立快照的本机位置和字节清单在 PR 交付，长期文档使用固定提交链接。
-
-## （二）明确兼容破坏点
-
-| **旧用法** | **当前或目标边界** |
-| --- | --- |
-| structure.api/*、control/artifact/make 多层内部路径 | 用例取 rpipe.api，纯配置取 structure.contracts，领域取明确 data/model/algorithm/system；不建空转发树 |
-| 平级 payloads 及旧 *Payload 类 | 组件按领域落 structure，装配为 flow.NativeRun/HuggingFaceRun/ProcessRun，上下文归 execution；api.run 的 payload 关键字保留 |
-| Study 内隐式 runs/shared、自动旧 cache 迁移 | 显式 run_root，不自动迁移、补签或重放旧 Run；实际 layout 见第六章 |
-| make 生成脚本/jobs、自动 GPU 轮次、任意阶段裁剪 | make 仅配置/index；执行统一 owner/launch，旧参数不接受 |
-| report 写 NUMBERS、process 写源码 docs | report 只读；process/figures/export 显式写外部目标 |
-| 旧目录对比自动声称来源一致 | CLI --legacy，标未验证；--study-source 只解决受信类兼容，不补来源证明 |
-| 同名 version 或相同 seed 复用成功 | 核 source/config/version/输入范围，旧身份不改；源码迁位可能改摘要，显式选新 version |
-
-包版本仍是 0.4.1，代码试验尚未正式发布；发布前必须处理版本和兼容说明。删除旧 API 不是“完全兼容重构”，公开保留参数也不保证全部内部路径稳定。
-
-# 九、设计后的实施落位与维护
-
-#229 以 #228 文档为基线，在原模块落实架构 D1–D5/D7，并集成为 `a32bdd110dda51986148369ea3358cc41544eb6c`。D6 保留真实拒绝和平台限制。dayan 的整包固定接入见[验证摘要](<研究流水线 通用调研.md#四历史验证与可复查边界>)，SD、量化尚未同步。本轮只订正交付状态，不改变源码落位或运行正式实验。
-
-| **目标差距** | **优先修改位置** | **连带核对** |
-| --- | --- | --- |
-| 收尾权威及执行状态 | structure/execution/artifacts/readout/contracts 与必要 flow | execution.json 已实现；api/CLI、stage/process、owner、写失败/重试镜像同步 |
-| 规范日志 | structure/system/logger.py、execution.error_record、flow/run.py | Native/Algorithm 日志调用、logs、脱敏/限额/单输出失败；不新增日志服务包 |
-| 输入/环境身份及源根保护 | contracts.RunSpec、artifacts/source_digest 及实际 Study 输入接入 | checkout/库源码与运行根隔离、数据/模型/profile 来源和展示，保护原字节及旧结果 |
-| 测试计划协议和镜像残留 | tests/run.py、conftest、实际镜像及未使用 marker | selected/required、attempt、环境、超时/缺口；本轮禁止改 workflow，CI 制品策略仍待后续授权 |
-| 兼容和安装 | api/cli、真实调用方、pyproject、package_smoke | 源码/产物成员、版本和许可，按实际 wheel/sdist 验证 |
-
-改动前读目标及 Git 状态，改动后核文件登记、允许依赖、调用方、镜像、源码/输出边界与文档链接。文件移动保留验证、异常与清理语义；公共合同同步架构，文件归属同步本文，历史证据只写通用调研，进展写 PR/提交。本轮文档 Draft 完成后等审，新的实施、合并、发布或下游同步分别取得明确授权。
+每次实现变更核对调用方、Study适配、测试镜像、安装成员及README。开发记录解释设计调整，运行记录保存实际验证；本文不保存迁移经过、PR流水或旧验收数字。
