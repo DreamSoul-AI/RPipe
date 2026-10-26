@@ -1,105 +1,75 @@
-整理日期：2026年10月27日。对象为 [RPipe](https://github.com/DreamSoul-AI/RPipe)。中文名为“研究流水线”。本文将机制、替代路线、历史验证和待核实问题集中维护，架构决定见 [架构设计](<架构设计 Architecture Design 研究流水线.md>)，研究协议见 [研究计划](<研究计划 Research Plan 研究流水线.md>)。
+更新日期与信息截止日：2026年10月27日。对象：小型本机研究执行模板。本文回答机制、现有工程路线、取舍与适用条件。项目历史、开发经过和实测结果只在日期记录维护，实际检索和源码核对范围见 [本轮运行记录](<运行记录 Run Record/2026-10-27 文档核验.md>)。
 
-# 一、问题与证据范围
+# 一、问题、范围与判断
 
-研究代码常把配置展开、训练、文件写入、汇总与科学判断混在一个脚本里。只看到退出码为零，无法知道结果对应哪份代码、哪些 seed 完成、旧成功是否被后处理覆盖，以及重试是否改变了比较条件。本调研面向维护研究仓库的开发者，回答怎样组织一个小型本机研究执行模板，让执行事实能够支撑研究者的判断。
+研究者需要把声明、代码与输入条件、计算、结果和分析连接起来，并能解释失败、取消、重试和缺项。单个脚本退出成功无法独自回答：结果属于哪次尝试，旧成功是否仍完整，哪些输入没固定，分析失败是否影响科学事实。
 
-范围包括声明展开、Run 执行权、科学载荷接入、产物身份、只读读取和跨 seed 汇总。不研究分布式队列、自动选题、模型训练算法优劣或完整实验平台采购。机制比较的信息截至2026年10月21日，外部技术资料访问日期仍为同日。2026年10月27日仅整理文档职责与来源，没有重新阅读外部论文正文或运行实验。学术证据独立维护于 [文献调研](<文献调研 Literature Review 研究流水线.md>)，逐次工程记录从 [运行记录](<运行记录 Run Record/2026-10-24 CPU 合同验收回顾.md>) 定位。
+本调研覆盖本机顺序执行、不可变共享输入、Run所属资源、科学结果与派生分析分离、身份和读取。集群调度、常驻协作服务、自动选题、GPU分配和模型算法优越性不在当前范围。结论是采用清楚的文件与生命周期合同，按需要借鉴外部跟踪、工作流与来源模型，不为这些路线各建一套内部框架。当前设计落在两份设计文档，工程待办进入开发计划。
 
-下文历史源码基线固定为 `ed0d50be4328af3480b54de31243bf507901d033`，版本文件标为 0.4.1。第二、三章中的“现有”只指该历史提交。第四章另外登记已集成代码与固定工程证据，不能把两者或未来目标混为同一实现。[固定源码](https://github.com/DreamSoul-AI/RPipe/tree/ed0d50be4328af3480b54de31243bf507901d033/src/rpipe)
+# 二、声明、运行与判断为何必须分开
 
-# 二、机制：把比较与执行事实连起来
-
-## （一）Study、Experiment、Run
-
-Study 是一组研究声明及其适配代码。Experiment 是因素轴的一组取值，Run 是该组合与一个 seed 的一次执行。声明不能代替实际有效配置，Run ID 也不能单独证明身份相同。有效配置、源码来源、外部输入、设备与精度条件一起限定结果可比较的范围。
+流程规格描述“准备如何计算”，一次运行描述“实际发生了什么”。二者关联但不能替代，工作流及其组件和运行各自需要能识别的版本与元数据。这一划分也是 [FAIR计算工作流建议](https://www.nature.com/articles/s41597-025-04451-9) 的核心对象区分。
 
 ```mermaid
 flowchart LR
-    Q[研究问题与判据] --> S[Study 声明]
-    S --> E[因素组合 Experiment]
-    E --> R[seed 与有效配置 Run]
-    R --> X[科学载荷执行]
-    X --> A[结果与原始轨迹]
-    A --> C[完整性核对与跨 seed 汇总]
-    C --> J[研究者判断]
-    A -->|身份、缺失、失败| J
+    Spec[研究声明与比较条件] --> Plan[计划和依赖]
+    Plan --> Attempt[实际尝试与所属资源]
+    Attempt --> Science[科学结果与轨迹]
+    Attempt --> Execution[执行与清理事实]
+    Science --> Analysis[派生分析]
+    Science --> Judge[按预定判据判断]
+    Execution --> Judge
+    Analysis --> Judge
 ```
 
-退出成功、科学指标达标和证据齐全是三个判断。成功运行可能没有改善指标，失败运行也可能留下有价值的反例。汇总必须保留缺失组合和未完成 seed，不能静默减少样本数或用最好 checkpoint 替换曲线终点。
+图中的箭头表示信息依赖，不是所有文件都在最后一次性写入。科学结果、整体执行和派生分析各有状态，状态未知或证据缺失时不推定成功。有效配置、源码、输入、环境与实际精度共同限定可比条件，版本字符串和seed不能单独证明相同实验。
 
-## （二）历史基线的执行路径
+可将一次观察抽象为 $O=(S,C,D,E,A,Y)$：$S$为声明，$C$为代码身份，$D$为输入身份，$E$为环境条件，$A$为实际尝试，$Y$为输出及其解释。该表达是本报告的组织模型，不是外部标准字段或新增schema。即使其中某部分可验证，也不能补齐另一部分的未知。
 
-现有 `flow/cli.py` 组装命令，`structure/make/` 从 Study 展开配置和启动计划，`flow/runner.py` 驱动 `prepare → execute → collect → summarize → write → process`。默认阶段确有实现，可选 Study hook 由 `flow/study.py` 加载。科学数据、模型、算法和设备适配目前分布在 `structure/` 内。它们是当前的实现形态，不是要求宿主算法包全部采用两柱结构的理由。[阶段驱动](https://github.com/DreamSoul-AI/RPipe/blob/ed0d50be4328af3480b54de31243bf507901d033/src/rpipe/flow/runner.py)，[扩展加载](https://github.com/DreamSoul-AI/RPipe/blob/ed0d50be4328af3480b54de31243bf507901d033/src/rpipe/flow/study.py)
+# 三、工程机制与失败边界
 
-现有 CLI 的 `make` 会写配置和脚本，`run`、`launch`、`run-one` 会执行，`process` 会写汇总，`report` 会写 `docs/NUMBERS.md`。`status` 的公开意图是只读。命令名称不能证明内部无写盘，构造产物布局也可能创建目录，因此目标设计要求对读取路径单独验证无副作用。[CLI](https://github.com/DreamSoul-AI/RPipe/blob/ed0d50be4328af3480b54de31243bf507901d033/src/rpipe/flow/cli.py)，[布局构造](https://github.com/DreamSoul-AI/RPipe/blob/ed0d50be4328af3480b54de31243bf507901d033/src/rpipe/structure/artifact/layout.py)
+## （一）执行权与资源所属
 
-## （三）执行权、身份与持久化
+执行者应拥有本次尝试的进程/句柄和发布权，读取者只观察。输入准备锁与Run执行权用途不同，释放缓存锁不等于计算和清理完成。取消是停止新派发并处理所属资源，不是撤销已产生的全部副作用。
 
-协调者拥有本次执行权和自己启动的子进程句柄。读取者只观察状态，不从读不到结果推断“可以重跑”，也不依据 PID 单独清理其他任务。业务结果、执行状态和后处理文件分开，后处理失败不能覆盖已有科学成功。
+Windows Job可以将关联进程作为一组管理，子进程继承及breakaway有明确条件，不能从根进程退出推断整棵树已停止。RPipe的显式监管须在放行前建立所属关系，失败时保留unknown，不扫描或终止不属于本次的进程。[Microsoft Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
 
-文件落盘需要区分写完与发布。目标为在同一文件系统先完整写临时文件，再替换正式文件，失败时仍能读到旧完整值或新完整值。该目标不是全目录事务或断电持久性的证明，具体保证依赖文件系统与实现。旧结果是否可复用，还需要完整来源核对，不能只匹配 version 文本。
+## （二）发布与持久化
 
-## （四）复现条件
+单文件完整写入临时对象后再替换，可收窄读取半文件的窗口。Python的os.replace允许在权限条件满足时替换既有文件，但跨文件系统可能失败，文档说明的成功原子重命名也不等于目录事务或断电持久性。[Python3.13 os.replace](https://docs.python.org/3.13/library/os.html#os.replace)
 
-同 seed 不代表跨版本、跨平台或 CPU/GPU 的结果完全相同。PyTorch 官方文档明确这些保证的边界，并分别讨论随机源、算法确定性与设备设置。RPipe 的作用是记录并执行已选条件，不承诺消除浮点顺序、后端和环境差异。本文只针对性阅读该页的保证范围与随机源、cuDNN 章节，没有将文档 2.14 的设置回写到历史运行。[PyTorch 2.14 Reproducibility](https://docs.pytorch.org/docs/2.14/notes/randomness.html)
+因此，科学结果、执行索引与执行权应可保守解释：部分发布和异常清理保留原件、首次错误及清理错误，不能靠“最后一个文件存在”伪造整体完成。来源校验在执行前和写入边界进行，路径保护解析实际目标，不能只比较字符串。
 
-# 三、现有方法与适用代价
+## （三）来源与可复现条件
 
-不同路线解决的问题不完全相同，不能仅以功能数量评价。下面比较的是机制和项目适配判断，没有在同一故障协议下运行这些工具。
+来源模型需要解释输入、活动、产物与责任主体的关系，而不只是存一个哈希。[W3C PROV-DM](https://www.w3.org/TR/2013/REC-prov-dm-20130430/) 提供实体、活动、主体及派生关系的概念模型。对本项目的采用是明确这些关系和缺口，并不因此实现或宣称PROV格式符合性。
 
-| **路线** | **实际机制与依据** | **适用情况与代价** | **对本项目的判断** |
-| --- | --- | --- | --- |
-| 研究脚本加清晰文件合同 | 本仓当前源码将配方、执行、结果和汇总连接起来 | 小团队容易查看与修改，但必须自己验证身份、取消和发布失败 | 继续使用小型本机模板，减少与科学实现纠缠 |
-| 实验跟踪，MLflow Tracking | 以 Run 记录参数、代码版本、指标和输出，Experiment 对 Run 分组，可本地存储或接入服务 | 适合统一查询和比较记录，额外引入存储和部署选择；不能仅由页面记录推断执行权正确 | 可作为未来导出接口候选，本轮不接入 [MLflow 文档](https://mlflow.org/docs/latest/ml/tracking/) |
-| 文件依赖工作流，Snakemake | 规则声明 input/output，wildcard 将规则应用于文件集合 | 适合以文件依赖表达的重复分析，对训练进程、checkpoint 和取消的具体映射仍需设计 | 外部比较候选，先统一相同的故障语义再评估 [Rules](https://snakemake.readthedocs.io/en/stable/snakefiles/rules.html) |
-| 复现组织与检查项 | Pineau 等的复现计划结合代码、挑战和检查项 | 帮助明确材料和独立验证责任，不能代替某次执行的数值验收 | 采用职责分离和条件披露思路，不声称本仓优于其他工具 [JMLR 摘要](https://jmlr.org/papers/v22/20-303.html) |
+PyTorch区分随机源控制与非确定性算法，且不保证跨发布、平台或CPU/GPU相同结果。实际比较还须记录数值精度、数据顺序和恢复状态，不能用同seed替代这些条件。[PyTorch2.14 Reproducibility](https://docs.pytorch.org/docs/2.14/notes/randomness.html) 仅作为机制依据，不升级本项目依赖。
 
-MLflow 的记录模型、Snakemake 的文件依赖和 RPipe 的研究执行模板可以组合。现在没有跨机器查询、多人服务或集群调度的已确认需求，引入独立服务会增加部署、恢复和权限状态，因此目标设计保留文件产物和本机协调者。若后续需求改变，应在架构质量场景中给出明确触发依据。
+## （四）读取、汇总与结论
 
-# 四、历史验证与可复查边界
+读取区分缺失、损坏和合法值，不补零、不触发重跑。汇总保留缺seed和每点实际样本数，执行失败与有效科学观察分列。统计口径须明确样本标准差与总体标准差，绘图阴影不自动等于置信区间。模型泛化和科学方法贡献由研究设计判断，工程合同通过不替代它们。
 
-## （一）一份历史摘要
+# 四、可复用路线与代价
 
-下表分别记录历史科学报告与后续工程验收，每行数字仅覆盖对应提交和条件。后续工程验收记录保存在对应 PR 所列外部证据根；历史科学原始 Run、checkpoint 和日志未在本轮核实完整性，均不随本次 Git clone 提供。已删除的大报告仍可在固定历史提交中查阅，不能把其存在称为原始证据完整可恢复。
-
-| **对象与实际来源** | **历史观察** | **不能推出的结论** |
+| **路线** | **直接机制与依据** | **适合的问题及采用边界** |
 | --- | --- | --- |
-| 2026年10月13日，v0.3.0，`804b3823ab6d2af46cbda1a65688ca8b76c60b22`；main_probe：MNIST/CIFAR10 × linear/mlp/cnn/resnet18 × seed0，8 个配对 Run，各60步，CUDA，具体设备与环境见旧报告 | 旧报告记载8格通过，16份参数 checkpoint 的最大差为0，Loss 最大差 `4.44e-16`，各自 best 独立评测一致 | 不是当前0.4.1基线全矩阵验证；参数规模没有在本轮重算，不作性能结论 |
-| 同一来源的 main_exp：两数据集 × 四模型 × 四 seed，32 train + 32 own-best eval，各训练80000步、400个完整 test 点，CUDA | 旧报告记载完整矩阵和固定曲线门通过，终点对图像估读的最大差约0.255个百分点 | 两个训练在中断后以新身份从step0重跑，不能称一次连续 launch；不是原历史日志逐位复现 |
-| 2026年10月14日的短 CPU/流程检查 | 有助于定位局部读取、来源和流程问题 | 不替代长矩阵、CUDA、恢复、异机或性能验收 |
-| RPipe [#228](https://github.com/DreamSoul-AI/RPipe/pull/228) 设计基线 `3da2c50bb8db70fbeb78f07029dd4c8cc28012de`，先于 [#229](https://github.com/DreamSoul-AI/RPipe/pull/229) 合入 dev。#229 验收代码为 `cdba1c953ba2f3fef03015a43657b5b18a90358f`，集成为 `a32bdd110dda51986148369ea3358cc41544eb6c`，两者文件树相同 | 本地 Windows 有界 CPU：core 1496 通过，1 项 POSIX 可执行位静态豁免，required 1496 完成。离线 integration/e2e 278 通过，有限真实 HF CPU 7 通过。wheel/sdist 各完成 10 个 CLI 检查、4 个 Toy/Stub Run 和 2 个 Experiment，48 文件及许可证核对一致 | 对应固定代码的工程验收，HF 仍保留部分恢复语义，未覆盖正式 MNIST/CIFAR、GPU 或性能。不是本文档分支的新运行结果 |
-| 同一 RPipe dev `a32bdd110dda51986148369ea3358cc41544eb6c` 的远端检查 | [Unit Tests](https://github.com/DreamSoul-AI/RPipe/actions/runs/39845242019) 的 Ubuntu/Windows × Python 3.10/3.13 CPU 矩阵和 [Package Check](https://github.com/DreamSoul-AI/RPipe/actions/runs/39845241499) 均成功 | 远端 CI 与本地运行分列，矩阵之外的平台、版本和真实研究仍待验证 |
-| dayan [#171](https://github.com/DreamSoul-AI/dayan/pull/171)，验收代码 `0684b7435edda46751b0d3b8262680bfc196b77d`，合入其 dev 为 `8951fa99c2b15c1004923c3d579de96d04144bfc`。完整内嵌上述 RPipe 48 文件与 MIT，逐字节固定 | 本地 CPU 888 通过、53 跳过、133 未选，81.50 秒内完成，进程预算 240 秒。八个固定合成样本、seed0、FP32、4→8→2 Linear/Tanh 共58参数，通过真实 CPU Engine，连续3步对照第1步 checkpoint 后失败清理及新进程恢复，模型、优化器、scheduler 和含 RNG 的 training_state 逐项一致。wheel/sdist/隔离安装通过，dayan Actions 保持关闭 | 宿主有限接入证据，不能代替 RPipe 正式研究、GPU 卸载、真实数据或性能验收。跳过与未选不计通过，也不自动列为缺陷。SD、量化副本尚未同步 |
+| 本机声明、执行权与文件合同 | 当前RPipe的纯计划、所属生命周期、身份与只读观察，源码落点见代码结构设计 | 易于嵌入小研究仓库和检查原件，但恢复、并发、平台清理与发布语义须自己验证，不具备集群服务能力 |
+| MLflow实验跟踪 | Runs记录参数、指标和产物，Experiment组织查询，后端可本地或服务化。[MLflow Tracking](https://mlflow.org/docs/latest/ml/tracking/) | 适合集中检索和比较；跟踪记录与本项目的执行权/取消合同是不同问题。是否通过适配满足同一故障协议尚待实测，不能推定支持或缺失 |
+| Snakemake规则工作流 | 通过input/output规则推导任务依赖，可定义protected、temp、ensure和retries。[Snakemake9.27.1 Rules](https://snakemake.readthedocs.io/en/v9.27.1/snakefiles/rules.html) | 适合文件依赖分析和可替换步骤。目录输出和临时文件清理需要匹配所有权，自动重试需要核副作用，不与本项目unknown不重放的语义混同 |
+| 可交换运行来源 | Workflow Run RO-Crate用不同粒度关联执行、输入、输出和代码。[WRROC官方说明](https://www.researchobject.org/workflow-run-crate/) | 适合跨系统交换/归档来源。可以作为未来导出候选，不需要为阅读既有Run先引入RDF或全套来源服务 |
 
-旧报告入口：[main_probe](https://github.com/DreamSoul-AI/RPipe/blob/804b3823ab6d2af46cbda1a65688ca8b76c60b22/studies/main_probe/docs/STUDY_REPORT.md)、[main_exp](https://github.com/DreamSoul-AI/RPipe/blob/804b3823ab6d2af46cbda1a65688ca8b76c60b22/studies/main_exp/docs/STUDY_REPORT.md)。它们是可读历史材料，不是新分支当前结论。原始环境如需重新核验，先获得外部归档和完整条件，不能从版本名反推。
+上述路线可组合，不能按工具功能数量排序。MLflow不是任务所有权协议，文件DAG不是科学质量判据，来源包也不是独立复现成功。比较须先统一输入、终态、失败与重试的含义，再讨论结果或成本。
 
-## （二）历史曲线是什么
+# 五、面向本项目的取舍
 
-main_exp 的原参考来自 `4ccb28d0496110253e9f8e3f3df658853f07996b` 的两张 README 图。Accuracy 数值是像素估读，原历史日志和实际 seed 完整性未找回。400个评测槽对应真实 optimizer step 200–80000，不能把图中“Epoch”照抄成训练 epoch。阴影是跨 seed population std，`ddof=0`，不是置信区间。固定估读输入仍保留在 [REFERENCE_CURVES.json](../studies/main_exp/docs/REFERENCE_CURVES.json)，具体曲线门并入 [研究计划](<研究计划 Research Plan 研究流水线.md>)，不再保存图片和逐次报告副本。[原聚合源码](https://github.com/DreamSoul-AI/RPipe/blob/4ccb28d0496110253e9f8e3f3df658853f07996b/src/process.py)
+1. 继续采用structure提供能力、flow组织装配与时序，计划/读取保持无执行副作用，科学对象只归当前Run
+2. 明确科学结果、执行事实与派生分析的权威，未知不自动接管或重放，先保全原件和错误再提供诊断
+3. 共享输入与可变状态分离，显式pin已声明输入，缺口显示未验证，不以源码摘要冒充全部科学身份
+4. 外部来源交换、服务查询和异构调度只在真实需求与公平协议明确后采用，不为候选生态预建空适配
 
-# 五、当前缺口与路线判断
+这些是基于当前需求和机制的工程判断，不是速度、可靠性或新颖性实测。研究主张、对照和判读见 [研究计划](<研究计划 Research Plan 研究流水线.md>)，职责合同见 [架构设计](<架构设计 Architecture Design 研究流水线.md>)。
 
-1. **来源与读取边界**：当前有效配置、缓存来源及只读访问需要以失败反例验证。历史 version 冻结不能阻止所有旁路读取，也不能证明任意旧产物可复用
-2. **执行权与取消**：当前实现已有唯一协调者和明确状态；完整合同与尚未闭合的失败路径仍需逐项核验，不新增租期、数据库或分布式协议
-3. **宿主边界**：dayan、SD、量化的科学包应保持自己的公共结构，只有 `studies/` 接入模板。内嵌 `src/rpipe/` 固定到完整来源提交，下游不私改
-4. **文档完整性与测试重复**：当前文档按九类职责维护，改版前完整分册从固定历史提交查阅，不能以归并为由遗漏合同细节。运行输出移出Git；下游只验证接入行为，不复制RPipe内部测试
-5. **外部有效性**：未执行 MLflow/Snakemake 的同协议比较，未完成系统文献综述。当前证据不能支持新颖性、速度或可靠性排名
+# 六、来源版本与结论范围
 
-工程演进见 [开发记录](<开发记录 Development Record/2026-10-27 文档重构与历史归属.md>)，活动工程待办见 [开发计划](<开发计划 Development Plan 研究流水线.md>)。历史分支收纳与清理见 [2026-10-22 记录](<开发记录 Development Record/2026-10-22 历史分支保全回顾.md>)。这些记录不替代架构合同或研究验收。
-
-# 六、来源与阅读范围
-
-| **来源** | **版本、日期与实际阅读范围** | **用途与边界** |
-| --- | --- | --- |
-| RPipe [固定代码](https://github.com/DreamSoul-AI/RPipe/tree/ed0d50be4328af3480b54de31243bf507901d033) | 0.4.1基线；定向读 CLI、FlowRunner、Study loader、产物布局、声明、历史报告和测试路径 | 历史实现分析，未作为当前 HEAD 的运行验证 |
-| [MLflow Tracking](https://mlflow.org/docs/latest/ml/tracking/) | 滚动页，2026年10月21日访问；概念和记录方式 | 记录路线比较，未安装或运行 |
-| [Snakemake Rules](https://snakemake.readthedocs.io/en/stable/snakefiles/rules.html) | stable滚动页，同日访问；input/output、wildcards与规则说明 | 文件依赖机制，未验证训练故障语义 |
-| [PyTorch Reproducibility](https://docs.pytorch.org/docs/2.14/notes/randomness.html) | 文档2.14，同日访问；保证范围、随机源与cuDNN | 复现条件，不代表升级依赖 |
-| Pineau等，[Improving Reproducibility in Machine Learning Research](https://jmlr.org/papers/v22/20-303.html) | JMLR 22(164)，2021；2026年10月21日记录为官方摘要阅读 | 组织方法背景，未精读全文或提取调查数字 |
-| DreamSoul 软件架构设计调研四件套 | 通过项目关联的 DreamSoul 文档库定位“软件架构设计 Software Architecture Design”；通用调研、大纲、端侧智能体案例、来源索引 | 从质量场景推导职责和取舍，按规模裁剪，不复制整套案例 |
-| [CPU 内存清理样板](https://github.com/DreamSoul-AI/cpu-memory-cleanup/tree/6938f10447b250958856a845fc5448aa1185b52d) | 固定提交，AGENTS与三份docs | 文档粒度与边界样板，不宣称其实现已集成 |
-
-历史2026年10月16日文献筛选中，Gundersen等 [Sources of Irreproducibility in Machine Learning](https://arxiv.org/html/2204.07610v2) 为定向章节阅读记录，Snakemake 论文直读受限，ACM 构件政策候选未核验。本轮不将旧记录升级为新的全文阅读，不引用其尚未核实的实验数字。若研究主张进入外部比较，先补读原论文、固定工具版本，再在唯一研究计划中确定公平条件。
-
-2026年10月24日的输入校验、清理、监管与日志修复增量，分别绑定 #231/#232/#233 的验收 SHA。其失败、复验和限制集中见 [CPU 合同验收回顾](<运行记录 Run Record/2026-10-24 CPU 合同验收回顾.md>)，不能用上表 #229 数字替代后续源码验收。
+直接来源包括：Python3.13接口文档、Microsoft当前Job文档、W3C PROV-DM 2013正式推荐、PyTorch2.14、Snakemake9.27.1、MLflow滚动Tracking页和WRROC官方概览。版本固定来源不与滚动页拼成统一运行环境。本文没有安装或运行外部工具，不给符合性、性能或外部故障能力结论，实际访问、定向阅读范围与失败保存在运行记录。
