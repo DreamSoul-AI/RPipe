@@ -445,11 +445,13 @@ tests/run.py/conftest 维护唯一协议。计划含 plan_id、选择条件、�
 
 | **工作流** | **实际声明** | **边界与不足** |
 | --- | --- | --- |
-| unit-tests.yml | Ubuntu/Windows × Python 3.10/3.13，core、离线 integration/e2e、TensorBoard 回读，Unit tests 汇总门 | 4 CPU 矩阵，不含正式研究/GPU/全部外网；无失败中断证据 always 上传 |
-| package-check.yml | Ubuntu/Windows，Python 3.10，构建、分别安装 wheel/sdist 并 package_smoke，Build package 汇总门 | 2 包矩阵；构建不代替安装，合成小例不外推真实研究 |
+| unit-tests.yml | Ubuntu/Windows × Python 3.10/3.13，core、离线 integration/e2e、TensorBoard 回读，Unit tests 汇总门 | 4 CPU 矩阵，不含正式研究/GPU/全部外网；always 尝试归档统一回执和命令日志，保留7天 |
+| package-check.yml | Ubuntu/Windows，Python 3.10，构建、分别安装 wheel/sdist 并 package_smoke，Build package 汇总门 | 2 包矩阵；构建/安装日志及已生成smoke工作区归档7天，构建不代替安装，合成小例不外推真实研究 |
 | branch-flow.yml | PR 到 dev，main 仅接受 dev 来源 | 只验方向，不是架构审查或合并授权 |
 
 依赖部分 pin、部分范围未固定，保存实际解析版本和制品摘要。目标先受影响低成本关键合同，再有限集成及安装，昂贵设备/网络矩阵仅明确计划运行。策略、保护规则和发布修改单独审查。
+
+上传动作在成功、失败或可继续收尾的取消路径执行，缺文件报错，单次上传最多5分钟。不同矩阵、Actions run/attempt与检出SHA使用不同artifact名称；7天保留期届满后不承诺平台下载可用。测试仍使用既有manifest/events/report，打包仍使用SMOKE_RESULT及日志，不另建结果协议。Bash的pipefail保留tee之前的失败，上传成功不改变作业和汇总门的失败状态。
 
 HEAD 改变后重核受影响验证。纯文档变动可说明代码未变并引用固定代码 SHA 的结果，不能冒称新 HEAD 已跑。静态、本地 CPU、有限数值、远端 CI、安装、真实研究和性能分列，未跑/取消/skip/缺失如实写。
 
@@ -483,7 +485,7 @@ Mermaid 分别表达依赖、运行和状态，足够本项目使用；未建立
 | D1 收尾一致性，P1 | execution/outcome 明确索引与纯投影、owner 最后释放、显式安全重试已实现 | 多文件崩溃窗口仍保守 unknown，无自动接管/重放 |
 | D2 日志，P1/P2 | JSONL、脱敏、容量/保留、单路隔离及生产者关联已实现 | 同步 I/O 无硬期限；空闲保留和真实长程限额未校准 |
 | D3 输入身份及源根保护，P1/P2 | RunSpec/写前核 Study、库和可定位 checkout；显式 inputs pins、输入重叠保护、环境观察已实现 | 未固定输入仍 unverified；不承诺任意外部宿主/模型全部字节身份 |
-| D4 测试协议，P1/P2 | 计划/required、attempt、环境、批次预算超时、重试及报告重建已实现 | 只监督自有 pytest 根；失败证据 always 上传仍未实现，见开发计划 DP2 |
+| D4 测试协议，P1/P2 | 计划/required、attempt、环境、批次预算超时、重试及报告重建已实现 | 只监督自有 pytest 根；平台强制终止、runner丢失或上传服务失败时，always步骤仍不能保证归档完整 |
 | D5 接受字段与兼容，P2 | freeze 明确拒绝、run_description 消费、flow 键和 bool 严格校验已实现 | prepare_shared=True 明确拒绝，False 保留兼容；不恢复旧冻结归档 |
 | D6 资源平台，P1/P2 | 默认 Budget 的硬内存/注入超时限制保留；显式 Windows supervise 提供所属树期限及 RSS/输出观察 | 非硬 RSS/存储配额；GPU预留不在当前能力，正式研究与长程预算需独立准入 |
 | D7 profile/导出，P2 | profile 逐批归约并关闭 Data、显式统计严格校验、实际来源记录和导出选择已实现 | 没有真实大数据 profile/性能实验，底层导出调用方保护未知输入 |

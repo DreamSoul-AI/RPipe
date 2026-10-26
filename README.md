@@ -14,7 +14,7 @@ RPipe（Research Pipeline，研究流水线）是研究项目的代码与执行�
 | [架构设计 Architecture Design](<docs/架构设计 Architecture Design 研究流水线.md>) | 质量场景、职责、接口、状态、运行部署、取消/故障、测试与 CI/CD 合同及保留限制 |
 | [代码结构设计 Code Structure Design](<docs/代码结构设计 Code Structure Design 研究流水线.md>) | 当前选定的两柱结构、50个包内 Python 文件职责、公开入口、依赖及源码/产物分类，另列实现差距 |
 | [开发计划 Development Plan](<docs/开发计划 Development Plan 研究流水线.md>) | 本轮文档阶段、后续工程任务、前置、验收和停止点；代码阶段待文档审阅后确认 |
-| [缺陷记录 Bug Report](<docs/缺陷记录 Bug Report 研究流水线.md>) | 活动合同缺口：CI 失败证据归档、模板旧指南注释；已修复历史不积累于活动清单 |
+| [缺陷记录 Bug Report](<docs/缺陷记录 Bug Report 研究流水线.md>) | 活动问题与待验证事项；已关闭问题的变更和证据只从日期记录追溯 |
 | [开发记录 Development Record](<docs/开发记录 Development Record/>) | 日期记录，本轮文档调整与历史集成、分支保全的归属；不复制整份测试结果 |
 | [运行记录 Run Record](<docs/运行记录 Run Record/>) | 本轮静态核验与固定 CPU 验收回顾；原始证据在 Git 外，本轮未重核其完整性 |
 | [文献调研 Literature Review](<docs/文献调研 Literature Review 研究流水线.md>) | 按问题比较六篇原始研究的方法、证据和限制，注明阅读深度；非穷尽系统综述，无外部优越性结论 |
@@ -70,7 +70,7 @@ python -m rpipe status studies/_template --run-root <external-run-root>
 python -m rpipe report studies/_template --run-root <external-run-root>
 ```
 
-**`_template` 当前是 MNIST/CUDA、20 epoch 示例，不是离线 CPU smoke。** 复制后先在研究计划登记问题、条件和判据，再核有效声明、数据/模型来源、设备、精度与预算。plan 不下载或训练。模板中指向旧 README Study 指南的注释待 BR2 修正。离线合成安装旅程由 tests/package_smoke.py 提供，不能外推到模板科学实验。
+**`_template` 当前是 MNIST/CUDA、20 epoch 示例，不是离线 CPU smoke。** 复制后先在研究计划登记问题、条件和判据，再核有效声明、数据/模型来源、设备、精度与预算。plan 不下载或训练。模板配置注释指向本节。离线合成安装旅程由 tests/package_smoke.py 提供，不能外推到模板科学实验。
 
 | **命令** | **作用与边界** |
 | --- | --- |
@@ -112,7 +112,7 @@ python tests/run.py --core --results-root <external-test-root> --timeout-seconds
 
 结果包含 manifest、逐项 events 与可重建 report，未执行、跳过、取消、缺失与失败分别保留。执行器只监督本次 pytest 根进程，不提供逐项内存或全部后代硬限。制品验证另用 [tests/package_smoke.py](tests/package_smoke.py)，针对实际安装 wheel/sdist 的解释器与新的外部 workspace，不用 editable 导入替代。
 
-现有工作流在 dev/main 的 PR 和 push 上运行 CPU 矩阵（Ubuntu/Windows × Python3.10/3.13）及两平台 Python3.10 打包安装，另在 PR 检查分支方向。当前没有失败/中断证据 artifact 上传，见 BR1。工作流声明、远端实际结果与分支保护不是同一事实，不把配置存在记为当前 HEAD 已通过。
+现有工作流在 dev/main 的 PR 和 push 上运行 CPU 矩阵（Ubuntu/Windows × Python3.10/3.13）及两平台 Python3.10 打包安装，另在 PR 检查分支方向。CPU 作业归档统一测试回执和命令日志，打包作业归档构建/安装日志及已生成的 wheel/sdist smoke 工作区。上传在成功或失败后均尝试执行，缺少文件时明确失败；artifact 名包含矩阵、Actions run/attempt 和检出 SHA，保留7天。日志管道使用 Bash pipefail，不吞测试或构建失败。平台强制终止、runner 丢失或上传服务不可用时可能无完整归档，不能将未上传当作通过。工作流声明、远端实际结果与分支保护不是同一事实，不把配置存在记为当前 HEAD 已通过。
 
 历史本地有界 CPU、有限原生/HF、安装 smoke 与远端 CI 各有固定身份，见运行记录。本轮进行文档、源码事实与原始文献核对，不运行本地项目测试、安装或科学实验，不做桌面新对话验证。正式 MNIST/CIFAR、GPU、长程性能、矩阵外环境与原始历史归档可恢复性仍未验收。
 
