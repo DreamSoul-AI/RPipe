@@ -25,8 +25,6 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
-    env:
-      RPIPE_PACKAGE_EVIDENCE_ROOT: ${{ runner.temp }}/rpipe-package-evidence
 
     steps:
       - name: Checkout repository
@@ -40,7 +38,9 @@ jobs:
 
       - name: Prepare evidence directory
         shell: bash
-        run: mkdir -p "$RPIPE_PACKAGE_EVIDENCE_ROOT"
+        run: |
+          mkdir -p "$RUNNER_TEMP/rpipe-package-evidence"
+          echo "RPIPE_PACKAGE_EVIDENCE_ROOT=$RUNNER_TEMP/rpipe-package-evidence" >> "$GITHUB_ENV"
 
       - name: Install build frontend
         shell: bash
@@ -81,7 +81,7 @@ jobs:
         with:
           name: package-evidence-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: |
-            ${{ env.RPIPE_PACKAGE_EVIDENCE_ROOT }}/
+            ${{ runner.temp }}/rpipe-package-evidence/
             ${{ runner.temp }}/rpipe-wheel-smoke/
             ${{ runner.temp }}/rpipe-sdist-smoke/
           if-no-files-found: error
