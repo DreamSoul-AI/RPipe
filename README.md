@@ -4,7 +4,7 @@ RPipe（Research Pipeline，研究流水线）是用于搭建研究实验的参�
 
 RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他项目长期安装调用的通用 package 为产品目标，也不要求衍生项目持续跟随本仓接口。模板自身仍需讲清职责、保持可运行并验证示例，帮助研究者把有效配置、执行事实、科学结果和比较分析连接起来。Python 包名 `rpipe`、安装命令和打包配置是当前源码的组织与运行方式，不构成跨项目稳定 API 的承诺。仓库为 [DreamSoul-AI/RPipe](https://github.com/DreamSoul-AI/RPipe)，采用 [MIT 许可](LICENSE.md)。
 
-当前包元数据为 **0.4.1**。实际实现和支持限制见下文；版本号不代表所有兼容变化已发布。架构设计以单一 Markdown 完整维护整体组成、结构与部件、流程与扩展、观测恢复及产物合同，作为下一步沟通底稿；代码结构设计尚待据此重新推导。当前文件结构及此前调整建议见[开发计划第六章](<docs/开发计划 Development Plan 研究流水线.md#六模板定位下的架构复核与结构建议>)，建议暂缓采纳，先核对架构复原稿。正式数值、GPU 和长程性能仍待验收。
+当前包元数据为 **0.4.1**。实际实现和支持限制见下文；版本号不代表所有兼容变化已发布。架构设计以单一 Markdown 完整维护整体组成、结构与部件、流程与扩展、观测恢复及产物合同，作为下一步沟通底稿；代码结构设计已据此重新推导为单一完整文档，写明目标目录、部件接口、生命周期和依赖；尚未实施代码。实际差距、清理工作与校准事项见[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)。正式数值、GPU 和长程性能仍待验收。
 
 ## 文档与阅读顺序
 
@@ -16,7 +16,7 @@ RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他�
 | --- | --- |
 | [通用调研 General Research](<docs/通用调研 General Research 研究流水线.md>) | 机制、工程路线、直接来源、取舍与限制；项目历史执行只进入日期记录 |
 | [架构设计 Architecture Design](<docs/架构设计 Architecture Design 研究流水线.md>) | 单一完整正文：实验部件、流程扩展、观测恢复及产物合同；供下一步校准 |
-| [代码结构设计 Code Structure Design](<docs/代码结构设计 Code Structure Design 研究流水线.md>) | 目标目录、模块职责、正式用例、允许依赖及测试交付结构，只呈现目标本身 |
+| [代码结构设计 Code Structure Design](<docs/代码结构设计 Code Structure Design 研究流水线.md>) | 依据完整架构推导的单一文档：目标目录、模块职责、接口、允许依赖及验证落点；尚未实施 |
 | [开发计划 Development Plan](<docs/开发计划 Development Plan 研究流水线.md>) | 实现差距、逐模块工作、旧接口清理及验收顺序；当前只改 Markdown，代码工作待明确恢复 |
 | [缺陷记录 Bug Report](<docs/缺陷记录 Bug Report 研究流水线.md>) | 活动问题与待验证事项；已关闭问题的变更和证据只从日期记录追溯 |
 | [开发记录 Development Record](<docs/开发记录 Development Record/>) | 日期记录，本轮文档调整与历史集成、分支保全的归属；不复制整份测试结果 |
@@ -32,7 +32,7 @@ Python **3.10+**，setuptools 的 `src` 布局。实际依赖为 PyTorch、torch
 
 | **位置** | **职责** |
 | --- | --- |
-| [src/rpipe/](src/rpipe/) | 模板主体；当前 structure 提供声明、执行/产物机制及 data/model/algorithm/system，flow 组织阶段、后端装配与所属进程；实际归属待架构复核 |
+| [src/rpipe/](src/rpipe/) | 模板主体；当前 structure 提供声明、执行/产物机制及 data/model/algorithm/system，flow 组织阶段、后端装配与所属进程；实际归属与新目标的差距见开发计划 |
 | [studies/](studies/) | `_template` 示例与 main_probe/main_exp 声明、研究适配及必要静态科学输入 |
 | [tests/](tests/) | 本仓源码/Study 镜像、最小合成输入、统一执行器和安装 smoke |
 | [docs/](docs/) | 七类开发成果与两类研究成果、日期记录 |
