@@ -18,7 +18,7 @@ RPipe（Research Pipeline，研究流水线）是研究项目的代码与执行�
 | [开发计划 Development Plan](<docs/开发计划 Development Plan 研究流水线.md>) | 依据新设计核对旧实现，分批重构及回归验证，维护前置、验收和停止点 |
 | [缺陷记录 Bug Report](<docs/缺陷记录 Bug Report 研究流水线.md>) | 活动问题与待验证事项；已关闭问题的变更和证据只从日期记录追溯 |
 | [开发记录 Development Record](<docs/开发记录 Development Record/>) | 日期记录，本轮文档调整与历史集成、分支保全的归属；不复制整份测试结果 |
-| [运行记录 Run Record](<docs/运行记录 Run Record/>) | 本轮静态核验与固定 CPU 验收回顾；原始证据在 Git 外，本轮未重核其完整性 |
+| [运行记录 Run Record](<docs/运行记录 Run Record/>) | 各次静态、CPU、安装及 CI 验证的实际身份、结果和缺口；原始证据在 Git 外 |
 | [文献调研 Literature Review](<docs/文献调研 Literature Review 研究流水线.md>) | 按问题比较六篇原始研究的方法、证据和限制，注明阅读深度；非穷尽系统综述，无外部优越性结论 |
 | [研究计划 Research Plan](<docs/研究计划 Research Plan 研究流水线.md>) | 唯一中文研究计划，RQ1–RQ4、全部 Study 的 E0–E4 设计与判据；正式对照和资源校准未完成 |
 
@@ -116,7 +116,7 @@ python tests/run.py --core --results-root <external-test-root> --timeout-seconds
 
 现有工作流在 dev/main 的 PR 和 push 上运行 CPU 矩阵（Ubuntu/Windows × Python3.10/3.13）及两平台 Python3.10 打包安装，另在 PR 检查分支方向。CPU 作业归档统一测试回执和命令日志，打包作业归档构建/安装日志及已生成的 wheel/sdist smoke 工作区。上传在成功或失败后均尝试执行，缺少文件时明确失败；artifact 名包含矩阵、Actions run/attempt 和检出 SHA，保留7天。日志管道使用 Bash pipefail，不吞测试或构建失败。平台强制终止、runner 丢失或上传服务不可用时可能无完整归档，不能将未上传当作通过。工作流声明、远端实际结果与分支保护不是同一事实，不把配置存在记为当前 HEAD 已通过。
 
-历史本地有界 CPU、有限原生/HF、安装 smoke 与远端 CI 各有固定身份，见运行记录。本轮进行文档、源码事实与原始文献核对，不运行本地项目测试、安装或科学实验，不做桌面新对话验证。正式 MNIST/CIFAR、GPU、长程性能、矩阵外环境与原始历史归档可恢复性仍未验收。
+历史与当前的本地有界 CPU、有限原生/HF、安装 smoke 与远端 CI 分别按运行记录中的固定身份核对。重构先执行受影响合同回归，再按实际范围验证科学装配、Study 与制品旅程。正式 MNIST/CIFAR、GPU、长程性能、矩阵外环境与原始历史归档可恢复性仍未验收。
 
 ## 宿主接入与资料来源
 
