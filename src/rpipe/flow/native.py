@@ -59,13 +59,10 @@ class NativeRun:
         before = ctx.state.get('before_prepare')
         if before is not None:
             before(ctx)
-        validate = ctx.state.get('validate_config')
-        if validate is not None:
-            validate(ctx)
+        ctx.validate_config(ctx.spec)
         recipe = ctx.state.get('apply_recipe')
         ctx.state['recipe'] = bool(recipe(ctx)) if recipe is not None else False
-        if validate is not None:
-            validate(ctx)
+        ctx.validate_config(ctx.spec)
         origin = cfg.get('origin')
         if origin not in (None, ''):
             apply_model_origin(normalize_origin(origin))

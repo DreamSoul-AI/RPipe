@@ -60,26 +60,41 @@ def test_invalid_quality_does_not_publish_success(source_study, run_root, payloa
 
 
 @pytest.mark.parametrize('entry', ['public', 'mechanism'])
+@pytest.mark.parametrize('phase', ['prepare', 'execute', 'collect', 'close'])
+@pytest.mark.parametrize('target', ['config', 'control'])
 def test_payload_cannot_change_effective_configuration_after_planning(
-        source_study, run_root, payload_factory, entry):
+        source_study, run_root, payload_factory, entry, phase, target):
     from rpipe.api import plan, run
-
-    class ChangesConfiguration(payload_factory):
-        def prepare(self, ctx):
-            self._phase('prepare')
-            ctx.config['data']['name'] = 'changed_after_plan'
+    from rpipe.structure.contracts import control_from_config
 
     spec = plan(source_study, run_root=run_root)[0]
-    payload = ChangesConfiguration()
+    payload = payload_factory()
+    original = getattr(payload, phase)
+
+    def change_config(ctx):
+        result = original(ctx)
+        if target == 'config':
+            ctx.config['data']['name'] = 'changed_after_plan'
+        else:
+            if ctx.control is None:
+                ctx.control = control_from_config(ctx.config)
+            ctx.control.run.data.name = 'changed_after_plan'
+        return result
+
+    setattr(payload, phase, change_config)
     if entry == 'mechanism':
         from rpipe.structure.execution import execute
         outcome = execute(spec, payload)
     else:
         outcome = run(spec, payload=payload)
     assert outcome.status == 'failed'
-    assert 'execute' not in payload.calls
+    assert outcome.error['type'] == 'SourceMismatch'
+    assert payload.calls[-1] == 'close'
+    if phase == 'prepare':
+        assert 'execute' not in payload.calls
     assert spec.config['data']['name'] == 'Toy'
     assert not spec.result_path.exists()
+    assert not (spec.run_dir / '.execution').exists()
 
 
 def test_release_failure_is_unknown_in_return_record_and_readout(

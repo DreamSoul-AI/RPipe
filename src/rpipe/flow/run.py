@@ -10,7 +10,7 @@ import sys
 import time
 import uuid
 
-from rpipe.structure.contracts import AdmissionError, Budget, Cancellation, RunSpec, SourceMismatch, control_from_config
+from rpipe.structure.contracts import AdmissionError, Budget, Cancellation, RunSpec, control_from_config
 from rpipe.structure.artifacts import ArtifactLayout, environment_snapshot, identity, load_config, read_json, write_json
 from rpipe.structure.execution import Cancelled, error_record, execute
 from rpipe.structure.execution import RunContext
@@ -35,10 +35,6 @@ def configure(ctx, *, runtime_id=None, request_id=None, stdout=True):
     study = load_config(ctx.study_dir / 'study.yaml')
     ctx.state['study'] = study
     ctx.control = control_from_config(ctx.config)
-    def validate_config(current):
-        if current.config != current.spec.to_config() or current.control.to_dict() != current.spec.to_config():
-            raise SourceMismatch('effective configuration changed after admission')
-    ctx.state['validate_config'] = validate_config
     ctx.state['before_prepare'] = lambda current: run_study_phase(current.study_dir, 'prepare', current, study, entry='before')
     ctx.state['apply_recipe'] = lambda current: apply_recipe(current.study_dir, study, RecipeContext(
         current.study_dir, current.spec.id, current.spec.seed, current.config,

@@ -37,6 +37,11 @@ class RunContext:
             raise AdmissionError('only a process handle created by this execution may be registered')
         self.processes.append(process)
 
+    def validate_config(self, spec: RunSpec, when: str = 'after admission') -> None:
+        expected = spec.to_config()
+        if self.config != expected or (self.control is not None and self.control.to_dict() != expected):
+            raise SourceMismatch(f'effective configuration changed {when}')
+
 
 def _validate_run(payload: Any) -> None:
     for name in ('prepare', 'execute', 'collect', 'close'):
@@ -126,12 +131,10 @@ def execute(spec: RunSpec, payload: Any, *, budget: Budget | None = None,
             result = pipeline(payload, ctx)
         else:
             payload.prepare(ctx)
-            if ctx.config != spec.to_config() or (ctx.control is not None and ctx.control.to_dict() != spec.to_config()):
-                raise SourceMismatch('effective configuration changed during prepare')
+            ctx.validate_config(spec, 'during prepare')
             if cancellation.is_set(): raise Cancelled('cancelled after prepare')
             payload.execute(ctx)
-            if ctx.config != spec.to_config() or (ctx.control is not None and ctx.control.to_dict() != spec.to_config()):
-                raise SourceMismatch('effective configuration changed during execute')
+            ctx.validate_config(spec, 'during execute')
             if cancellation.is_set(): raise Cancelled('cancelled after execute')
             result = payload.collect(ctx)
         if not isinstance(result, dict):
@@ -181,8 +184,7 @@ def execute(spec: RunSpec, payload: Any, *, budget: Budget | None = None,
     if status == 'succeeded':
         try:
             validate_source(spec)
-            if ctx.config != spec.to_config() or (ctx.control is not None and ctx.control.to_dict() != spec.to_config()):
-                raise SourceMismatch('effective configuration changed before result publication')
+            ctx.validate_config(spec, 'before result publication')
             structure = result.get('structure')
             data_snapshot = structure.get('data') if isinstance(structure, dict) else None
             observed_stats = data_snapshot.get('stats_source') if isinstance(data_snapshot, dict) else None

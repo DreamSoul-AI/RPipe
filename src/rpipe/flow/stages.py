@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from rpipe.structure.execution import Cancelled
-from rpipe.structure.contracts import AdmissionError, SourceMismatch
+from rpipe.structure.contracts import AdmissionError
 
 from .study import run_study_phase
 
@@ -22,8 +22,7 @@ def pipeline(payload, ctx) -> dict:
         check()
 
     def check():
-        if ctx.config != ctx.spec.to_config() or (ctx.control is not None and ctx.control.to_dict() != ctx.spec.to_config()):
-            raise SourceMismatch('effective configuration changed after admission')
+        ctx.validate_config(ctx.spec)
         if ctx.cancellation.is_set():
             raise Cancelled('cancelled between phases')
 

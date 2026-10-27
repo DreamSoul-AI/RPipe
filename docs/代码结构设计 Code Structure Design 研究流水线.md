@@ -133,7 +133,7 @@ src/rpipe/
 | --- | --- | --- |
 | `structure/contracts.py` | 配置/Control、RunSpec/RunOutcome、Budget/SupervisionLimits/Cancellation，纯合并/ID/project_execution、validate_run_root | 仅标准库；RunSpec 只读观察路径和源码根标记并拒绝重叠，不读取配置内容/加载后端/写盘；纯投影服务执行和读取 |
 | `structure/plan.py` | expand：声明展开、轴/seed/版本、Experiment 分组与 train_id | 只依赖纯合同；api.plan 提供已解析输入和实际摘要 |
-| `structure/execution.py` | RunContext、execute、Cancelled、error_record；明确 attempt、owner 最后释放、首错/清理、科学/派生发布与终态 | 注入四方法，不选科学后端；统一纯投影，release 后不写 Run，unknown 不重放 |
+| `structure/execution.py` | RunContext 及其 validate_config、execute、Cancelled、error_record；明确 attempt、owner 最后释放、首错/清理、科学/派生发布与终态 | RunContext 统一核配置及 Control 与冻结规格一致，flow 决定检查时点；注入四方法，不选科学后端，release 后不写 Run，unknown 不重放 |
 | `structure/artifacts.py` | 布局/identity/source_digest/validate_source/validate_train、input_provenance/environment_snapshot/read_execution/safe_error_record、发布/owner/锁/输入原语 | 明确索引及 pins 校验、输入输出保护、安全异常记录，读取不建目录；实际 I/O 仍在负责入口 |
 | `structure/readout.py` | read_run/read_legacy、aggregate/logs/report/compare；轨迹加载、曲线摘要、train/eval 配对与差值 | 只读，不 import 执行/科学后端；api、exports 及 Study 分析使用。旧辅助读端不等于核心准入来源 |
 | `structure/comparison.py` | compare_runs/format_compare/write_compare；Tensor、复杂数、大整数、checkpoint 和轨迹深比较 | 显式重操作，可延迟读受信 Torch；只接注入 checkpoint reader，不反向导入 flow 或猜 Study 根 |

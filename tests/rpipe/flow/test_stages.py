@@ -42,6 +42,26 @@ def test_write_hook_failure_cannot_publish_success(source_study, run_root, paylo
     assert not spec.result_path.exists()
 
 
+@pytest.mark.parametrize('phase', ['prepare', 'execute', 'collect', 'summarize', 'write'])
+@pytest.mark.parametrize('target', ['config', 'control'])
+def test_study_hook_configuration_change_cannot_publish_success(
+        source_study, run_root, payload_factory, file_bytes, phase, target):
+    from rpipe.api import plan, run
+
+    _hook(source_study, phase, 'def run(ctx):\n    ctx.control.run.data.name = "changed"\n'
+          if target == 'control' else
+          'def run(ctx):\n    ctx.config["data"]["name"] = "changed"\n')
+    before = file_bytes(source_study)
+    spec = plan(source_study, run_root=run_root)[0]
+    payload = payload_factory()
+    outcome = run(spec, payload=payload)
+    assert outcome.status == 'failed' and outcome.error['type'] == 'SourceMismatch'
+    assert payload.calls[-1] == 'close'
+    assert not spec.result_path.exists()
+    assert not (spec.run_dir / '.execution').exists()
+    assert file_bytes(source_study) == before
+
+
 def test_process_hook_failure_preserves_published_scientific_success(source_study, run_root, payload_factory):
     from rpipe.api import plan, read_run, run
 

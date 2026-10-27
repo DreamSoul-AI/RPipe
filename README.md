@@ -6,14 +6,16 @@ RPipe（Research Pipeline，研究流水线）是研究项目的代码与执行�
 
 ## 文档与阅读顺序
 
-先读本 README 和 [AGENTS.md](AGENTS.md)，再按问题进入以下唯一成果。开发与研究的计划独立维护，日期记录保存实际演进与证据，不另建同义进度、交接或验收报告。
+研发协作的共用依据为 [研发用 AGENTS.md](https://dreamsoul.feishu.cn/docx/QICWdeEokobO9RxYR9zcjE6Pnyg)。采用其适用正文，并结合本仓 [AGENTS.md](AGENTS.md) 的项目约定执行。共用《研发用 AGENTS.md》与资料库根 AGENTS.md 是不同文档，不得相互替代。本地源与飞书正文需核对版本，不能以本仓规则已更新推定共用正文已同步。
+
+先读本 README、共用《研发用 AGENTS.md》和本仓项目约定，再按问题进入以下唯一成果。开发与研究的计划独立维护，日期记录保存实际演进与证据，不另建同义进度、交接或验收报告。
 
 | **成果** | **当前内容与边界** |
 | --- | --- |
 | [通用调研 General Research](<docs/通用调研 General Research 研究流水线.md>) | 机制、工程路线、直接来源、取舍与限制；项目历史执行只进入日期记录 |
 | [架构设计 Architecture Design](<docs/架构设计 Architecture Design 研究流水线.md>) | 质量场景、职责、接口、状态、运行部署、取消/故障、测试与 CI/CD 合同及保留限制 |
 | [代码结构设计 Code Structure Design](<docs/代码结构设计 Code Structure Design 研究流水线.md>) | 当前选定的两柱结构、50个包内 Python 文件职责、公开入口、依赖及源码/产物分类，另列实现差距 |
-| [开发计划 Development Plan](<docs/开发计划 Development Plan 研究流水线.md>) | 本轮文档阶段、后续工程任务、前置、验收和停止点；代码阶段待文档审阅后确认 |
+| [开发计划 Development Plan](<docs/开发计划 Development Plan 研究流水线.md>) | 依据新设计核对旧实现，分批重构及回归验证，维护前置、验收和停止点 |
 | [缺陷记录 Bug Report](<docs/缺陷记录 Bug Report 研究流水线.md>) | 活动问题与待验证事项；已关闭问题的变更和证据只从日期记录追溯 |
 | [开发记录 Development Record](<docs/开发记录 Development Record/>) | 日期记录，本轮文档调整与历史集成、分支保全的归属；不复制整份测试结果 |
 | [运行记录 Run Record](<docs/运行记录 Run Record/>) | 本轮静态核验与固定 CPU 验收回顾；原始证据在 Git 外，本轮未重核其完整性 |

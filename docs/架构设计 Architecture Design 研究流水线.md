@@ -55,7 +55,7 @@ api.plan 读取两个 YAML、计算实际源码摘要，再调用 expand。展�
 | 四类组件 | data/model 有 name/source/path/config，algorithm 有 mode/source/path/config，system 有 source/path/config | config 同名设置优先于兼容 extras；保留扩展字段不等于实现能力 |
 | freeze、provenance、run_description | freeze 明确拒绝；provenance.include 扫描源码、inputs 固定声明输入；run_description 生成说明 | 描述只支持 data_name/model_name/mode/seed/train_size/source 六个标量占位符，不支持属性/索引/格式执行；不改旧 ID |
 
-RunConfig 是有效配置，Control 是执行侧访问对象，RunSpec 冻结配置、来源、输出根、摘要、版本和依赖。准备、执行、阶段 hook 后及发布前检查有效配置未变；改变条件须重新计划。
+RunConfig 是有效配置，Control 是执行侧访问对象，RunSpec 冻结配置、来源、输出根、摘要、版本和依赖。运行上下文统一拥有配置及 Control 与冻结规格的一致性规则，执行器和流程选择准备、执行、阶段 hook 后及发布前的检查时点；改变条件须重新计划。
 
 train/eval 在计划中配对：忽略 algorithm.mode 和说明性字段后，其余条件及 seed 相同，形成 train_id，train 排在 eval 前。独立 eval 核自己的成功 train 身份，不从邻近目录、日志、旧 index 或“最近训练”猜依赖。inference 是配置允许值，当前无通用已注册实现。
 
