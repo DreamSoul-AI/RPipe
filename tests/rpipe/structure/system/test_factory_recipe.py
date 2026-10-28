@@ -20,10 +20,9 @@ def test_recipe_checkpoint_state_keeps_legacy_and_relocated_imports(tmp_path, mo
     import importlib.util
     import sys
     from rpipe.structure.make import plan
-    from rpipe.structure.execution import RunContext
-    from rpipe.structure.contracts import Cancellation
-    from rpipe.flow.run import configure
-    from rpipe.flow.native import NativeRun
+    from rpipe.flow.context import ScienceContext
+    from rpipe.flow.context import Cancellation
+    from rpipe.flow.stages import configure_science, prepare, close_science
     from rpipe.structure.control import SystemConfig
     from rpipe.structure.system.factory import SystemFactory
     from rpipe.structure.model.factory import ModelRegistry
@@ -82,11 +81,10 @@ def register(ctx):
     def prepared(study):
         spec = plan(study, run_root=tmp_path / 'outputs')[0]
         from rpipe.structure.artifact.io import ArtifactLayout
-        ctx = RunContext(spec=spec, cancellation=Cancellation(), layout=ArtifactLayout(spec))
-        configure(ctx)
-        payload = NativeRun()
-        request.addfinalizer(lambda: payload.close(ctx))
-        payload.prepare(ctx)
+        ctx = ScienceContext(spec=spec, cancellation=Cancellation(), layout=ArtifactLayout(spec))
+        configure_science(ctx, logging_context={}, request_id=None)
+        request.addfinalizer(lambda: close_science(ctx))
+        prepare(ctx)
         return ctx
 
     ctx = prepared(study)

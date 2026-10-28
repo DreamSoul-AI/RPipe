@@ -15,7 +15,9 @@ pytestmark = [pytest.mark.content, pytest.mark.p1,
 def test_native_public_run_trains_two_updates_then_independently_evaluates_own_best(
         tensor_study, run_root, file_bytes):
     from rpipe.structure.make import publish, plan
-    from rpipe.api import process, read_run, run
+    from rpipe.api import read_run
+    from rpipe.flow.process import process_study as process
+    from rpipe.flow.run import run
     from rpipe.structure.system.factory import SystemFactory
     from rpipe.structure.control import SystemConfig
 
@@ -46,7 +48,7 @@ def test_silent_worker_cannot_reuse_previous_worker_response(
         source_study, run_root, monkeypatch):
     import importlib
     from rpipe.structure.make import plan
-    from rpipe.api import run
+    from rpipe.flow.run import run
 
     spec = plan(source_study, run_root=run_root)[0]
     spec.run_dir.mkdir(parents=True)
@@ -59,7 +61,7 @@ def test_silent_worker_cannot_reuse_previous_worker_response(
         def __init__(self, args, **kwargs):
             super().__init__([sys.executable, '-B', '-c', 'pass'], **kwargs)
 
-    module = importlib.import_module('rpipe.flow.run')
+    module = importlib.import_module('rpipe.flow.worker')
     monkeypatch.setattr(module.subprocess, 'Popen', SilentWorker)
     outcome = run(spec)
     assert outcome.status == 'failed'
@@ -75,7 +77,7 @@ def test_abrupt_worker_exit_keeps_unknown_owner_when_descendants_cannot_be_verif
     import os
     from types import SimpleNamespace
     from rpipe.structure.make import plan
-    from rpipe.api import run
+    from rpipe.flow.run import run
     from rpipe.structure.control import BusyError
 
     with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
@@ -86,7 +88,7 @@ def test_abrupt_worker_exit_keeps_unknown_owner_when_descendants_cannot_be_verif
     else:
         (source_study / 'flow').mkdir()
         (source_study / 'flow' / 'prepare.py').write_text('def run(ctx): pass\n', encoding='utf-8')
-    module = importlib.import_module('rpipe.flow.run')
+    module = importlib.import_module('rpipe.flow.worker')
     native_popen = subprocess.Popen
 
     class AbruptWorker(native_popen):
@@ -104,8 +106,9 @@ def test_abrupt_worker_exit_keeps_unknown_owner_when_descendants_cannot_be_verif
     assert (spec.run_dir / '.execution').is_dir() is unknown
     assert not spec.result_path.exists()
     if unknown:
-        with pytest.raises(BusyError):
-            run(spec, retry=True)
+        _rejected = run(spec, retry=True)
+        assert _rejected.status == 'rejected'
+        assert _rejected.error['type'] == 'BusyError'
 
 
 @pytest.mark.integration
@@ -118,7 +121,7 @@ def test_windows_hard_timeout_admission_matches_possible_descendants(
     from rpipe.structure.make import plan
     from rpipe.structure.artifact.io import load_config, write_config
     from rpipe.structure.control import AdmissionError
-    from rpipe.structure.contracts import Budget
+    from rpipe.flow.context import Budget
 
     with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
         stream.write('recipe: recipe.py\n' if extension == 'recipe' else
@@ -135,12 +138,50 @@ def test_windows_hard_timeout_admission_matches_possible_descendants(
         config['algorithm']['source'] = 'transformers_trainer'
     write_config(source_study / 'experiment_config.yaml', config)
     spec = plan(source_study, run_root=run_root)[0]
-    module = importlib.import_module('rpipe.flow.run')
+    module = importlib.import_module('rpipe.flow.worker')
     monkeypatch.setattr(module, 'os', SimpleNamespace(name='nt', environ=os.environ, pathsep=os.pathsep))
     possible = extension not in {'disabled-hook', 'no-hook'}
     if possible:
         with pytest.raises(AdmissionError):
-            module.ProcessRun(spec, Budget(timeout_seconds=1))
+            module.validate_budget(spec, Budget(timeout_seconds=1))
     else:
-        assert not module.ProcessRun(spec, Budget(timeout_seconds=1)).may_have_descendants
+        assert not module.validate_budget(spec, Budget(timeout_seconds=1))
     assert not run_root.exists()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('fault', ['request', 'identity', 'attempt', 'schema', 'scalar',
+                                  'truncated', 'missing-draft', 'invalid-closure'])
+def test_foreign_or_malformed_worker_response_never_publishes_scientific_success(
+        source_study, run_root, monkeypatch, fault):
+    import importlib
+    from rpipe.flow.run import run
+    from rpipe.structure.make import plan
+
+    module = importlib.import_module('rpipe.flow.worker')
+    native_popen = subprocess.Popen
+    script = '''import json, sys
+from pathlib import Path
+request, output, fault = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+body = json.loads(request.read_text(encoding='utf-8'))
+response = {'schema': 1, 'request': body['request'], 'identity': body['identity'],
+            'attempt': body['attempt'], 'result': {'metrics': {'value': 3.0}},
+            'error': None, 'cleanup_errors': [], 'unknown_resources': False,
+            'science_closed': True, 'diagnostics_complete': True, 'environment': {}}
+if fault in {'request', 'attempt'}: response[fault] = 'f' * 32
+elif fault == 'identity': response['identity'] = {'foreign': True}
+elif fault == 'schema': response['schema'] = True
+elif fault == 'scalar': response = []
+elif fault == 'missing-draft': response['result'] = {}
+elif fault == 'invalid-closure': response['unknown_resources'] = True
+output.write_text('{' if fault == 'truncated' else json.dumps(response), encoding='utf-8')
+'''
+    class ForeignWorker(native_popen):
+        def __init__(self, args, **kwargs):
+            super().__init__([sys.executable, '-B', '-c', script, *args[-2:], fault], **kwargs)
+    monkeypatch.setattr(module.subprocess, 'Popen', ForeignWorker)
+    spec = plan(source_study, run_root=run_root)[0]
+    outcome = run(spec)
+    assert outcome.status == 'failed'
+    assert outcome.error is not None
+    assert not spec.result_path.exists()

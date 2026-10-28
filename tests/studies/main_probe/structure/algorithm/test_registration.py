@@ -37,13 +37,13 @@ def registration(monkeypatch):
 
 @pytest.mark.parametrize('cleanup_failed', [False, True], ids=['cancel', 'cancel-and-cleanup-failure'])
 def test_probe_cancellation_cleanup_reaches_execution_outcome(
-        registration, monkeypatch, tmp_path, cleanup_failed):
+        registration, monkeypatch, tmp_path, cleanup_failed, science_factory, science_worker):
     from rpipe.structure.make import plan
     from rpipe.api import read_run
-    from rpipe.flow.native import NativeRun
     from rpipe.structure.algorithm.factory import AlgorithmRegistry
     from rpipe.structure.control import AlgorithmConfig
-    from rpipe.structure.execution import Cancelled, execute
+    from rpipe.flow.context import Cancelled
+    from rpipe.flow.run import run
 
     primary = Cancelled('probe cancelled')
     secondary = OSError('owned writer close failed')
@@ -55,7 +55,7 @@ def test_probe_cancellation_cleanup_reaches_execution_outcome(
 
     monkeypatch.setattr(registration.paired, 'run_pair', fail)
 
-    class ProbeBoundary(NativeRun):
+    class ProbeBoundary(science_factory):
         def prepare(self, ctx):
             workspace = ctx.layout.assets_dir / 'probe'
             workspace.mkdir(parents=True)
@@ -76,7 +76,8 @@ def test_probe_cancellation_cleanup_reaches_execution_outcome(
         'experiment: probe_boundary\ndata: {name: Toy}\nmodel: {name: linear}\n'
         'algorithm: {mode: train}\nsystem: {device: cpu}\n', encoding='utf-8')
     spec = plan(source, run_root=tmp_path / 'runs')[0]
-    outcome = execute(spec, ProbeBoundary())
+    science_worker(ProbeBoundary())
+    outcome = run(spec)
     record = json.loads((spec.run_dir / 'execution.json').read_text(encoding='utf-8'))
     status = 'failed' if cleanup_failed else 'cancelled'
     assert outcome.status == read_run(spec)['status'] == record['candidate_status'] == status

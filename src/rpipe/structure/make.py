@@ -229,8 +229,11 @@ def _validate_set(specs: tuple[RunSpec, ...]) -> None:
 
 def _check_existing(spec: RunSpec) -> None:
     config = spec.run_dir / 'config.yaml'
-    if config.exists() and io.load_config(config) != spec.to_config():
-        raise SourceMismatch(f'existing config differs: {spec.id}')
+    if config.exists():
+        stored = json.dumps(io.load_config(config), sort_keys=True, allow_nan=False)
+        expected = json.dumps(spec.to_config(), sort_keys=True, allow_nan=False)
+        if stored != expected:
+            raise SourceMismatch(f'existing config differs: {spec.id}')
     if spec.result_path.exists() and io.read_json(spec.result_path).get('identity') != io.identity(spec):
         raise SourceMismatch(f'existing result differs: {spec.id}')
     execution = spec.run_dir / 'execution.json'

@@ -233,8 +233,24 @@ class Ownership:
         if not self.acquired:
             return
         self.verify()
+        directory = self.path.stat()
+        record = (self.path / 'owner.json').read_bytes()
         (self.path / 'owner.json').unlink()
-        self.path.rmdir()
+        try:
+            self.path.rmdir()
+        except BaseException as primary:
+            try:
+                current = self.path.stat()
+                if (current.st_dev, current.st_ino) != (directory.st_dev, directory.st_ino):
+                    raise BusyError('execution directory changed during release')
+                # Restore only our unchanged directory, never replace a peer owner.
+                with (self.path / 'owner.json').open('xb') as stream:
+                    stream.write(record)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            except BaseException as cleanup:
+                _cleanup_note(primary, cleanup)
+            raise
         self.acquired = False
 
     def __enter__(self):
@@ -589,3 +605,44 @@ def validate_run_root(source_dir: Path | str, run_root: Path | str) -> None:
                 project_found = True
     if any(output.is_relative_to(root) or root.is_relative_to(output) for root in roots):
         raise AdmissionError('run_root must be separate from source roots and their checkouts')
+
+
+def project_execution(record: dict, result: dict, *, busy: bool, complete: bool = True) -> dict:
+    """Project one fixed attempt; callers decide whether its owner is still held."""
+    status = record.get('candidate_status')
+    valid = (type(record.get('schema')) is int and record['schema'] == 1 and record.get('phase') == 'closing'
+             and isinstance(status, str) and status in {'succeeded', 'failed', 'cancelled', 'unknown'}
+             and isinstance(record.get('evidence_complete'), bool)
+             and (record.get('quality') is None or isinstance(record['quality'], bool))
+             and isinstance(record.get('scientific_result_published'), bool)
+             and isinstance(record.get('cancelled'), bool)
+             and isinstance(record.get('cleanup_errors'), list)
+             and (record.get('error') is None or isinstance(record['error'], dict)))
+    published = record.get('scientific_result_published') is True
+    if published:
+        valid = valid and (result.get('status') == 'succeeded'
+                           and result.get('identity') == record.get('identity')
+                           and result.get('attempt') == record.get('attempt')
+                           and isinstance(result.get('evidence_complete'), bool)
+                           and result.get('quality') == record.get('quality'))
+    elif result:
+        valid = False
+    if status == 'succeeded' and not published:
+        valid = False
+    if status == 'succeeded' and (record.get('error') or record.get('cleanup_errors')
+                                  or record.get('cancelled')
+                                  or record.get('derived_status') not in {'not_run', 'succeeded'}):
+        valid = False
+    return {**result, 'id': record.get('identity', {}).get('id'),
+            'identity': record.get('identity'), 'attempt': record.get('attempt'),
+            'status': status if valid and complete and not busy else 'unknown',
+            'quality': record.get('quality') if valid else None,
+            'evidence_complete': bool(valid and complete and not busy and status == 'succeeded'
+                                      and record['evidence_complete'] and result.get('evidence_complete')),
+            'scientific_status': result.get('status', 'missing'),
+            'derived_status': record.get('derived_status', 'not_run'),
+            'input_provenance': record.get('input_provenance'), 'environment': record.get('environment'),
+            'error': record.get('error'), 'cleanup_errors': record.get('cleanup_errors', []),
+            'cancelled': record.get('cancelled', False), 'busy': busy,
+            **({'metadata_status': 'incomplete' if record.get('phase') == 'running' else 'invalid'}
+               if not valid or not complete else {})}

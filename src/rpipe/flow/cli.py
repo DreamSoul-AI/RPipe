@@ -53,12 +53,15 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == '_worker':
-            from .run import worker as execute_worker
+            from .worker import worker as execute_worker
             return execute_worker(args.request, args.output)
         if args.command == '_supervisor-coordinator':
             from .supervision import coordinator
             return coordinator()
         from rpipe import api
+        from .context import Budget, SupervisionLimits
+        from .supervision import launch, supervise
+        from .process import process_study
         if args.command == 'compare':
             if not args.legacy:
                 parser.error('directory comparison requires --legacy; use api.compare with verified RunSpecs')
@@ -78,7 +81,7 @@ def main(argv=None) -> int:
         if args.run_root is None:
             parser.error('--run-root is required; old Study directories are never implicitly migrated')
         if args.command == 'supervise':
-            limits = api.SupervisionLimits(args.run_seconds, args.batch_seconds, args.rss_bytes,
+            limits = SupervisionLimits(args.run_seconds, args.batch_seconds, args.rss_bytes,
                                           args.output_bytes, args.poll_seconds, args.cleanup_seconds)
             limits.validate()
         specs = planning.plan(args.study_dir, run_root=args.run_root, version=args.study_version)
@@ -92,7 +95,7 @@ def main(argv=None) -> int:
         elif args.command == 'make':
             value = planning.publish(specs)
         elif args.command == 'supervise':
-            value = api.supervise(specs, limits=limits, evidence_dir=args.evidence_dir, retry=args.retry)
+            value = supervise(specs, limits=limits, evidence_dir=args.evidence_dir, retry=args.retry)
             print(json.dumps(value, default=str))
             return 0 if value['status'] == 'succeeded' else 1
         elif args.command in ('run', 'study', 'launch', 'run-one'):
@@ -103,7 +106,7 @@ def main(argv=None) -> int:
                       'attempt': r.attempt, 'scientific_status': r.scientific_status,
                       'derived_status': r.derived_status,
                       'error_type': r.error.get('type') if r.error else None}
-                     for r in api.launch(specs, budget=api.Budget(args.timeout, args.memory_bytes), retry=args.retry)]
+                     for r in launch(specs, budget=Budget(args.timeout, args.memory_bytes), retry=args.retry)]
             print(json.dumps(value, default=str))
             return 0 if all(r['status'] == 'succeeded' for r in value) else 1
         elif args.command == 'status':
@@ -135,7 +138,7 @@ def main(argv=None) -> int:
             value = export_tensorboard(specs[0].study_root, args.out,
                                        run_ids=[s.id for s in specs] if selected else None)
         else:
-            value = api.process(specs)
+            value = process_study(specs)
             if args.figures:
                 from .exports import write_learning_curves
                 from rpipe.structure.artifact.io import load_index

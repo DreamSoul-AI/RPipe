@@ -14,7 +14,7 @@ import pytest
 
 from rpipe.structure.artifact.io import identity, write_json
 from rpipe.structure.control import AdmissionError
-from rpipe.structure.contracts import Cancellation, RunOutcome, SupervisionLimits
+from rpipe.flow.context import Cancellation, RunReport, SupervisionLimits
 
 pytestmark = [pytest.mark.content, pytest.mark.p1,
               pytest.mark.cost(cost_class='c2'),
@@ -254,7 +254,7 @@ def test_poll_sleep_is_capped_by_nearest_deadline(module, specs, tmp_path, monke
 
 @pytest.mark.unit
 @pytest.mark.parametrize(('status', 'quality', 'complete'), [
-    ('failed', None, False), ('unknown', None, False), ('succeeded', False, True),
+    ('failed', None, False), ('unknown', None, False), ('rejected', None, False), ('succeeded', False, True),
     ('succeeded', True, False)])
 def test_first_bad_outcome_stops_without_rewriting_science(module, specs, limits, tmp_path,
                                                            monkeypatch, status, quality, complete):
@@ -314,10 +314,9 @@ def test_foreign_progress_fails_closed(module, specs, tmp_path):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize('fault', ['quality', 'incomplete', 'failed', 'exception'])
+@pytest.mark.parametrize('fault', ['quality', 'incomplete', 'failed', 'rejected', 'exception'])
 def test_coordinator_stops_first_failure_using_existing_run_contract(module, specs, tmp_path,
                                                                     monkeypatch, fault):
-    from rpipe import api
     request = {'request': 'test', 'specs': [module._spec_body(spec) for spec in specs],
                'progress': str(tmp_path / 'progress.json'), 'retry': False}
     write_json(tmp_path / 'request.json', request)
@@ -329,9 +328,10 @@ def test_coordinator_stops_first_failure_using_existing_run_contract(module, spe
         calls.append((spec.id, kwargs))
         if fault == 'exception':
             raise RuntimeError('prepare failed')
-        return RunOutcome('failed' if fault == 'failed' else 'succeeded',
+        return RunReport(fault if fault in {'failed', 'rejected'} else 'succeeded',
                           quality=fault != 'quality', evidence_complete=fault != 'incomplete')
-    monkeypatch.setattr(api, 'run', run)
+    import importlib
+    monkeypatch.setattr(module, 'run', run)
     assert module.coordinator() == 1
     body = json.loads((tmp_path / 'progress.json').read_text(encoding='utf-8'))
     assert len(calls) == 1 and calls[0][1]['retry'] is False
@@ -346,9 +346,10 @@ def test_coordinator_eof_is_a_closed_gate(module, monkeypatch):
 
 _TINY_COORDINATOR = '''import json, subprocess, sys, time
 from pathlib import Path
-from rpipe import api
+import importlib
+run_module = importlib.import_module('rpipe.flow.supervision')
 from rpipe.structure.artifact.io import identity, write_json
-from rpipe.structure.contracts import RunOutcome
+from rpipe.flow.context import RunReport
 from rpipe.flow.supervision import coordinator
 mode = sys.argv[1]
 def run(spec, **kwargs):
@@ -371,9 +372,9 @@ def run(spec, **kwargs):
         child = subprocess.Popen([sys.executable, '-B', '-c', 'import time; time.sleep(60)'])
         (spec.assets_dir / 'orphan-pid').write_text(str(child.pid))
     owner.rmdir()
-    return RunOutcome('failed' if mode == 'failed' else 'succeeded',
+    return RunReport('failed' if mode == 'failed' else 'succeeded',
                       quality=mode != 'quality', evidence_complete=mode != 'incomplete')
-api.run = run
+run_module.run = run
 raise SystemExit(coordinator())
 '''
 
@@ -524,3 +525,41 @@ def test_real_publication_hook_timeout_preserves_science_and_busy_owner(module, 
     assert report['trigger']['kind'] == 'run_timeout' and report['status'] == 'unknown'
     assert report['tree_empty'] and report['interrupted']['scientific_status'] == 'succeeded'
     assert (specs[0].run_dir / '.execution').is_dir() and not specs[1].run_dir.exists()
+
+
+@pytest.mark.integration
+def test_launch_unknown_owner_stops_new_dispatch(source_study, run_root, monkeypatch):
+    from rpipe.flow.context import RunReport
+    from rpipe.structure import make as planning
+
+    specs = planning.plan(source_study, run_root=run_root)
+    calls = []
+
+    def unresolved(spec, **kwargs):
+        calls.append(spec.id)
+        return RunReport('unknown')
+
+    import importlib
+    execution = importlib.import_module('rpipe.flow.supervision')
+    from rpipe.flow.supervision import launch
+    monkeypatch.setattr(execution, 'run', unresolved)
+    assert [outcome.status for outcome in launch(specs)] == ['unknown']
+    assert calls == [specs[0].id]
+
+
+@pytest.mark.integration
+def test_launch_preserves_explicit_retry_choice(source_study, run_root, monkeypatch):
+    from rpipe.flow.context import RunReport
+    from rpipe.structure import make as planning
+
+    specs = planning.plan(source_study, run_root=run_root)
+    calls = []
+    def execute(spec, **kwargs):
+        calls.append(kwargs['retry'])
+        return RunReport('succeeded', evidence_complete=True)
+    import importlib
+    execution = importlib.import_module('rpipe.flow.supervision')
+    from rpipe.flow.supervision import launch
+    monkeypatch.setattr(execution, 'run', execute)
+    launch(specs, retry=True)
+    assert calls == [True, True]

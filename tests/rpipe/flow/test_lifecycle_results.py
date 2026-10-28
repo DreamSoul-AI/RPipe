@@ -10,18 +10,19 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
 @pytest.mark.parametrize('observation', [object(), {'value': float('nan')}, {'value': object()}],
                          ids=['not-mapping', 'nonfinite-measurement', 'not-serializable'])
 def test_invalid_collected_observation_fails_without_success_result(
-        source_study, run_root, payload_factory, observation):
+        source_study, run_root, science_factory, observation, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import run
+    from rpipe.flow.run import run
 
-    class InvalidObservation(payload_factory):
+    class InvalidObservation(science_factory):
         def collect(self, ctx):
             self._phase('collect')
             return observation
 
     spec = plan(source_study, run_root=run_root)[0]
     payload = InvalidObservation()
-    outcome = run(spec, payload=payload)
+    science_worker(payload)
+    outcome = run(spec)
     assert outcome.status == 'failed'
     assert outcome.quality is None
     assert outcome.evidence_complete is False
@@ -31,48 +32,50 @@ def test_invalid_collected_observation_fails_without_success_result(
 
 @pytest.mark.parametrize('quality,complete', [(False, True), (None, False)])
 def test_scientific_quality_and_evidence_are_preserved_separately(
-        source_study, run_root, payload_factory, quality, complete):
+        source_study, run_root, science_factory, quality, complete, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run, run
+    from rpipe.api import read_run
+    from rpipe.flow.run import run
 
-    class ScientificFacts(payload_factory):
+    class ScientificFacts(science_factory):
         def collect(self, ctx):
             self._phase('collect')
             return {'metrics': {'value': 3.0}, 'quality': quality, 'evidence_complete': complete}
 
     spec = plan(source_study, run_root=run_root)[0]
-    outcome = run(spec, payload=ScientificFacts())
+    science_worker(ScientificFacts())
+    outcome = run(spec)
     result = read_run(spec)
     assert outcome.status == 'succeeded'
     assert outcome.quality is result['quality'] is quality
     assert outcome.evidence_complete is result['evidence_complete'] is complete
 
 
-def test_invalid_quality_does_not_publish_success(source_study, run_root, payload_factory):
+def test_invalid_quality_does_not_publish_success(source_study, run_root, science_factory, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import run
+    from rpipe.flow.run import run
 
-    class InvalidQuality(payload_factory):
+    class InvalidQuality(science_factory):
         def collect(self, ctx):
             return {'quality': 'pass'}
 
     spec = plan(source_study, run_root=run_root)[0]
-    outcome = run(spec, payload=InvalidQuality())
+    science_worker(InvalidQuality())
+    outcome = run(spec)
     assert outcome.status == 'failed'
     assert not spec.result_path.exists()
 
 
-@pytest.mark.parametrize('entry', ['public', 'mechanism'])
 @pytest.mark.parametrize('phase', ['prepare', 'execute', 'collect', 'close'])
 @pytest.mark.parametrize('target', ['config', 'control'])
 def test_payload_cannot_change_effective_configuration_after_planning(
-        source_study, run_root, payload_factory, entry, phase, target):
+        source_study, run_root, science_factory, phase, target, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import run
+    from rpipe.flow.run import run
     from rpipe.structure.control import resolve_control
 
     spec = plan(source_study, run_root=run_root)[0]
-    payload = payload_factory()
+    payload = science_factory()
     original = getattr(payload, phase)
 
     def change_config(ctx):
@@ -86,11 +89,8 @@ def test_payload_cannot_change_effective_configuration_after_planning(
         return result
 
     setattr(payload, phase, change_config)
-    if entry == 'mechanism':
-        from rpipe.structure.execution import execute
-        outcome = execute(spec, payload)
-    else:
-        outcome = run(spec, payload=payload)
+    science_worker(payload)
+    outcome = run(spec)
     assert outcome.status == 'failed'
     assert outcome.error['type'] == 'SourceMismatch'
     assert payload.calls[-1] == 'close'
@@ -102,9 +102,10 @@ def test_payload_cannot_change_effective_configuration_after_planning(
 
 
 def test_release_failure_is_unknown_in_return_record_and_readout(
-        source_study, run_root, payload_factory, monkeypatch):
+        source_study, run_root, science_factory, monkeypatch, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run, run
+    from rpipe.api import read_run
+    from rpipe.flow.run import run
     from rpipe.structure.artifact.io import Ownership, read_json
 
     def denied(owner):
@@ -112,7 +113,8 @@ def test_release_failure_is_unknown_in_return_record_and_readout(
 
     monkeypatch.setattr(Ownership, 'release', denied)
     spec = plan(source_study, run_root=run_root)[0]
-    outcome = run(spec, payload=payload_factory())
+    science_worker(science_factory())
+    outcome = run(spec)
     row = read_run(spec)
     record = read_json(spec.run_dir / 'execution.json')
     attempt = read_json(spec.run_dir / 'attempts' / record['attempt'] / 'outcome.json')
@@ -125,12 +127,49 @@ def test_release_failure_is_unknown_in_return_record_and_readout(
     assert outcome.cleanup_errors[0]['type'] == 'PermissionError'
 
 
+def test_release_directory_failure_restores_token_and_records_owned_unknown_facts(
+        source_study, run_root, science_factory, science_worker, monkeypatch):
+    from pathlib import Path
+    from rpipe.flow.run import run
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact.io import Ownership, read_json
+    from rpipe.structure.control import BusyError
+
+    spec = plan(source_study, run_root=run_root)[0]
+    owner_path = spec.run_dir / '.execution'
+    original_rmdir, removed_owner = Path.rmdir, []
+    def refuse(path, *args, **kwargs):
+        if path == owner_path:
+            assert not (path / 'owner.json').exists()
+            raise OSError('owned directory release refused')
+        return original_rmdir(path, *args, **kwargs)
+    original_unlink = Path.unlink
+    def remember(path, *args, **kwargs):
+        if path == owner_path / 'owner.json':
+            removed_owner.append(path.read_bytes())
+        return original_unlink(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'rmdir', refuse)
+    monkeypatch.setattr(Path, 'unlink', remember)
+    science_worker(science_factory())
+    outcome = run(spec)
+    assert outcome.status == 'unknown' and not outcome.evidence_complete
+    assert removed_owner and (owner_path / 'owner.json').read_bytes() == removed_owner[0]
+    record = read_json(spec.run_dir / 'execution.json')
+    assert record['candidate_status'] == 'unknown'
+    assert record['attempt'] == outcome.attempt
+    assert record['cleanup_errors'][0]['type'] == 'OSError'
+    assert spec.result_path.exists()
+    with pytest.raises(BusyError):
+        Ownership(spec).acquire()
+
+
 @pytest.mark.parametrize('target', ['attempt', 'execution'])
 def test_final_record_write_failure_keeps_owner_and_unknown_projection(
-        source_study, run_root, payload_factory, monkeypatch, target):
+        source_study, run_root, science_factory, monkeypatch, target, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run, run
-    from rpipe.structure import execution
+    from rpipe.api import read_run
+    from rpipe.flow.run import run
+    from rpipe.structure.artifact import io as execution
 
     write = execution.write_json
     def denied(path, record):
@@ -142,7 +181,8 @@ def test_final_record_write_failure_keeps_owner_and_unknown_projection(
 
     monkeypatch.setattr(execution, 'write_json', denied)
     spec = plan(source_study, run_root=run_root)[0]
-    outcome = run(spec, payload=payload_factory())
+    science_worker(science_factory())
+    outcome = run(spec)
     row = read_run(spec)
     assert outcome.status == row['status'] == 'unknown'
     assert not outcome.evidence_complete and not row['evidence_complete']
@@ -150,8 +190,9 @@ def test_final_record_write_failure_keeps_owner_and_unknown_projection(
 
 
 def test_candidate_success_is_not_complete_until_owner_release(
-        source_study, run_root, payload_factory, monkeypatch):
-    from rpipe.api import aggregate, read_run, run
+        source_study, run_root, science_factory, monkeypatch, science_worker):
+    from rpipe.api import aggregate, read_run
+    from rpipe.flow.run import run
     from rpipe.structure.make import plan
     from rpipe.structure.artifact.io import Ownership
 
@@ -163,38 +204,45 @@ def test_candidate_success_is_not_complete_until_owner_release(
         assert aggregate([spec])['complete'] is False
         release(owner)
     monkeypatch.setattr(Ownership, 'release', closing)
-    outcome = run(spec, payload=payload_factory())
+    science_worker(science_factory())
+    outcome = run(spec)
     assert observed[0]['status'] == 'unknown' and observed[0]['busy']
     assert observed[0]['scientific_status'] == 'succeeded'
     assert outcome.status == read_run(spec)['status'] == 'succeeded'
 
 
 def test_retry_requires_explicit_admission_and_preserves_previous_attempt(
-        source_study, run_root, payload_factory, file_bytes):
+        source_study, run_root, science_factory, file_bytes, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run, run
+    from rpipe.api import read_run
+    from rpipe.flow.run import run
     from rpipe.structure.artifact.io import read_json
     from rpipe.structure.control import AdmissionError
 
     spec = plan(source_study, run_root=run_root)[0]
-    first = run(spec, payload=payload_factory(fail='execute'))
+    science_worker(science_factory(fail='execute'))
+    first = run(spec)
     record = read_json(spec.run_dir / 'execution.json')
     old_attempt = spec.run_dir / 'attempts' / record['attempt'] / 'outcome.json'
     stored = old_attempt.read_bytes()
     assert first.status == read_run(spec)['status'] == 'failed'
     before = file_bytes(run_root)
-    with pytest.raises(AdmissionError, match='retry'):
-        run(spec, payload=payload_factory())
+    science_worker(science_factory())
+    _rejected = run(spec)
+    assert _rejected.status == 'rejected'
+    assert _rejected.error['type'] == 'AdmissionError'
     assert file_bytes(run_root) == before
-    assert run(spec, payload=payload_factory(), retry=True).status == 'succeeded'
+    science_worker(science_factory())
+    assert run(spec, retry=True).status == 'succeeded'
     assert old_attempt.read_bytes() == stored
     assert read_json(spec.run_dir / 'execution.json')['attempt'] != record['attempt']
 
 
 def test_old_return_stays_bound_to_its_attempt_when_retry_finishes_during_release(
-        source_study, run_root, payload_factory, monkeypatch):
+        source_study, run_root, science_factory, monkeypatch, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run, run
+    from rpipe.api import read_run
+    from rpipe.flow.run import run
     from rpipe.structure.artifact.io import Ownership, read_json
 
     spec = plan(source_study, run_root=run_root)[0]
@@ -204,28 +252,31 @@ def test_old_return_stays_bound_to_its_attempt_when_retry_finishes_during_releas
         release(owner)
         if not retried:
             retried.append(True)
-            assert run(spec, payload=payload_factory(), retry=True).status == 'succeeded'
+            science_worker(science_factory())
+            assert run(spec, retry=True).status == 'succeeded'
     monkeypatch.setattr(Ownership, 'release', release_and_retry)
-    first = run(spec, payload=payload_factory(fail='execute'))
+    science_worker(science_factory(fail='execute'))
+    first = run(spec)
     assert first.status == 'failed'
     assert read_run(spec)['status'] == 'succeeded'
     assert read_json(spec.run_dir / 'execution.json')['candidate_status'] == 'succeeded'
 
 
 def test_changed_owner_cannot_receive_old_scientific_or_execution_writes(
-        source_study, run_root, payload_factory):
+        source_study, run_root, science_factory, science_worker):
     from rpipe.structure.make import plan
     from rpipe.structure.artifact.io import read_json, write_json
-    from rpipe.structure.execution import execute
+    from rpipe.flow.run import run
 
     spec = plan(source_study, run_root=run_root)[0]
     peer = {'peer': 'unchanged'}
-    class ChangesOwner(payload_factory):
+    class ChangesOwner(science_factory):
         def execute(self, ctx):
             owner_path = spec.run_dir / '.execution' / 'owner.json'
             write_json(owner_path, {**read_json(owner_path), 'token': 'different-owner'})
             write_json(spec.run_dir / 'execution.json', peer)
-    outcome = execute(spec, ChangesOwner())
+    science_worker(ChangesOwner())
+    outcome = run(spec)
     assert outcome.status == 'unknown' and not outcome.evidence_complete
     assert not spec.result_path.exists()
     assert read_json(spec.run_dir / 'execution.json') == peer
@@ -233,12 +284,12 @@ def test_changed_owner_cannot_receive_old_scientific_or_execution_writes(
 
 @pytest.mark.parametrize('kind', ['record', 'invalid-item', 'none-item', 'invalid-sequence'])
 def test_supplied_cleanup_records_are_sanitized_before_return_or_persistence(
-        source_study, run_root, payload_factory, kind):
+        source_study, run_root, science_factory, kind, science_worker):
     import json
     from rpipe.structure.make import plan
-    from rpipe.api import run
+    from rpipe.flow.run import run
 
-    class RemoteCleanup(payload_factory):
+    class RemoteCleanup(science_factory):
         def close(self, ctx):
             record = {'type': 'OSError',
                 'message': 'secret=CLEANUP_PRIVATE_TEXT', 'traceback': 'C:/private/CLEANUP_PRIVATE_TEXT.py',
@@ -246,7 +297,8 @@ def test_supplied_cleanup_records_are_sanitized_before_return_or_persistence(
             ctx.state['cleanup_error_records'] = ([record] if kind == 'record' else
                 ['CLEANUP_PRIVATE_TEXT'] if kind == 'invalid-item' else [None] if kind == 'none-item' else record)
     spec = plan(source_study, run_root=run_root)[0]
-    outcome = run(spec, payload=RemoteCleanup())
+    science_worker(RemoteCleanup())
+    outcome = run(spec)
     assert outcome.status == 'failed'
     assert outcome.cleanup_errors[0]['type'] == ('OSError' if kind == 'record' else 'AdmissionError')
     if kind == 'record':

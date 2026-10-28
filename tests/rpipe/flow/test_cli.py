@@ -10,13 +10,14 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
 
 @pytest.mark.parametrize('command', ['plan', 'status', 'logs', 'report'])
 def test_cli_read_command_preserves_source_and_runtime_bytes(
-        source_study, run_root, payload_factory, file_bytes, command, capsys):
+        source_study, run_root, science_factory, file_bytes, command, capsys, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import run
+    from rpipe.flow.run import run
     from rpipe.flow.cli import main
 
     specs = plan(source_study, run_root=run_root)
-    assert run(specs[0], payload=payload_factory()).status == 'succeeded'
+    science_worker(science_factory())
+    assert run(specs[0]).status == 'succeeded'
     before_source, before_runtime = file_bytes(source_study), file_bytes(run_root)
     assert main([command, str(source_study), '--run-root', str(run_root)]) == 0
     assert capsys.readouterr().err == ''
@@ -51,15 +52,15 @@ def test_cli_make_requires_explicit_run_root_before_any_write(source_study, file
 
 
 def test_cli_retry_is_passed_only_when_explicitly_selected(source_study, run_root, monkeypatch, capsys):
-    from rpipe import api
     from rpipe.flow.cli import main
-    from rpipe.structure.contracts import RunOutcome
+    from rpipe.flow.context import RunReport
 
     calls = []
     def launch(specs, **kwargs):
         calls.append(kwargs['retry'])
-        return (RunOutcome('failed'),)
-    monkeypatch.setattr(api, 'launch', launch)
+        return (RunReport('failed'),)
+    from rpipe.flow import supervision
+    monkeypatch.setattr(supervision, 'launch', launch)
     for flag in ([], ['--retry']):
         assert main(['launch', str(source_study), '--run-root', str(run_root), *flag]) == 1
         assert capsys.readouterr().err == ''
@@ -67,7 +68,6 @@ def test_cli_retry_is_passed_only_when_explicitly_selected(source_study, run_roo
 
 
 def test_cli_tensorboard_passes_explicit_selected_run_ids(source_study, run_root, tmp_path, monkeypatch, capsys):
-    from rpipe import api
     from rpipe.flow import exports
     from rpipe.flow.cli import main
 
@@ -110,7 +110,6 @@ def test_cli_data_profiles_only_the_selected_effective_input(source_study, run_r
     import json
     import yaml
     import torch
-    from rpipe import api
     from rpipe.flow.cli import main
     from rpipe.structure.data import profile
     from rpipe.structure.data.factory import Data

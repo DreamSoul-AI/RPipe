@@ -67,7 +67,8 @@ def main(recipe, argv):
     from rpipe.structure.artifact.io import atomic_write_text
     from rpipe.structure.artifact.io import load_config, write_config
     from rpipe.structure.make import plan, publish
-    from rpipe.api import run as run_spec, read_run, compare_runs
+    from rpipe.flow.run import run as run_spec
+    from rpipe.api import read_run, compare_runs
     ident = 'capacity-' + time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8]
     root = args.run_root / 'validation' / ident
     root.mkdir(parents=True, exist_ok=False)

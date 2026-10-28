@@ -7,7 +7,7 @@ from typing import Any
 import json
 
 from rpipe.structure.control import AdmissionError, RunSpec, SourceMismatch
-from rpipe.structure.contracts import project_execution
+from rpipe.structure.artifact.io import project_execution
 from rpipe.structure.artifact.io import contained, identity, read_execution, read_json, safe_error_record
 from rpipe.structure.artifact.provenance import validate_source
 

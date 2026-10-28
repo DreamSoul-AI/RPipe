@@ -69,3 +69,43 @@ def test_planning_and_publication_cannot_reach_execution_or_science():
 def test_artifact_io_does_not_depend_on_provenance():
     for line, names in _imports(SOURCE / 'structure' / 'artifact' / 'io.py'):
         assert not any(name.startswith('rpipe.structure.artifact.provenance') for name in names), (line, names)
+
+
+def test_runtime_context_depends_only_on_standard_library_and_pure_control():
+    for line, names in _imports(SOURCE / 'flow' / 'context.py'):
+        assert all(name.split('.')[0] in sys.stdlib_module_names
+                   or name == 'rpipe.structure.control'
+                   or name.startswith('rpipe.structure.control.')
+                   for name in names), (line, names)
+
+
+def test_worker_delegates_scientific_construction_to_stages():
+    forbidden = tuple('rpipe.structure.' + name for name in ('data', 'model', 'algorithm', 'system'))
+    for line, names in _imports(SOURCE / 'flow' / 'worker.py'):
+        assert not any(name == prefix or name.startswith(prefix + '.')
+                       for prefix in forbidden for name in names), (line, names)
+
+
+def test_stages_write_is_the_only_formal_result_publisher():
+    publishers = []
+    for path in SOURCE.rglob('*.py'):
+        tree = ast.parse(path.read_text(encoding='utf-8-sig'))
+        for function in ast.walk(tree):
+            if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for call in ast.walk(function):
+                if not isinstance(call, ast.Call) or not call.args:
+                    continue
+                name = call.func.id if isinstance(call.func, ast.Name) else (
+                    call.func.attr if isinstance(call.func, ast.Attribute) else '')
+                target = call.args[0]
+                if name == 'write_json' and isinstance(target, ast.Attribute) and target.attr == 'result_path':
+                    publishers.append((path.relative_to(SOURCE).as_posix(), function.name))
+    assert publishers == [('flow/stages.py', 'write')]
+
+
+def test_retired_runtime_adapters_and_api_execution_wrappers_are_absent():
+    from rpipe import api
+    assert not any(hasattr(api, name) for name in ('run', 'cancel', 'launch', 'supervise', 'process'))
+    assert not any((SOURCE / name).exists() for name in (
+        'structure/execution.py', 'structure/contracts.py', 'flow/native.py', 'flow/huggingface.py'))

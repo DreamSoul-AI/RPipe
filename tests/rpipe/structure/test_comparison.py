@@ -103,7 +103,7 @@ def test_exact_checkpoint_comparison_preserves_integer_and_complex_differences(t
 def test_compare_bad_containers_are_file_errors_without_evidence_overwrite(tmp_path, capsys, field, value):
     a, b = (_run(tmp_path, 'a'), _run(tmp_path, 'b'))
     path = a / ('result.json' if field in ('result-root', 'metrics') else 'assets/tracker/tracker_state.json')
-    body = json.loads(path.read_text())
+    body = json.loads(path.read_text(encoding='utf-8'))
     if field.endswith('root'):
         body = value
     elif field in ('metrics', 'splits'):
@@ -147,7 +147,7 @@ def test_compare_exact_huge_integers_without_float_coercion(tmp_path, different)
     before = {p: p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
     output = tmp_path / 'comparison.json'
     assert cli.main(['compare', '--legacy', str(a), str(b), '--out', str(output)]) == (1 if different else 0)
-    result = json.loads(output.read_text())
+    result = json.loads(output.read_text(encoding='utf-8'))
     assert result['items']['metrics']['max_abs_diff'] == (10 ** 400 if different else 0)
     assert {p: p.read_bytes() for p in before} == before
 
@@ -168,7 +168,7 @@ def test_compare_keeps_legacy_null_optional_containers(tmp_path, field):
     a, b = (_run(tmp_path, 'a'), _run(tmp_path, 'b'))
     for run in (a, b):
         p = run / ('result.json' if field == 'metrics' else 'assets/tracker/tracker_state.json')
-        body = json.loads(p.read_text())
+        body = json.loads(p.read_text(encoding='utf-8'))
         if field == 'split':
             body['splits']['train'] = None
         else:
@@ -183,7 +183,7 @@ def test_compare_huge_integer_tolerance_retains_exact_difference(tmp_path, delta
     b = _run(tmp_path, 'b', loss=10 ** 400 + delta)
     output = tmp_path / 'comparison.json'
     assert cli.main(['compare', '--legacy', str(a), str(b), f'--atol={atol}', f'--rtol={rtol}', '--out', str(output)]) == (0 if passed else 1)
-    result = json.loads(output.read_text())
+    result = json.loads(output.read_text(encoding='utf-8'))
     assert result['items']['metrics']['max_abs_diff'] == delta
 
 
@@ -339,12 +339,12 @@ def test_compare_nonfinite_evidence_keeps_value_identity(tmp_path, capsys, kind,
     for run, value in [(a, left), (b, right)]:
         if kind == 'metrics':
             path = run / 'result.json'
-            body = json.loads(path.read_text())
+            body = json.loads(path.read_text(encoding='utf-8'))
             body['metrics']['loss'] = value
             path.write_text(json.dumps(body), encoding='utf-8')
         elif kind == 'history':
             path = run / 'assets/tracker/tracker_state.json'
-            body = json.loads(path.read_text())
+            body = json.loads(path.read_text(encoding='utf-8'))
             body['splits']['train']['Loss']['history'] = [value]
             path.write_text(json.dumps(body), encoding='utf-8')
         else:
@@ -357,7 +357,7 @@ def test_compare_nonfinite_evidence_keeps_value_identity(tmp_path, capsys, kind,
     assert compare_runs(a, b, rtol=rtol)['passed'] is passed
     output = tmp_path / 'compare.json'
     assert cli.main(['compare', '--legacy', str(a), str(b), f'--rtol={rtol}', '--out', str(output)]) == (0 if passed else 1)
-    assert json.loads(output.read_text())['passed'] is passed
+    assert json.loads(output.read_text(encoding='utf-8'))['passed'] is passed
     observed = json.loads(capsys.readouterr().out)
     assert observed['passed'] is passed
     assert observed['legacy'] is True and observed['verified'] is False
@@ -445,12 +445,12 @@ def test_finite_comparison_overflow_keeps_mathematical_tolerance(tmp_path, capsy
     for run, value in [(a, -1.7e308), (b, 1.7e308)]:
         if kind == 'metrics':
             path = run / 'result.json'
-            body = json.loads(path.read_text())
+            body = json.loads(path.read_text(encoding='utf-8'))
             body['metrics']['loss'] = value
             path.write_text(json.dumps(body), encoding='utf-8')
         elif kind == 'history':
             path = run / 'assets/tracker/tracker_state.json'
-            body = json.loads(path.read_text())
+            body = json.loads(path.read_text(encoding='utf-8'))
             body['splits']['train']['Loss']['history'] = [value]
             path.write_text(json.dumps(body), encoding='utf-8')
         else:
@@ -507,7 +507,7 @@ def test_finite_complex_norm_overflow_keeps_zero_relative_bound(tmp_path, case):
     assert report['items']['checkpoint.latest.model']['max_abs_diff'] == difference
     output = tmp_path / 'comparison.json'
     assert cli.main(['compare', '--legacy', str(a), str(b), f'--atol={atol}', '--out', str(output)]) == (0 if passed else 1)
-    assert json.loads(output.read_text())['passed'] is passed
+    assert json.loads(output.read_text(encoding='utf-8'))['passed'] is passed
     assert {p: p.read_bytes() for p in before} == before
 
 
@@ -532,12 +532,12 @@ def test_mixed_numeric_compare_preserves_integer_information(tmp_path, capsys, k
     for run, value in zip((a, b), values):
         if kind == 'metrics':
             path = run / 'result.json'
-            body = json.loads(path.read_text())
+            body = json.loads(path.read_text(encoding='utf-8'))
             body['metrics']['loss'] = value
             path.write_text(json.dumps(body), encoding='utf-8')
         elif kind == 'history':
             path = run / 'assets/tracker/tracker_state.json'
-            body = json.loads(path.read_text())
+            body = json.loads(path.read_text(encoding='utf-8'))
             body['splits']['train']['Loss']['history'] = [value]
             path.write_text(json.dumps(body), encoding='utf-8')
         else:
@@ -588,7 +588,7 @@ def test_mixed_scalar_numeric_extremes_are_comparisons_not_file_errors(tmp_path,
             torch.save(body, path)
         else:
             path = run / ('result.json' if kind == 'metrics' else 'assets/tracker/tracker_state.json')
-            body = json.loads(path.read_text())
+            body = json.loads(path.read_text(encoding='utf-8'))
             if kind == 'metrics':
                 body['metrics']['loss'] = value
             else:

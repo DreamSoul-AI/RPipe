@@ -14,9 +14,10 @@ import uuid
 
 from rpipe.structure.artifact.io import contained, identity, read_json, validate_input_paths, write_json
 from rpipe.structure.control import AdmissionError, RunSpec
-from rpipe.structure.contracts import Cancellation, SupervisionLimits
+from .context import Budget, Cancellation, RunReport, SupervisionLimits
 from rpipe.structure.artifact.io import validate_run_root
-from rpipe.structure.execution import error_record
+from rpipe.structure.artifact.io import safe_error_record as error_record
+from .run import run
 from rpipe.structure.system.resources import WindowsJob, output_growth, output_snapshot
 
 
@@ -33,7 +34,6 @@ def _successful(outcome):
 
 def coordinator():
     """The child cannot inspect a Study or create a Run before its stdin grant."""
-    from rpipe import api
 
     line = sys.stdin.readline()
     if not line:
@@ -88,7 +88,7 @@ def coordinator():
             state['current'] = {'index': index, 'id': spec.id, 'started': time.monotonic()}
             publish()
             # execute() publishes its own config; make([spec]) would truncate the Study index.
-            outcome = api.run(spec, cancellation=cancellation, retry=request['retry'])
+            outcome = run(spec, cancellation=cancellation, retry=request['retry'])
             row = {key: value for key, value in asdict(outcome).items() if key != 'result'}
             row.update(index=index, id=spec.id, identity=identity(spec),
                        elapsed_seconds=max(0.0, time.monotonic() - state['current']['started']),
@@ -124,7 +124,7 @@ def _progress(path, nonce, specs):
     for index, row in enumerate(completed):
         if (not isinstance(row, dict) or row.get('index') != index or row.get('id') != specs[index].id
                 or row.get('identity') != identity(specs[index])
-                or row.get('status') not in {'succeeded', 'failed', 'cancelled', 'unknown'}
+                or row.get('status') not in {'succeeded', 'failed', 'cancelled', 'unknown', 'rejected'}
                 or type(row.get('evidence_complete')) is not bool
                 or row.get('quality') is not None and type(row['quality']) is not bool
                 or not isinstance(row.get('cleanup_errors'), list)
@@ -171,7 +171,6 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
     if type(retry) is not bool:
         raise AdmissionError('retry must be a boolean')
     specs = tuple(specs)
-    from rpipe.api import _one_root
     if not specs or any(not isinstance(spec, RunSpec) for spec in specs):
         raise AdmissionError('a nonempty RunSpec batch is required')
     _one_root(specs)
@@ -412,3 +411,28 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
             report.update(status='unknown', evidence_complete=False)
         write_json(report_path, report)
     return report
+
+
+def _one_root(specs):
+    if len({(s.study_root, s.source_dir, s.source_digest) for s in specs}) > 1:
+        raise AdmissionError('one Study source/version/output root is required')
+
+
+def launch(specs, *, budget: Budget | None = None, cancellation: Cancellation | None = None,
+           retry: bool = False) -> tuple[RunReport, ...]:
+    specs = tuple(specs)
+    if any(not isinstance(spec, RunSpec) for spec in specs):
+        raise AdmissionError('launch requires RunSpecs')
+    _one_root(specs)
+    if len({spec.id for spec in specs}) != len(specs):
+        raise AdmissionError('duplicate Run in launch request')
+    outcomes = []
+    for spec in specs:
+        if cancellation and cancellation.is_set():
+            break
+        outcomes.append(run(spec, budget=budget, cancellation=cancellation, retry=retry))
+        outcome = outcomes[-1]
+        if (outcome.status != 'succeeded' or outcome.quality is False
+                or not outcome.evidence_complete):
+            break
+    return tuple(outcomes)

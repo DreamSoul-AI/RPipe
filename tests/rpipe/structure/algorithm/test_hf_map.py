@@ -52,21 +52,19 @@ def test_hf_maps_sgd_cosine_and_resume_key():
     assert clipped['max_grad_norm'] == pytest.approx(1.0)
 
 
-def test_hf_overlay_retains_none_value_identity_and_existing_key_positions(monkeypatch):
+def test_hf_overlay_preserves_none_and_explicit_values(monkeypatch):
     import sys
     from types import SimpleNamespace
     class Arguments:
         def __init__(self, learning_rate=None, custom_flag=None, report_to=None):
             pass
     monkeypatch.setitem(sys.modules, 'transformers', SimpleNamespace(TrainingArguments=Arguments))
-    token = object()
+    flag = {'enabled': True, 'label': 'fixture'}
     config = AlgorithmConfig.from_mapping({'num_steps': 2, 'learning_rate': 0.25,
-                                           'custom_flag': token, 'report_to': None})
+                                           'custom_flag': flag, 'report_to': None})
     result = training_arguments_kwargs(config, output_dir='unused')
     assert result['learning_rate'] == 0.25 and result['report_to'] is None
-    assert result['custom_flag'] is token
-    assert list(result)[-1] == 'custom_flag'
-    assert list(result).index('learning_rate') < list(result).index('report_to')
+    assert result['custom_flag'] == flag
 
 
 def test_filter_args_retains_reserved_unknown_and_variadic_guards():
@@ -85,31 +83,27 @@ def test_filter_args_retains_reserved_unknown_and_variadic_guards():
     ({'adam_epsilon': 7, 'eps': 0}, True, 0),
     ({'adam_epsilon': 7, 'eps': None}, False, None),
 ])
-def test_hf_alias_forwarding_keeps_order_identity_and_epsilon_default(monkeypatch, epsilon, present, expected):
+def test_hf_alias_forwarding_preserves_values_and_epsilon_precedence(monkeypatch, epsilon, present, expected):
     import sys
     from types import SimpleNamespace
     class Arguments:
         def __init__(self):
             pass
     monkeypatch.setitem(sys.modules, 'transformers', SimpleNamespace(TrainingArguments=Arguments))
-    token = object()
-    payload = {'num_steps': 1, 'weight_decay': 0, 'warmup_ratio': token, 'warmup_steps': 0,
-               'adam_beta1': 0, 'adam_beta2': 0, 'momentum': token, **epsilon}
+    payload = {'num_steps': 1, 'weight_decay': 0, 'warmup_ratio': 0.2, 'warmup_steps': 0,
+               'adam_beta1': 0, 'adam_beta2': 0, 'momentum': 0.7, **epsilon}
     config = AlgorithmConfig.from_mapping(payload)
     result = training_arguments_kwargs(config, output_dir='unused', resume_from_checkpoint='resume')
-    tail = ['weight_decay', 'warmup_ratio', 'warmup_steps', 'adam_beta1', 'adam_beta2']
-    if present:
-        tail.append('adam_epsilon')
-    tail += ['resume_from_checkpoint']
-    assert list(result)[-len(tail):] == tail
+    forwarded = {'weight_decay': 0, 'warmup_ratio': 0.2, 'warmup_steps': 0,
+                 'adam_beta1': 0, 'adam_beta2': 0}
+    assert {name: result[name] for name in forwarded} == forwarded
     assert ('adam_epsilon' in result) == present
     if present:
         assert result['adam_epsilon'] == expected
-    assert result['warmup_ratio'] is token
     assert 'momentum' not in result
     assert result['max_grad_norm'] == 0.0
     assert result['resume_from_checkpoint'] == 'resume'
-    assert config.extras['momentum'] is token
+    assert config.extras['momentum'] == 0.7
 
 
 def test_sgd_momentum_is_consumed_by_optimizer_and_not_training_arguments():

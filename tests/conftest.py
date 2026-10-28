@@ -453,3 +453,87 @@ def reader_close_fault(monkeypatch):
             scope.setattr(Path, 'open', opening)
             yield handles, closes
     return inject
+
+
+@pytest.fixture
+def science_factory():
+    class ScientificActions:
+        def __init__(self, *, fail=None, close_error=None):
+            self.calls = []
+            self.fail = fail
+            self.close_error = close_error
+
+        def _phase(self, phase):
+            self.calls.append(phase)
+            if self.fail == phase:
+                raise ValueError(f'{phase} primary failure')
+
+        def prepare(self, ctx):
+            self._phase('prepare')
+
+        def execute(self, ctx):
+            self._phase('execute')
+            return {'value': 3.0}
+
+        def collect(self, ctx):
+            self._phase('collect')
+            return {'metrics': {'value': 3.0}}
+
+        def close(self, ctx):
+            self.calls.append('close')
+            if self.close_error:
+                raise RuntimeError(self.close_error)
+
+    return ScientificActions
+
+
+@pytest.fixture
+def science_worker(monkeypatch):
+    """Inline the real worker protocol, replacing only scientific phase actions."""
+    import multiprocessing
+    import os
+    import subprocess
+    from types import SimpleNamespace
+    from rpipe.flow import stages, worker
+    from rpipe.flow.study import run_study_phase
+
+    selected = []
+
+    def install(actions):
+        selected[:] = [actions]
+
+    def prepare(ctx):
+        actions = selected[0]
+        ctx.state['test_science_actions'] = actions
+        class ScientificResource:
+            def close(self):
+                actions.close(ctx)
+        ctx.register_resource(ScientificResource())
+        run_study_phase(ctx.study_dir, 'prepare', ctx, ctx.state['study'], entry='before')
+        actions.prepare(ctx)
+
+    def execute(ctx):
+        return ctx.state['test_science_actions'].execute(ctx)
+
+    def collect(ctx):
+        return ctx.state['test_science_actions'].collect(ctx)
+
+    class InlineWorker:
+        def __init__(self, args, **kwargs):
+            self.pid = os.getpid()
+            name = multiprocessing.current_process().name
+            try:
+                self.returncode = worker.worker(Path(args[-2]), Path(args[-1]))
+            finally:
+                multiprocessing.current_process().name = name
+        def poll(self):
+            return self.returncode
+        def wait(self, timeout=None):
+            return self.returncode
+
+    monkeypatch.setattr(stages, 'prepare', prepare)
+    monkeypatch.setattr(stages, 'execute', execute)
+    monkeypatch.setattr(stages, 'collect', collect)
+    monkeypatch.setattr(worker, 'subprocess', SimpleNamespace(Popen=InlineWorker,
+        DEVNULL=subprocess.DEVNULL, STDOUT=subprocess.STDOUT))
+    return install

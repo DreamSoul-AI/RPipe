@@ -17,7 +17,6 @@ source_modules =
     rpipe.structure.control
 forbidden_modules =
     rpipe.structure.make
-    rpipe.structure.execution
     rpipe.structure.artifact
     rpipe.structure.readout
     rpipe.structure.comparison
@@ -32,7 +31,6 @@ type = forbidden
 source_modules =
     rpipe.structure.make
 forbidden_modules =
-    rpipe.structure.execution
     rpipe.structure.readout
     rpipe.structure.comparison
     rpipe.structure.data
@@ -46,8 +44,35 @@ type = forbidden
 source_modules =
     rpipe.structure.readout
 forbidden_modules =
-    rpipe.structure.execution
     rpipe.structure.comparison
+    rpipe.structure.data
+    rpipe.structure.model
+    rpipe.structure.algorithm
+    rpipe.structure.system
+
+[importlinter:contract:context-has-no-execution]
+name = Context carries data without constructing or executing science
+type = forbidden
+source_modules =
+    rpipe.flow.context
+forbidden_modules =
+    rpipe.flow.run
+    rpipe.flow.worker
+    rpipe.flow.stages
+    rpipe.structure.data
+    rpipe.structure.model
+    rpipe.structure.algorithm
+    rpipe.structure.system
+
+[importlinter:contract:process-does-not-execute]
+name = Derived processing cannot construct science or launch a Run
+type = forbidden
+source_modules =
+    rpipe.flow.process
+forbidden_modules =
+    rpipe.flow.run
+    rpipe.flow.worker
+    rpipe.flow.stages
     rpipe.structure.data
     rpipe.structure.model
     rpipe.structure.algorithm

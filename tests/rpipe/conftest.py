@@ -1,4 +1,4 @@
-"""Small source declarations and payloads shared by RPipe contract tests."""
+"""Small declarations and science-boundary stubs for lifecycle contract tests."""
 
 from pathlib import Path
 
@@ -21,36 +21,6 @@ def run_root(tmp_path):
     return tmp_path / 'artifacts'
 
 
-@pytest.fixture
-def payload_factory():
-    class Payload:
-        def __init__(self, *, fail=None, close_error=None):
-            self.calls = []
-            self.fail = fail
-            self.close_error = close_error
-
-        def _phase(self, phase):
-            self.calls.append(phase)
-            if self.fail == phase:
-                raise ValueError(f'{phase} primary failure')
-
-        def prepare(self, ctx):
-            self._phase('prepare')
-
-        def execute(self, ctx):
-            self._phase('execute')
-            return {'value': 3.0}
-
-        def collect(self, ctx):
-            self._phase('collect')
-            return {'metrics': {'value': 3.0}}
-
-        def close(self, ctx):
-            self.calls.append('close')
-            if self.close_error:
-                raise RuntimeError(self.close_error)
-
-    return Payload
 
 
 @pytest.fixture

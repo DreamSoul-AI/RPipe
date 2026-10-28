@@ -1,7 +1,5 @@
 """Immutable plans and finite enforceable budgets are admission boundaries."""
 
-import math
-
 import pytest
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
@@ -18,15 +16,6 @@ def test_run_spec_effective_configuration_cannot_drift_after_planning(source_stu
     assert spec.config['algorithm']['num_steps'] == 2
 
 
-@pytest.mark.parametrize('field,value', [
-    ('timeout_seconds', math.nan), ('timeout_seconds', math.inf),
-    ('timeout_seconds', -1), ('memory_bytes', -1), ('memory_bytes', True),
-])
-def test_budget_invalid_limit_is_rejected(field, value):
-    from rpipe.structure.contracts import Budget
-
-    with pytest.raises((TypeError, ValueError)):
-        Budget(**{field: value}).validate()
 
 
 @pytest.mark.parametrize('field,value', [('id', value) for value in

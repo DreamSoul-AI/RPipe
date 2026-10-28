@@ -33,9 +33,10 @@ def _declare(source, inputs, *, data=None, model=None, stats=None):
 
 @pytest.mark.parametrize('kind', ['file', 'directory'])
 def test_declared_pin_drift_is_rejected_without_resigning_saved_success(
-        source_study, run_root, tmp_path, payload_factory, file_bytes, kind):
+        source_study, run_root, tmp_path, science_factory, file_bytes, kind, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run, run
+    from rpipe.api import read_run
+    from rpipe.flow.run import run
     from rpipe.structure.artifact.provenance import validate_source
     from rpipe.structure.control import SourceMismatch
 
@@ -47,7 +48,8 @@ def test_declared_pin_drift_is_rejected_without_resigning_saved_success(
         'path': str(root), 'files': {'data.bin': _sha(item)}}
     _declare(source_study, [pin], data=item if kind == 'file' else root)
     spec = plan(source_study, run_root=run_root)[0]
-    assert run(spec, payload=payload_factory()).status == 'succeeded'
+    science_worker(science_factory())
+    assert run(spec).status == 'succeeded'
     stored = file_bytes(run_root)
     item.write_bytes(b'modified')
     with pytest.raises(SourceMismatch):
@@ -144,16 +146,18 @@ def test_environment_snapshot_is_actual_and_does_not_import_scientific_modules(m
 
 
 def test_execution_records_input_and_environment_as_observations(
-        source_study, run_root, tmp_path, payload_factory):
+        source_study, run_root, tmp_path, science_factory, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run, run
+    from rpipe.api import read_run
+    from rpipe.flow.run import run
     from rpipe.structure.artifact.io import read_json
 
     item = tmp_path / 'input.bin'
     item.write_bytes(b'scientific input')
     _declare(source_study, [{'path': str(item), 'sha256': _sha(item)}], data=item)
     spec = plan(source_study, run_root=run_root)[0]
-    outcome = run(spec, payload=payload_factory())
+    science_worker(science_factory())
+    outcome = run(spec)
     row = read_run(spec)
     record = read_json(spec.run_dir / 'execution.json')
     assert outcome.status == 'succeeded' and outcome.quality is None
@@ -165,7 +169,7 @@ def test_execution_records_input_and_environment_as_observations(
 
 @pytest.mark.parametrize('reference', ['pinned-directory', 'unpinned-directory', 'stats-file'])
 def test_planning_rejects_input_overlap_before_writing_any_output(
-        source_study, run_root, payload_factory, file_bytes, reference):
+        source_study, run_root, science_factory, file_bytes, reference):
     from rpipe.structure.make import plan
     from rpipe.structure.control import AdmissionError
 
@@ -184,9 +188,10 @@ def test_planning_rejects_input_overlap_before_writing_any_output(
     assert file_bytes(run_root) == before
 
 
-def test_pinned_shared_input_sibling_is_allowed(source_study, run_root, payload_factory):
+def test_pinned_shared_input_sibling_is_allowed(source_study, run_root, science_factory, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run, run
+    from rpipe.api import read_run
+    from rpipe.flow.run import run
 
     shared = run_root / 'shared' / 'data'
     shared.mkdir(parents=True)
@@ -194,7 +199,8 @@ def test_pinned_shared_input_sibling_is_allowed(source_study, run_root, payload_
     item.write_bytes(b'fixed shared input')
     _declare(source_study, [{'path': str(shared), 'files': {'input.bin': _sha(item)}}], data=shared)
     spec = plan(source_study, run_root=run_root)[0]
-    assert run(spec, payload=payload_factory()).status == 'succeeded'
+    science_worker(science_factory())
+    assert run(spec).status == 'succeeded'
     assert read_run(spec)['input_provenance']['references']['data.path']['status'] == 'verified'
     assert item.read_bytes() == b'fixed shared input'
 
@@ -259,9 +265,10 @@ def test_explicit_vision_statistics_override_implicit_profile(source_study, run_
 
 @pytest.mark.parametrize('actual_source', ['builtin_fallback', 'study_profile'])
 def test_published_provenance_uses_observed_statistics_source_after_prepare(
-        source_study, run_root, tmp_path, payload_factory, actual_source):
+        source_study, run_root, tmp_path, science_factory, actual_source, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run, run
+    from rpipe.api import read_run
+    from rpipe.flow.run import run
 
     raw = tmp_path / 'input'
     raw.mkdir()
@@ -277,7 +284,7 @@ def test_published_provenance_uses_observed_statistics_source_after_prepare(
     if actual_source == 'builtin_fallback':
         profile.parent.mkdir(parents=True)
         profile.write_text('mean: [0.1]\nstd: [0.9]\n', encoding='utf-8')
-    class ObservedStats(payload_factory):
+    class ObservedStats(science_factory):
         def prepare(self, ctx):
             if actual_source == 'builtin_fallback':
                 profile.unlink()
@@ -286,7 +293,8 @@ def test_published_provenance_uses_observed_statistics_source_after_prepare(
                 profile.write_text('mean: [0.1]\nstd: [0.9]\n', encoding='utf-8')
         def collect(self, ctx):
             return {'metrics': {'value': 3.0}, 'structure': {'data': {'stats_source': actual_source}}}
-    outcome = run(spec, payload=ObservedStats())
+    science_worker(ObservedStats())
+    outcome = run(spec)
     assert outcome.status == 'succeeded'
     row = read_run(spec)['input_provenance']
     assert row['references']['data.implicit_stats_path']['status'] == (
@@ -315,9 +323,10 @@ def test_builtin_statistics_do_not_verify_unpinned_default_data_cache(
 
 
 def test_actual_statistics_reference_survives_default_profile_removal(
-        source_study, run_root, tmp_path, payload_factory):
+        source_study, run_root, tmp_path, science_factory, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run, run
+    from rpipe.api import read_run
+    from rpipe.flow.run import run
 
     raw = tmp_path / 'input'
     raw.mkdir()
@@ -331,12 +340,13 @@ def test_actual_statistics_reference_survives_default_profile_removal(
     spec = plan(source_study, run_root=run_root)[0]
     actual = tmp_path / 'actual-consumed-profile.yaml'
     actual.write_text('mean: [0.1]\nstd: [0.9]\n', encoding='utf-8')
-    class ObservedReference(payload_factory):
+    class ObservedReference(science_factory):
         def collect(self, ctx):
             actual.unlink()
             return {'metrics': {'value': 3.0}, 'structure': {'data': {
                 'stats_source': 'study_profile', 'stats_reference': str(actual.resolve())}}}
-    assert run(spec, payload=ObservedReference()).status == 'succeeded'
+    science_worker(ObservedReference())
+    assert run(spec).status == 'succeeded'
     observed = read_run(spec)['input_provenance']['references']['data.implicit_stats_path']
     assert observed['resolved_path'] == str(actual.resolve())
     assert observed['status'] == 'unverified'

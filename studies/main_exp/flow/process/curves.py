@@ -152,7 +152,7 @@ def read_diagnostics(root, run_id, attempt):
 
 def read_execution_projection(root, result):
     from rpipe.structure.artifact.io import contained
-    from rpipe.structure.contracts import project_execution
+    from rpipe.structure.artifact.io import project_execution
 
     busy = True
     try:

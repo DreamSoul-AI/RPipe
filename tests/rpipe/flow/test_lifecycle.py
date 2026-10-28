@@ -13,27 +13,30 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
               pytest.mark.result_type('categorical', detail='summary')]
 
 
-def test_same_run_competing_starts_invoke_only_one_payload(source_study, run_root, payload_factory):
+def test_same_run_competing_starts_invoke_only_one_payload(source_study, run_root, science_factory, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import run
+    from rpipe.flow.run import run
     from rpipe.structure.control import BusyError
 
     entered, finish = Event(), Event()
 
-    class Blocking(payload_factory):
+    class Blocking(science_factory):
         def execute(self, ctx):
             self._phase('execute')
             entered.set()
             assert finish.wait(5), 'test owner failed to release the payload'
 
     spec = plan(source_study, run_root=run_root)[0]
-    first, competitor = Blocking(), payload_factory()
+    first, competitor = Blocking(), science_factory()
     with ThreadPoolExecutor(max_workers=1) as worker:
-        future = worker.submit(run, spec, payload=first)
+        science_worker(first)
+        future = worker.submit(run, spec)
         try:
             assert entered.wait(5), 'first payload did not start'
-            with pytest.raises(BusyError):
-                run(spec, payload=competitor)
+            science_worker(competitor)
+            _rejected = run(spec)
+            assert _rejected.status == 'rejected'
+            assert _rejected.error['type'] == 'BusyError'
         finally:
             finish.set()
         outcome = future.result(timeout=5)
@@ -48,91 +51,81 @@ def test_same_run_competing_starts_invoke_only_one_payload(source_study, run_roo
     ('collect', ['prepare', 'execute', 'collect', 'close']),
 ])
 def test_phase_failure_and_close_failure_preserve_first_error(
-        source_study, run_root, payload_factory, phase, expected):
+        source_study, run_root, science_factory, phase, expected, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import run
+    from rpipe.flow.run import run
 
-    payload = payload_factory(fail=phase, close_error='secondary close failure')
-    outcome = run(plan(source_study, run_root=run_root)[0], payload=payload)
-    assert outcome.status == 'failed'
+    payload = science_factory(fail=phase, close_error='secondary close failure')
+    science_worker(payload)
+    spec = plan(source_study, run_root=run_root)[0]
+    outcome = run(spec)
+    assert outcome.status == 'unknown'
     assert outcome.error['type'] == 'ValueError'
     assert outcome.cleanup_errors[0]['type'] == 'RuntimeError'
     assert outcome.quality is None
     assert payload.calls == expected
+    assert (spec.run_dir / '.execution').exists()
+    assert not spec.result_path.exists()
 
 
-def test_cancel_before_start_does_not_call_payload(source_study, run_root, payload_factory):
-    from rpipe.api import cancel, run
+def test_cancel_before_start_does_not_call_payload(source_study, run_root, science_factory, science_worker):
+    from rpipe.flow.run import run
+    from rpipe.flow.context import Cancellation
     from rpipe.structure.make import plan
-    from rpipe.structure.contracts import Cancellation
 
     token = Cancellation()
-    cancel(token)
-    payload = payload_factory()
-    outcome = run(plan(source_study, run_root=run_root)[0], payload=payload, cancellation=token)
+    token.request()
+    payload = science_factory()
+    science_worker(payload)
+    outcome = run(plan(source_study, run_root=run_root)[0], cancellation=token)
     assert outcome.status == 'cancelled'
     assert outcome.cancelled is True
     assert payload.calls == []
 
 
-def test_cancel_during_execute_prevents_collect(source_study, run_root, payload_factory):
+def test_cancel_during_execute_prevents_collect(source_study, run_root, science_factory, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import run
-    from rpipe.structure.contracts import Cancellation
+    from rpipe.flow.run import run
+    from rpipe.flow.context import Cancellation
 
     token = Cancellation()
 
-    class Cancelling(payload_factory):
+    class Cancelling(science_factory):
         def execute(self, ctx):
             self._phase('execute')
             token.request()
+            ctx.cancellation.request()
 
     payload = Cancelling()
-    outcome = run(plan(source_study, run_root=run_root)[0], payload=payload, cancellation=token)
+    science_worker(payload)
+    outcome = run(plan(source_study, run_root=run_root)[0], cancellation=token)
     assert outcome.status == 'cancelled'
     assert outcome.cancelled is True
     assert payload.calls == ['prepare', 'execute', 'close']
 
 
-@pytest.mark.parametrize('limit', [{'timeout_seconds': 1}, {'memory_bytes': 1048576}])
-def test_unsupported_hard_budget_rejects_before_payload_start(
-        source_study, run_root, payload_factory, limit):
+def test_unsupported_hard_memory_rejects_before_science_or_output(
+        source_study, run_root, monkeypatch):
     from rpipe.structure.make import plan
-    from rpipe.api import run
-    from rpipe.structure.control import AdmissionError
-    from rpipe.structure.contracts import Budget
-
-    payload = payload_factory()
+    from rpipe.flow.run import run
+    from rpipe.flow.context import Budget
+    from rpipe.flow import worker
+    calls = []
+    monkeypatch.setattr(worker, 'compute', lambda *args: calls.append(args))
     spec = plan(source_study, run_root=run_root)[0]
-    with pytest.raises(AdmissionError):
-        run(spec, payload=payload, budget=Budget(**limit))
-    assert payload.calls == []
-    assert not run_root.exists()
-
-
-def test_payload_boolean_claim_cannot_grant_itself_hard_timeout_capability(
-        source_study, run_root, payload_factory):
-    from rpipe.structure.make import plan
-    from rpipe.api import run
-    from rpipe.structure.control import AdmissionError
-    from rpipe.structure.contracts import Budget
-
-    payload = payload_factory()
-    payload.hard_timeout = True
-    spec = plan(source_study, run_root=run_root)[0]
-    with pytest.raises(AdmissionError):
-        run(spec, payload=payload, budget=Budget(timeout_seconds=1))
-    assert payload.calls == []
-    assert not run_root.exists()
+    rejected = run(spec, budget=Budget(memory_bytes=1048576))
+    assert rejected.status == 'rejected'
+    assert rejected.error['type'] == 'AdmissionError'
+    assert not calls and not run_root.exists()
 
 
 @pytest.mark.parametrize('stop_fails', [False, True], ids=['confirmed-stop', 'unknown-stop'])
 def test_cancel_cleans_only_owned_process_and_unknown_owner_remains_busy(
-        source_study, run_root, payload_factory, monkeypatch, stop_fails):
+        source_study, run_root, science_factory, monkeypatch, stop_fails, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import run
+    from rpipe.flow.run import run
     from rpipe.structure.control import BusyError
-    from rpipe.structure.contracts import Cancellation
+    from rpipe.flow.context import Cancellation
 
     def child():
         return subprocess.Popen([sys.executable, '-B', '-c', 'import time; time.sleep(30)'],
@@ -144,7 +137,7 @@ def test_cancel_cleans_only_owned_process_and_unknown_owner_remains_busy(
     stop = owned.terminate
     token = Cancellation()
 
-    class OwnsProcess(payload_factory):
+    class OwnsProcess(science_factory):
         def execute(self, ctx):
             self._phase('execute')
             ctx.register_process(owned)
@@ -156,12 +149,15 @@ def test_cancel_cleans_only_owned_process_and_unknown_owner_remains_busy(
         monkeypatch.setattr(owned, 'terminate', denied)
     spec = plan(source_study, run_root=run_root)[0]
     try:
-        outcome = run(spec, payload=OwnsProcess(), cancellation=token)
+        science_worker(OwnsProcess())
+        outcome = run(spec, cancellation=token)
         assert peer.poll() is None, 'cancel terminated an unrelated peer'
         if stop_fails:
             assert outcome.status == 'unknown' and owned.poll() is None
-            with pytest.raises(BusyError):
-                run(spec, payload=payload_factory())
+            science_worker(science_factory())
+            _rejected = run(spec)
+            assert _rejected.status == 'rejected'
+            assert _rejected.error['type'] == 'BusyError'
         else:
             assert outcome.status == 'cancelled' and owned.poll() is not None
             assert not (spec.run_dir / '.execution').exists()
@@ -173,10 +169,10 @@ def test_cancel_cleans_only_owned_process_and_unknown_owner_remains_busy(
 
 
 def test_eval_cannot_bind_successful_training_from_another_seed(
-        source_study, run_root, payload_factory, file_bytes):
+        source_study, run_root, science_factory, file_bytes, science_worker):
     from dataclasses import replace
     from rpipe.structure.make import plan
-    from rpipe.api import run
+    from rpipe.flow.run import run
     from rpipe.structure.control import AdmissionError
 
     with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
@@ -185,11 +181,14 @@ def test_eval_cannot_bind_successful_training_from_another_seed(
     trains = [spec for spec in specs if spec.config['algorithm']['mode'] == 'train']
     evaluated = next(spec for spec in specs if spec.config['algorithm']['mode'] == 'eval' and spec.seed == 1)
     for train in trains:
-        assert run(train, payload=payload_factory()).status == 'succeeded'
+        science_worker(science_factory())
+        assert run(train).status == 'succeeded'
     wrong = replace(evaluated, train_id=next(spec.id for spec in trains if spec.seed == 0))
     before = file_bytes(run_root)
-    payload = payload_factory()
-    with pytest.raises(AdmissionError):
-        run(wrong, payload=payload)
+    payload = science_factory()
+    science_worker(payload)
+    _rejected = run(wrong)
+    assert _rejected.status == 'rejected'
+    assert _rejected.error['type'] == 'AdmissionError'
     assert payload.calls == []
     assert file_bytes(run_root) == before

@@ -133,11 +133,11 @@ def test_step_period_accumulates_before_optimizer_step(tmp_path: Path):
     assert out['steps'] == 1
     import json
 
-    records = [json.loads(line) for line in (tmp_path / 'tracker' / 'scalars.jsonl').read_text().splitlines()]
+    records = [json.loads(line) for line in (tmp_path / 'tracker' / 'scalars.jsonl').read_text(encoding='utf-8').splitlines()]
     reports = [row for row in records if 'mean' in row]
     assert {row['optimizer_step'] for row in reports} == {1}
     assert reports[-1]['step'] > reports[-1]['optimizer_step']  # Includes test and accumulated batches.
-    checkpoint = json.loads((tmp_path / 'checkpoints' / 'latest' / 'tracker.json').read_text())
+    checkpoint = json.loads((tmp_path / 'checkpoints' / 'latest' / 'tracker.json').read_text(encoding='utf-8'))
     assert checkpoint['jsonl_offset'] == (tmp_path / 'tracker' / 'scalars.jsonl').stat().st_size
 
 
@@ -163,7 +163,7 @@ def test_curve_discards_reports_after_failed_checkpoint_and_resume(tmp_path, mon
         _run(root, mapping)
     completed, _ = _run(root, mapping)
     assert completed['steps'] == 4
-    reports = [json.loads(line) for line in (root / 'tracker' / 'scalars.jsonl').read_text().splitlines()]
+    reports = [json.loads(line) for line in (root / 'tracker' / 'scalars.jsonl').read_text(encoding='utf-8').splitlines()]
     at3 = [row for row in reports if row.get('split') == 'test' and row.get('name') == 'Loss' and row.get('optimizer_step') == 3]
     assert len(at3) == 2  # Raw diagnostics retain the failed branch.
     curve = load_curve_series(tmp_path, 'run')['test']['Loss']

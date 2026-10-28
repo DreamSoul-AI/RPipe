@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from rpipe.structure.artifact.io import safe_error_record
-from rpipe.structure.execution import Cancelled
+from rpipe.flow.context import Cancelled
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.structure_layer, pytest.mark.module_algorithm,
