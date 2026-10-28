@@ -21,7 +21,7 @@
 | 代码、接口、依赖、持久化 | [代码规范](https://dreamsoul.feishu.cn/docx/FKrsdHO9bolq4YxV2KAcosghnme) 及本仓两份设计 |
 | 分支、PR、多代理、跨仓合同 | [多人协作代码开发规范](https://dreamsoul.feishu.cn/docx/WihCdOtlqoeYjaxrpeXckFomnCh) |
 | 测试、隔离、计划与结果 | [测试规范 代码](https://dreamsoul.feishu.cn/docx/KE4IdW6EWoKdvExSkdvcjTJFnsf) |
-| 程序日志与故障上下文 | [全局 日志规范](https://dreamsoul.feishu.cn/docx/RBlFdcSSBo93q9x6p8kcdU6wnYb) |
+| 程序日志与故障上下文 | [日志规范 Logging Specification](https://dreamsoul.feishu.cn/docx/RBlFdcSSBo93q9x6p8kcdU6wnYb) |
 | 构建、自动检查与交付 | [CI CD 执行规范](https://dreamsoul.feishu.cn/docx/NrJ4d0WVGo9t4uxAVwScFTBVnRb) |
 | 技术机制与方案调查 | [通用调研规范 General Research Standard](https://dreamsoul.feishu.cn/docx/YcWIdE4INoLqoLxR5O8cbl7hnTf) |
 | 学术检索、证据与论文阅读 | [文献调研规范](https://dreamsoul.feishu.cn/docx/QKXhdAW2doZCvUxHSoFcpT0Mn5e) |
@@ -66,6 +66,8 @@
 4. 按行为、合同及失败风险选择验证，每个测试进程使用独立临时目录，不拿真实输入或旧 Run 作清理 fixture。静态、本地测试、安装、CI、真实实验与性能分别报告，变更后刷新受影响验证
 5. 实际命令、版本、环境、结果及未执行项进运行记录，变更和决定进开发记录，活动缺陷更新状态。修复后回归原反例，不删除失败或放宽研究门换取通过
 6. 检查范围、编码、命名、链接/锚点、资源依赖与实现一致性，按授权提交交付，报告完整 SHA、PR、实际成果与缺口
+
+模型、数据和实验任务沿用项目版本、资源及使用约束，下载模型优先使用 ModelScope。研究结果、代码可运行和产品已集成分别判断
 
 实验沿项目研究计划，先小范围准入再按授权扩大。逐项记录数据、模型/规模、算法、指标、设备、实际精度、依赖、seed、来源与预算。流程变动用新 version/Run ID，保留旧身份、失败及重复结果，不以退出码、通过数、同 seed 或短探针替代科学质量。不稳定反例先保留排查，不挑成功重复代替验收。
 
