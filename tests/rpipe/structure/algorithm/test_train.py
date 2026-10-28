@@ -51,7 +51,7 @@ def test_train_summary_uses_last_evaluation_segment(tmp_path, unit):
     config.update({'num_epochs': 2} if unit == 'epoch' else {'num_steps': 4})
     tracker = AlgorithmTracker(tmp_path)
     system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
-    out = TrainAlgorithm(AlgorithmConfig.from_mapping(config)).compute(
+    out = TrainAlgorithm(AlgorithmConfig.from_mapping(config), checkpoint_dir=tmp_path / 'checkpoints').compute(
         Batches(), SimpleNamespace(module=module), system, tracker, cancel_check=lambda: None,
     )
     assert out['train_loss'] == pytest.approx(expected[-1])
@@ -77,7 +77,7 @@ def test_train_summary_omits_metrics_that_were_not_requested(tmp_path, names, ab
     ]))
     system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
     try:
-        result = TrainAlgorithm(AlgorithmConfig.from_mapping({'num_steps': 1, 'resume': False})).compute(
+        result = TrainAlgorithm(AlgorithmConfig.from_mapping({'num_steps': 1, 'resume': False}), checkpoint_dir=tmp_path / 'checkpoints').compute(
             data, SimpleNamespace(module=torch.nn.Linear(1, 2)), system,
             AlgorithmTracker(tmp_path, MetricBundle({'train': names, 'test': names})), cancel_check=lambda: None,
         )
@@ -87,7 +87,7 @@ def test_train_summary_omits_metrics_that_were_not_requested(tmp_path, names, ab
 
 
 def test_two_epoch_stub_train_does_not_raise(tmp_path):
-    algo = TrainAlgorithm(AlgorithmConfig.from_mapping({'mode': 'train', 'num_epochs': 2}))
+    algo = TrainAlgorithm(AlgorithmConfig.from_mapping({'mode': 'train', 'num_epochs': 2}), checkpoint_dir=tmp_path / 'checkpoints')
     tracker = AlgorithmTracker(tmp_path)
     out = algo.compute(_Data(), None, None, tracker, cancel_check=lambda: None)
     assert out['mode'] == 'train'
@@ -102,7 +102,7 @@ def test_missing_inputs_do_not_become_stub_results(tmp_path, mode, source):
 
     from rpipe.structure.algorithm.factory import build_algorithm
 
-    algorithm = build_algorithm(AlgorithmConfig(mode=mode, source=source))
+    algorithm = build_algorithm(AlgorithmConfig(mode=mode, source=source), checkpoint_dir=tmp_path / 'checkpoints')
     tracker = AlgorithmTracker(tmp_path)
     for data, model in [
         (None, None),
@@ -127,7 +127,7 @@ def test_explicit_stub_is_supported_by_both_sources(tmp_path, mode, source):
     from rpipe.structure.control import DataConfig
 
     data = data_api(DataConfig(name='Toy', source='stub'), tmp_path, seed=2)
-    algorithm = algorithm_api(AlgorithmConfig(mode=mode, source=source))
+    algorithm = algorithm_api(AlgorithmConfig(mode=mode, source=source), checkpoint_dir=tmp_path / 'checkpoints')
     result = algorithm.compute(data, SimpleNamespace(module=object()), None, AlgorithmTracker(tmp_path), cancel_check=lambda: None)
     assert result['mode'] == mode
     assert result['stub'] is True
@@ -205,7 +205,7 @@ def test_train_reports_lr_used_by_completed_optimizer_step(tmp_path, eval_period
     })
     system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
     model = SimpleNamespace(module=module)
-    result = TrainAlgorithm(config).compute(_Batches(), model, system, AlgorithmTracker(tmp_path), cancel_check=lambda: None)
+    result = TrainAlgorithm(config, checkpoint_dir=tmp_path / 'checkpoints').compute(_Batches(), model, system, AlgorithmTracker(tmp_path), cancel_check=lambda: None)
     records = re.findall(
         r'\[split\] (train|test).*? lr=([^ ]+) step=(\d+)',
         system.logger.path.read_text(encoding='utf-8'),
@@ -220,7 +220,7 @@ def test_train_reports_lr_used_by_completed_optimizer_step(tmp_path, eval_period
     torch.testing.assert_close(module.weight, reference.weight)
 
     # No new optimizer step: the restored current LR, not the old used LR, is reported.
-    TrainAlgorithm(config).compute(_Batches(), model, system, AlgorithmTracker(tmp_path), cancel_check=lambda: None)
+    TrainAlgorithm(config, checkpoint_dir=tmp_path / 'checkpoints').compute(_Batches(), model, system, AlgorithmTracker(tmp_path), cancel_check=lambda: None)
     resumed = re.findall(
         r'\[split\] test.*? lr=([^ ]+) step=(\d+)',
         system.logger.path.read_text(encoding='utf-8'),
@@ -231,7 +231,7 @@ def test_train_reports_lr_used_by_completed_optimizer_step(tmp_path, eval_period
 
 @pytest.mark.parametrize('unit', ['step', 'epoch'])
 @pytest.mark.parametrize('early_stop', [False, True], ids=['complete', 'early_stop'])
-def test_checkpoint_progress_matches_completed_updates(tmp_path, unit, early_stop):
+def test_checkpoint_progress_matches_completed_updates(tmp_path, monkeypatch, unit, early_stop):
     from copy import deepcopy
     from math import cos, pi
     from types import SimpleNamespace
@@ -266,19 +266,22 @@ def test_checkpoint_progress_matches_completed_updates(tmp_path, unit, early_sto
         torch.nn.init.zeros_(module.weight)
         system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), root)
         snapshots = []
-        save = system.save_checkpoint
+        from rpipe.structure.artifact import checkpoint
+        save = checkpoint.save_snapshot
 
-        def save_and_observe(payload, name):
+        def save_and_observe(path, payload):
+            name = path.stem
             snapshots.append((name, deepcopy(payload)))
-            path = save(payload, name)
+            path = save(path, payload)
             if interrupt and name == 'latest' and payload['step'] == 2:
                 raise RuntimeError('injected interruption after checkpoint')
             return path
 
-        system.save_checkpoint = save_and_observe
-        result = TrainAlgorithm(config).compute(
-            _Batches(), SimpleNamespace(module=module), system, AlgorithmTracker(root), cancel_check=lambda: None
-        )
+        with monkeypatch.context() as patch:
+            patch.setattr(checkpoint, 'save_snapshot', save_and_observe)
+            result = TrainAlgorithm(config, checkpoint_dir=root / 'checkpoints').compute(
+                _Batches(), SimpleNamespace(module=module), system, AlgorithmTracker(root), cancel_check=lambda: None
+            )
         return result, module, snapshots, system
 
     result, module, snapshots, system = execute(tmp_path / 'clean')
@@ -319,7 +322,8 @@ def test_checkpoint_progress_matches_completed_updates(tmp_path, unit, early_sto
         assert resumed['steps'] == final_step
         assert resumed['best_value'] == pytest.approx(result['best_value'])
         torch.testing.assert_close(resumed_model.weight, module.weight)
-        assert resumed_system.load_checkpoint('latest')['scheduler'] == system.load_checkpoint('latest')['scheduler']
+        from rpipe.structure.artifact.checkpoint import load_snapshot
+        assert load_snapshot(tmp_path / 'interrupted/checkpoints/latest.pt')['scheduler'] == load_snapshot(tmp_path / 'clean/checkpoints/latest.pt')['scheduler']
         # Budget already done: no update or checkpoint rewrite, and Loss keeps its own name.
         done, done_model, writes, _ = execute(tmp_path / 'interrupted')
         assert done['steps'] == final_step
@@ -330,17 +334,17 @@ def test_checkpoint_progress_matches_completed_updates(tmp_path, unit, early_sto
 
 
 @pytest.mark.parametrize('metric', ['Loss', 'Accuracy'])
-def test_checkpoint_hook_normalizes_best_metric_for_all_train_callers(metric):
+def test_checkpoint_hook_normalizes_best_metric_for_all_train_callers(metric, tmp_path, monkeypatch):
     from types import SimpleNamespace
 
-    algo = TrainAlgorithm(AlgorithmConfig.from_mapping({'mode': 'train', 'best_metric': metric}))
+    algo = TrainAlgorithm(AlgorithmConfig.from_mapping({'mode': 'train', 'best_metric': metric}), checkpoint_dir=tmp_path / 'checkpoints')
     algo._best_test = 0.25
     saved = []
     # Some callers build their payload before adding generic best metadata (HF included).
     payload = {'step': 2, 'best_accuracy': 0.25}
-    algo.on_checkpoint(None, None, None, None, SimpleNamespace(
-        save_checkpoint=lambda body, name: saved.append(body),
-    ), {'checkpoint_names': ['latest'], 'payload': payload})
+    from rpipe.structure.artifact import checkpoint
+    monkeypatch.setattr(checkpoint, 'save_snapshot', lambda path, body: saved.append(body))
+    algo.on_checkpoint(None, None, None, None, None, {'checkpoint_names': ['latest'], 'payload': payload})
     assert saved[0]['best_metric'] == metric
     assert saved[0]['best_value'] == 0.25
     if metric == 'Accuracy':
@@ -391,7 +395,7 @@ def test_train_final_flush_cannot_replace_primary_failure(tmp_path, monkeypatch,
         def bad_state():
             return {**state_dict(), 'unserializable': object()}
         monkeypatch.setattr(tracker, 'state_dict', bad_state)
-    algorithm = TrainAlgorithm(AlgorithmConfig.from_mapping({'mode': 'train', 'num_steps': 1}))
+    algorithm = TrainAlgorithm(AlgorithmConfig.from_mapping({'mode': 'train', 'num_steps': 1}), checkpoint_dir=tmp_path / 'checkpoints')
     with pytest.raises(BaseException) as caught:
         algorithm.compute(data, SimpleNamespace(module=torch.nn.Linear(2, 2)), system, tracker, cancel_check=lambda: None)
     assert calls == ['train']
@@ -428,7 +432,7 @@ def test_successful_train_final_flush_failure_still_propagates(tmp_path, monkeyp
             yield torch.eye(2), torch.tensor([0, 1])
     tracker = AlgorithmTracker(tmp_path)
     system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
-    algorithm = TrainAlgorithm(AlgorithmConfig.from_mapping({'mode': 'train', 'num_steps': 1, 'eval_period': 0, 'checkpoint_period': 0}))
+    algorithm = TrainAlgorithm(AlgorithmConfig.from_mapping({'mode': 'train', 'num_steps': 1, 'eval_period': 0, 'checkpoint_period': 0}), checkpoint_dir=tmp_path / 'checkpoints')
     armed = []
     def final_checkpoint(*args):
         armed.append(tracker.state_path.read_bytes())

@@ -179,7 +179,7 @@ AlgorithmHook 是算法循环中明确的评测、checkpoint、停止等协作�
 | readout.py | 正式状态、日志、摘要与轨迹读取，输出缺失和不确定事实 | 不执行阶段、不取得执行权、不加载部件构造器或补写结果 |
 | comparison.py | 比较明确指标、轨迹和受信 checkpoint | 显式容差、单位和缺项，按需加载数值库，不修改输入 |
 
-provenance 和 checkpoint 可使用 io，io 不反向导入它们。readout 使用已保存的身份与记录，不依赖 run、worker 或科学对象。comparison 对受信状态作数值比较，不通过反序列化加载任意研究类路径。
+provenance 和 checkpoint 可使用 io，io 不反向导入它们。readout 使用已保存的身份与记录，不依赖 run、worker 或科学对象。comparison 对受信状态作数值比较，不通过反序列化加载任意研究类路径。compare 接两份正式 RunRef 和明确比较条件；compare_state 比较调用方明确提供的内存状态树，研究转换须保留原始来源与规则，不伪造正式 Run。
 
 # 四、Flow 模块职责
 
@@ -193,7 +193,7 @@ provenance 和 checkpoint 可使用 io，io 不反向导入它们。readout 使�
 | study.py | 明确选择的研究准备、计算和阶段协作，隔离加载作用域 | 无研究差异时不加载扩展，不依目录存在自动执行工具 |
 | supervision.py | 明确 Run 集合、依赖、批次派发、重试及可选资源监管 | 调同一 run；不绕过 Run 生命周期，采样不冒充硬配额 |
 | process.py | 单 Run 派生与按清单的 Experiment/Study 统计 | 只消费正式结果和证据，不覆盖科学 result |
-| exports.py | 学习曲线、数字表与明确选择的 TensorBoard 等导出 | 管理自己的目标文件与图句柄，不写人工研究结论 |
+| exports.py | 学习曲线、数字表与明确选择的 TensorBoard 等导出 | 管理自己的目标文件与图句柄，不写人工研究结论；图发布不跟随输出路径别名进入原件域 |
 
 六阶段先在 stages.py 中以六个有实际职责的函数表达，不建立六套包和转发入口。复杂的统计、导出和进程协议各有真实实现文件；职责进一步增长时再按变化原因拆分。
 
@@ -213,15 +213,15 @@ provenance 和 checkpoint 可使用 io，io 不反向导入它们。readout 使�
 | make.expand | 已解析 Study/基底、明确来源身份、外部运行根和 version | RunSpec 有序集合、Experiment 分组及显式依赖；不写盘 |
 | make.publish | 同一研究及输出域的合法规格和来源记录 | 配置、index 和来源清单；显式受保护写入，不执行 |
 
-RunSpec 包含配置身份、因素归属、seed、来源引用、输出位置和明确训练依赖；不携带模型或进程句柄。experiment 由有效条件、来源和 version 派生，不接受被忽略的构造值；source_dir/run_root 在纯规格中要求绝对路径且不含父目录跳转，实际路径解析和源码/输入保护由 artifact 在读取/发布准入时执行。相同身份不能在同一清单重复，依赖必须存在且无环。control 定义的 RunRef 只是正式记录的身份与位置，不隐式取得写入许可。持久化 RunRecord/ExecutionRecord 的字段结构由 artifact.io 维护，readout 与写端共用，不从 flow.context 导入；flow.context 只定义请求、响应、内存报告和上下文，不能成为读端的反向依赖。
+RunSpec 包含配置身份、因素归属、seed、来源引用、输出位置和明确训练依赖；不携带模型或进程句柄。experiment 由有效条件、来源和 version 派生，不接受被忽略的构造值；source_dir/run_root 在纯规格中要求绝对路径且不含父目录跳转，实际路径解析和源码/输入保护由 artifact 在读取/发布准入时执行。相同身份不能在同一清单重复，依赖必须存在且无环。control 定义的 RunRef 只是正式记录的身份、位置和明确训练依赖，不隐式取得写入许可。读取使用清单保存的身份，不要求当前源码仍与历史记录相同；生成新的派生物另核当前来源与计划。持久化 RunRecord/ExecutionRecord 的字段结构由 artifact.io 维护，readout 与写端共用，不从 flow.context 导入；flow.context 只定义请求、响应、内存报告和上下文，不能成为读端的反向依赖。
 
 ## （二）部件交接
 
 | **构造或消费接口** | **输入 → 输出** | **必要操作与状态** |
 | --- | --- | --- |
-| data.factory.build_data | DataConfig、明确位置和 seed → DataPort | meta、按 split 迭代、支持范围内的数据状态、所属资源关闭 |
+| data.factory.build_data | DataConfig、明确位置和 seed → DataPort | meta、按 split 迭代、支持范围内的数据状态及纯恢复校验、所属资源关闭 |
 | model.factory.build_model | ModelConfig、必要 data_meta 和 SystemPort → ModelPort | 前向、训练/评测模式、参数与模型状态；不持有整个 Data |
-| algorithm.factory.build_algorithm | AlgorithmConfig → AlgorithmPort | 执行支持的 mode，消费注入对象，返回实际观测 |
+| algorithm.factory.build_algorithm | AlgorithmConfig、明确 checkpoint_dir 和可选 train_checkpoint_dir → AlgorithmPort | 执行支持的 mode，消费注入对象，返回实际观测 |
 | system.factory.build_system | SystemConfig、明确位置与初始化条件 → SystemPort | 设备/精度、放置、Logger 和所属资源能力 |
 | AlgorithmPort.compute | DataPort、ModelPort、SystemPort、Tracker、取消检查器 → ComputationObservation | 算法拥有更新状态和时序，观测包含真实指标来源、进度与证据位置 |
 
@@ -323,7 +323,7 @@ Study 源码目录保存声明和研究实现，运行物保存在调用方显�
 
 make.publish 以 schema 3 index 为计划提交点：先准备完整配置，来源清单和 Experiment/Run 索引写入同一原子记录，避免两个独立可变文件产生版本错配。提交前持续持有目标 Run 排他权，旧配置重复发布不改字节，已有来源或格式不匹配明确拒绝；不承诺整树回滚。
 
-io 提供排他与原子存取原语，run 持有执行权，write 解释是否可发布。失败重试和新实测区分身份与结果新鲜度；派生物关联其实际读取的结果，不靠时间戳猜测当前性。没有记录、记录不完整和明确失败分别呈现。
+io 提供排他与原子存取原语，run 持有执行权，write 解释是否可发布。失败重试和新实测区分身份与结果新鲜度；派生物关联其实际读取的结果，不靠时间戳猜测当前性。Study 摘要记录清单、各 Run 配置/结果/执行记录及其明确 outcome、busy 状态的指纹，写出前再核这些输入与来源，变化时拒绝发布并保全既有派生物。没有记录、记录不完整和明确失败分别呈现。
 
 执行事实与科学结果各有保存位置和身份关联。新的启动尚未确定结果时保全此前科学结果，并明确它属于此前启动，不能将其显示成当前启动成功；unknown、取消和清理错误首先属于执行事实，不能通过改写科学数值抹掉差异。未确认释放时不得自动释放执行权、启动新的执行者或发布/覆盖科学结果；当前执行权所有者仍可追加本次 unknown 和清理事实。后续处置先核明所属资源及执行权，不由读端自动修复。
 
@@ -331,7 +331,7 @@ run 在派发科学进程前、独立 process_study 在读取并写出新汇总�
 
 ## （三）Checkpoint、恢复与统计
 
-算法组装模型、优化器、scheduler、进度和停止状态；Data 提供采样位置，runtime 提供 RNG，Tracker 提供加权累计与有效轨迹。artifact.checkpoint 发布单一明确的完整快照及必要诊断信息，提交失败保留此前有效副本，未完成片段不当作完整快照。
+算法组装模型、优化器、scheduler、进度和停止状态；Data 提供采样位置，runtime 提供 RNG，Tracker 提供加权累计与有效轨迹。artifact.checkpoint 发布单一明确的完整快照及必要诊断信息，提交失败保留此前有效副本，未完成片段不当作完整快照。存取接口只接明确绝对 .pt 文件；快照有唯一格式与发布点，只包含无自定义属性的 Tensor、明确安全的标准状态容器和标量，不携带可执行研究类或开放任意类名单。Flow 将本 Run 的 checkpoint_dir 和来自清单 train_id 的可选 train_checkpoint_dir 注入算法构造；算法在明确根内按策略选文件，显式 resume_from 必须是绝对 .pt 路径，不根据附近目录推断训练来源。
 
 恢复由 resume 明确选择目标及支持范围，按依赖顺序重建对象后应用状态。权重加载、训练状态恢复、数据/RNG 连续和完整观测恢复分别报告；不支持的后端、预取或私有状态不能用空操作标为完整恢复。
 

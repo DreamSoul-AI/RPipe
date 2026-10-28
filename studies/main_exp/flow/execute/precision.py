@@ -121,7 +121,7 @@ def _worker(recipe, args):
                 tensors.append(output.detach().cpu())
             return super().evaluate(split, mode, input, output)
     tracker = AlgorithmTracker(assets, Captured())
-    algorithm = EvalAlgorithm(AlgorithmConfig.from_mapping({'mode': 'eval', 'resume_from': str(args.checkpoint.resolve()), 'eval_num_steps': -1}))
+    algorithm = EvalAlgorithm(AlgorithmConfig.from_mapping({'mode': 'eval', 'resume_from': str(args.checkpoint.resolve()), 'eval_num_steps': -1}), checkpoint_dir=(assets / 'checkpoints').resolve())
     activities = [torch.profiler.ProfilerActivity.CPU]
     if torch.profiler.ProfilerActivity.CUDA in torch.profiler.supported_activities():
         activities.append(torch.profiler.ProfilerActivity.CUDA)

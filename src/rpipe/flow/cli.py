@@ -23,7 +23,6 @@ def main(argv=None) -> int:
         if name == 'tensorboard': command.add_argument('--out', type=Path, required=True)
         if name == 'data': command.add_argument('--download', action='store_true')
         if name == 'process': command.add_argument('--figures', action='store_true')
-        if name in ('status', 'report'): command.add_argument('--legacy', action='store_true')
         if name in ('run', 'study', 'launch', 'run-one'):
             command.add_argument('--timeout', type=float)
             command.add_argument('--memory-bytes', type=int)
@@ -40,12 +39,10 @@ def main(argv=None) -> int:
     compare = commands.add_parser('compare')
     compare.add_argument('left', type=Path)
     compare.add_argument('right', type=Path)
-    compare.add_argument('--legacy', action='store_true')
     compare.add_argument('--atol', type=float, default=0.0)
     compare.add_argument('--rtol', type=float, default=0.0)
     compare.add_argument('--checkpoints', nargs='+', default=['latest'])
     compare.add_argument('--out', type=Path)
-    compare.add_argument('--study-source', type=Path, help='explicit recipe source for trusted legacy checkpoint classes')
     worker = commands.add_parser('_worker', help=argparse.SUPPRESS)
     worker.add_argument('request', type=Path)
     worker.add_argument('output', type=Path)
@@ -58,28 +55,46 @@ def main(argv=None) -> int:
         if args.command == '_supervisor-coordinator':
             from .supervision import coordinator
             return coordinator()
-        from rpipe import api
+        from rpipe.structure.artifact import readout, comparison, io
         from .context import Budget, SupervisionLimits
         from .supervision import launch, supervise
         from .process import process_study
         if args.command == 'compare':
-            if not args.legacy:
-                parser.error('directory comparison requires --legacy; use api.compare with verified RunSpecs')
-            value = api.compare_runs(args.left, args.right, atol=args.atol, rtol=args.rtol, checkpoints=args.checkpoints,
-                                     study_dir=args.study_source)
-            value.update(legacy=True, verified=False, evidence_complete=False)
+            left, right = readout.ref_from_run_dir(args.left), readout.ref_from_run_dir(args.right)
+            value = comparison.compare(left, right, atol=args.atol, rtol=args.rtol,
+                                       checkpoints=args.checkpoints)
             if args.out:
-                for source in (args.left.resolve(), args.right.resolve()):
-                    if args.out.resolve().is_relative_to(source):
-                        raise ValueError('comparison output must be outside input Run directories')
-                api.write_compare(args.out, value)
+                comparison.write_compare(args.out, value)
             print(json.dumps(value, default=str))
             return 0 if value['passed'] else 1
-        if getattr(args, 'legacy', False):
-            print(json.dumps(api.read_legacy(args.study_dir), default=str))
-            return 0
         if args.run_root is None:
             parser.error('--run-root is required; old Study directories are never implicitly migrated')
+        if args.command in ('status', 'logs', 'report'):
+            from rpipe.structure.control import _component
+            version = args.study_version
+            if version is None:
+                declaration = io.load_config(args.study_dir / 'study.yaml')
+                base = io.load_config(args.study_dir / 'experiment_config.yaml')
+                fixed = declaration.get('fixed', {})
+                if not isinstance(fixed, dict):
+                    raise ValueError('Study fixed conditions must be a mapping')
+                version = str(next((value for value in (fixed.get('version'), base.get('version'))
+                                    if value is not None), 'default'))
+            _component(version, 'version')
+            root = Path(args.run_root).resolve()
+            study_root = io.contained(root / args.study_dir.name / version, root)
+            refs = readout.refs_from_index(study_root)
+            if args.selected_id:
+                refs = tuple(ref for ref in refs if ref.id == args.selected_id)
+                if not refs:
+                    parser.error('Run id is not in the published plan')
+            if args.command == 'logs':
+                print('\n'.join(readout.logs(ref) for ref in refs))
+            elif args.command == 'report':
+                print(readout.report(refs), end='')
+            else:
+                print(json.dumps([readout.read_run(ref) for ref in refs], default=str))
+            return 0
         if args.command == 'supervise':
             limits = SupervisionLimits(args.run_seconds, args.batch_seconds, args.rss_bytes,
                                           args.output_bytes, args.poll_seconds, args.cleanup_seconds)
@@ -91,7 +106,7 @@ def main(argv=None) -> int:
             if not specs: parser.error('Run id is not in the actual current plan')
         if args.command == 'plan':
             value = [{'id': s.id, 'experiment': s.experiment, 'seed': s.seed, 'source_digest': s.source_digest,
-                      'run_dir': str(s.run_dir), 'train_id': s.train_id} for s in specs]
+                      'run_dir': str(s.run_dir), 'version': s.version, 'train_id': s.train_id} for s in specs]
         elif args.command == 'make':
             value = planning.publish(specs)
         elif args.command == 'supervise':
@@ -109,14 +124,6 @@ def main(argv=None) -> int:
                      for r in launch(specs, budget=Budget(args.timeout, args.memory_bytes), retry=args.retry)]
             print(json.dumps(value, default=str))
             return 0 if all(r['status'] == 'succeeded' for r in value) else 1
-        elif args.command == 'status':
-            value = [api.read_run(s) for s in specs]
-        elif args.command == 'logs':
-            print('\n'.join(api.logs(s) for s in specs))
-            return 0
-        elif args.command == 'report':
-            print(api.report(specs), end='')
-            return 0
         elif args.command == 'shared':
             value = {'data': str(args.run_root.resolve() / 'shared' / 'data'),
                      'model': str(args.run_root.resolve() / 'shared' / 'model')}

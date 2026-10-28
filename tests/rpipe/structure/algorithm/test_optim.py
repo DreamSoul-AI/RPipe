@@ -2,7 +2,6 @@ import pytest
 
 from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.optim import clip_gradients, make_optimizer, make_scheduler
-from rpipe.structure.algorithm.resume import resume_stem
 
 pytestmark = [
     pytest.mark.unit,
@@ -13,23 +12,6 @@ pytestmark = [
     pytest.mark.cost(cost_class='c1'),
     pytest.mark.result_type('categorical', detail='summary'),
 ]
-
-
-def test_resume_stem_train_defaults_to_latest_eval_to_best():
-    train = AlgorithmConfig.from_mapping({'mode': 'train'})
-    eval_cfg = AlgorithmConfig.from_mapping({'mode': 'eval'})
-    assert resume_stem(train, mode='train') == 'latest'
-    assert resume_stem(eval_cfg, mode='eval') == 'best'
-
-
-def test_resume_stem_false_returns_none():
-    off = AlgorithmConfig.from_mapping({'mode': 'train', 'resume': False})
-    assert resume_stem(off, mode='train') is None
-
-
-def test_resume_stem_named_resume_from_overrides_eval_best():
-    named = AlgorithmConfig.from_mapping({'mode': 'eval', 'resume_from': 'step_000003'})
-    assert resume_stem(named, mode='eval') == 'step_000003'
 
 
 def test_make_optimizer_passes_valid_extras_and_ignores_unknown_keys():

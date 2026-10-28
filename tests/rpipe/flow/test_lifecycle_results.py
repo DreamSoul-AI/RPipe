@@ -34,7 +34,7 @@ def test_invalid_collected_observation_fails_without_success_result(
 def test_scientific_quality_and_evidence_are_preserved_separately(
         source_study, run_root, science_factory, quality, complete, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.run import run
 
     class ScientificFacts(science_factory):
@@ -45,7 +45,7 @@ def test_scientific_quality_and_evidence_are_preserved_separately(
     spec = plan(source_study, run_root=run_root)[0]
     science_worker(ScientificFacts())
     outcome = run(spec)
-    result = read_run(spec)
+    result = read_run(spec.ref)
     assert outcome.status == 'succeeded'
     assert outcome.quality is result['quality'] is quality
     assert outcome.evidence_complete is result['evidence_complete'] is complete
@@ -104,7 +104,7 @@ def test_payload_cannot_change_effective_configuration_after_planning(
 def test_release_failure_is_unknown_in_return_record_and_readout(
         source_study, run_root, science_factory, monkeypatch, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.run import run
     from rpipe.structure.artifact.io import Ownership, read_json
 
@@ -115,7 +115,7 @@ def test_release_failure_is_unknown_in_return_record_and_readout(
     spec = plan(source_study, run_root=run_root)[0]
     science_worker(science_factory())
     outcome = run(spec)
-    row = read_run(spec)
+    row = read_run(spec.ref)
     record = read_json(spec.run_dir / 'execution.json')
     attempt = read_json(spec.run_dir / 'attempts' / record['attempt'] / 'outcome.json')
     assert outcome.status == row['status'] == record['candidate_status'] == attempt['candidate_status'] == 'unknown'
@@ -167,7 +167,7 @@ def test_release_directory_failure_restores_token_and_records_owned_unknown_fact
 def test_final_record_write_failure_keeps_owner_and_unknown_projection(
         source_study, run_root, science_factory, monkeypatch, target, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.run import run
     from rpipe.structure.artifact import io as execution
 
@@ -183,7 +183,7 @@ def test_final_record_write_failure_keeps_owner_and_unknown_projection(
     spec = plan(source_study, run_root=run_root)[0]
     science_worker(science_factory())
     outcome = run(spec)
-    row = read_run(spec)
+    row = read_run(spec.ref)
     assert outcome.status == row['status'] == 'unknown'
     assert not outcome.evidence_complete and not row['evidence_complete']
     assert row['busy'] and spec.result_path.exists()
@@ -191,7 +191,7 @@ def test_final_record_write_failure_keeps_owner_and_unknown_projection(
 
 def test_candidate_success_is_not_complete_until_owner_release(
         source_study, run_root, science_factory, monkeypatch, science_worker):
-    from rpipe.api import aggregate, read_run
+    from rpipe.structure.artifact.readout import aggregate, read_run
     from rpipe.flow.run import run
     from rpipe.structure.make import plan
     from rpipe.structure.artifact.io import Ownership
@@ -200,21 +200,21 @@ def test_candidate_success_is_not_complete_until_owner_release(
     release = Ownership.release
     observed = []
     def closing(owner):
-        observed.append(read_run(spec))
-        assert aggregate([spec])['complete'] is False
+        observed.append(read_run(spec.ref))
+        assert aggregate([spec.ref])['complete'] is False
         release(owner)
     monkeypatch.setattr(Ownership, 'release', closing)
     science_worker(science_factory())
     outcome = run(spec)
     assert observed[0]['status'] == 'unknown' and observed[0]['busy']
     assert observed[0]['scientific_status'] == 'succeeded'
-    assert outcome.status == read_run(spec)['status'] == 'succeeded'
+    assert outcome.status == read_run(spec.ref)['status'] == 'succeeded'
 
 
 def test_retry_requires_explicit_admission_and_preserves_previous_attempt(
         source_study, run_root, science_factory, file_bytes, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.run import run
     from rpipe.structure.artifact.io import read_json
     from rpipe.structure.control import AdmissionError
@@ -225,7 +225,7 @@ def test_retry_requires_explicit_admission_and_preserves_previous_attempt(
     record = read_json(spec.run_dir / 'execution.json')
     old_attempt = spec.run_dir / 'attempts' / record['attempt'] / 'outcome.json'
     stored = old_attempt.read_bytes()
-    assert first.status == read_run(spec)['status'] == 'failed'
+    assert first.status == read_run(spec.ref)['status'] == 'failed'
     before = file_bytes(run_root)
     science_worker(science_factory())
     _rejected = run(spec)
@@ -241,7 +241,7 @@ def test_retry_requires_explicit_admission_and_preserves_previous_attempt(
 def test_old_return_stays_bound_to_its_attempt_when_retry_finishes_during_release(
         source_study, run_root, science_factory, monkeypatch, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.run import run
     from rpipe.structure.artifact.io import Ownership, read_json
 
@@ -258,7 +258,7 @@ def test_old_return_stays_bound_to_its_attempt_when_retry_finishes_during_releas
     science_worker(science_factory(fail='execute'))
     first = run(spec)
     assert first.status == 'failed'
-    assert read_run(spec)['status'] == 'succeeded'
+    assert read_run(spec.ref)['status'] == 'succeeded'
     assert read_json(spec.run_dir / 'execution.json')['candidate_status'] == 'succeeded'
 
 

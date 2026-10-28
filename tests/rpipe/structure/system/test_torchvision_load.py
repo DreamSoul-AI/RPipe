@@ -5,6 +5,19 @@ import pytest
 
 from rpipe.structure.system.torchvision_load import import_torchvision
 
+
+@pytest.fixture(autouse=True)
+def preserve_torchvision_modules():
+    saved = {name: module for name, module in sys.modules.items()
+             if name == 'torchvision' or name.startswith('torchvision.')}
+    try:
+        yield
+    finally:
+        for name in list(sys.modules):
+            if name == 'torchvision' or name.startswith('torchvision.'):
+                del sys.modules[name]
+        sys.modules.update(saved)
+
 pytestmark = [
     pytest.mark.unit,
     pytest.mark.content,

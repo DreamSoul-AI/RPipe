@@ -203,3 +203,10 @@ def checkpoint_names(
     if save_best and improved:
         names.append('best')
     return list(dict.fromkeys(names))
+
+
+def hook_observation(*, epoch: int, lr: float, step: int | None = None) -> dict[str, Any]:
+    extra: dict[str, Any] = {'epoch': epoch, 'lr': lr}
+    if step is not None:
+        extra['step'] = step
+    return extra

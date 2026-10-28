@@ -15,9 +15,9 @@ import re
 import threading
 import yaml
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict
 from types import SimpleNamespace
-from ..control import RunSpec, AdmissionError, SourceMismatch, BusyError
+from ..control import RunSpec, RunRef, AdmissionError, SourceMismatch, BusyError
 
 
 @dataclass(frozen=True)
@@ -53,10 +53,12 @@ def contained(path: Path, root: Path) -> Path:
     return resolved
 
 
-def identity(spec: RunSpec) -> dict[str, str]:
-    config = json.dumps(spec.to_config(), sort_keys=True, separators=(',', ':'), allow_nan=False)
-    return {'id': spec.id, 'source_digest': spec.source_digest,
-            'config_digest': hashlib.sha256(config.encode()).hexdigest(), 'version': spec.version}
+def identity(run: RunSpec | RunRef) -> dict[str, str]:
+    if isinstance(run, RunSpec):
+        return run.ref.identity
+    if isinstance(run, RunRef):
+        return run.identity
+    raise AdmissionError('identity requires an explicit Run specification or reference')
 
 
 
@@ -570,11 +572,14 @@ def validate_input_paths(spec: RunSpec, *, output_root: Path | str | None = None
 kinds = SimpleNamespace(TRACKER=TRACKER, TRACKER_STATE=TRACKER_STATE, TRACKER_JSONL=TRACKER_JSONL, LOGS=LOGS, RUN_LOG=RUN_LOG, CHECKPOINTS=CHECKPOINTS, SAMPLES=SAMPLES, CACHE=CACHE, WEIGHTS=WEIGHTS)
 
 
-def read_execution(spec: RunSpec) -> tuple[dict, bool]:
+def read_execution(spec: RunSpec | RunRef) -> tuple[dict, bool]:
     """Read only the explicitly indexed attempt, never UUID or modification order."""
     record = read_json(contained(spec.run_dir / 'execution.json', spec.run_root))
-    if record.get('identity') != identity(spec):
-        raise SourceMismatch(f'execution identity differs: {spec.id}')
+    validate_identity(record.get('identity'), expected=identity(spec))
+    try:
+        validate_execution_record(record, expected_identity=identity(spec))
+    except AdmissionError:
+        return record, False
     attempt = record.get('attempt')
     if (not isinstance(attempt, str) or len(attempt) != 32
             or any(char not in '0123456789abcdef' for char in attempt)):
@@ -586,6 +591,32 @@ def read_execution(spec: RunSpec) -> tuple[dict, bool]:
         return record, False
     return record, (json.dumps(outcome, sort_keys=True, allow_nan=False)
                     == json.dumps(record, sort_keys=True, allow_nan=False))
+
+
+
+def record_inputs(ref: RunSpec | RunRef) -> dict:
+    """Fingerprint the exact files and lock state consumed by the formal reader."""
+    inputs = {'identity': identity(ref)}
+    execution = None
+    for name in ('config', 'result', 'execution'):
+        suffix = 'yaml' if name == 'config' else 'json'
+        path = contained(ref.run_dir / f'{name}.{suffix}', ref.run_root)
+        raw = _read_bytes(path) if path.exists() else None
+        inputs[f'{name}_sha256'] = hashlib.sha256(raw).hexdigest() if raw is not None else None
+        if name == 'execution':
+            execution = raw
+    inputs.update(attempt=None, outcome_sha256=None,
+                  busy=contained(ref.run_dir / '.execution', ref.run_root).exists())
+    if execution is not None:
+        try:
+            record = json.loads(execution)
+            validate_execution_record(record, expected_identity=inputs['identity'])
+        except (ValueError, TypeError, RecursionError):
+            return inputs
+        inputs['attempt'] = record['attempt']
+        path = contained(ref.run_dir / 'attempts' / record['attempt'] / 'outcome.json', ref.run_root)
+        inputs['outcome_sha256'] = _digest(path) if path.exists() else None
+    return inputs
 
 
 def validate_run_root(source_dir: Path | str, run_root: Path | str) -> None:
@@ -607,33 +638,125 @@ def validate_run_root(source_dir: Path | str, run_root: Path | str) -> None:
         raise AdmissionError('run_root must be separate from source roots and their checkouts')
 
 
+class RunRecord(TypedDict):
+    id: str
+    identity: dict[str, str]
+    attempt: str
+    status: str
+    quality: bool | None
+    evidence_complete: bool
+    metrics: dict[str, Any]
+
+
+class ExecutionRecord(TypedDict):
+    schema: int
+    identity: dict[str, str]
+    attempt: str
+    owner_token: str
+    phase: str
+    candidate_status: str | None
+    quality: bool | None
+    evidence_complete: bool
+    scientific_result_published: bool
+    derived_status: str
+    error: dict[str, Any] | None
+    cleanup_errors: list[dict[str, Any]]
+    cancelled: bool
+
+
+def _record_json(record: dict) -> None:
+    if not isinstance(record, dict):
+        raise AdmissionError('a saved record must be a JSON object')
+    try:
+        json.dumps(record, allow_nan=False)
+    except (TypeError, ValueError, OverflowError, RecursionError) as error:
+        raise AdmissionError('record must contain finite JSON values') from error
+
+
+def validate_identity(value: dict, *, expected: dict | None = None) -> dict[str, str]:
+    if not isinstance(value, dict) or set(value) != {'id', 'source_digest', 'config_digest', 'version'}:
+        raise AdmissionError('record identity must contain its four explicit fields')
+    if any(not isinstance(value[name], str) or not value[name] for name in ('id', 'version')):
+        raise AdmissionError('record identity requires an id and version')
+    for name in ('source_digest', 'config_digest'):
+        if not isinstance(value.get(name), str) or re.fullmatch(r'[0-9a-f]{64}', value[name]) is None:
+            raise AdmissionError(f'record {name} must be a SHA-256 digest')
+    if expected is not None and value != expected:
+        raise SourceMismatch('record belongs to a different Run identity')
+    return value
+
+
+def _attempt(value, name: str) -> None:
+    if not isinstance(value, str) or re.fullmatch(r'[0-9a-f]{32}', value) is None:
+        raise AdmissionError(f'{name} must be an explicit attempt identifier')
+
+
+def validate_run_record(record: dict, *, expected_identity: dict | None = None,
+                        attempt: str | None = None) -> RunRecord:
+    """Validate the actual scientific record shape without accessing storage."""
+    _record_json(record)
+    required = {'id', 'identity', 'attempt', 'status', 'quality', 'evidence_complete', 'metrics'}
+    if not required.issubset(record):
+        raise AdmissionError('scientific record is missing required metadata')
+    observed = validate_identity(record['identity'], expected=expected_identity)
+    _attempt(record['attempt'], 'scientific attempt')
+    if record['id'] != observed['id'] or attempt is not None and record['attempt'] != attempt:
+        raise SourceMismatch('scientific record belongs to a different Run or attempt')
+    if (record['status'] != 'succeeded' or type(record['evidence_complete']) is not bool
+            or record['quality'] is not None and type(record['quality']) is not bool
+            or not isinstance(record['metrics'], dict)):
+        raise AdmissionError('scientific record has invalid observations')
+    return record
+
+
+def validate_execution_record(record: dict, *, expected_identity: dict | None = None) -> ExecutionRecord:
+    """Validate execution facts; the lifecycle remains their decision maker."""
+    _record_json(record)
+    required = set(ExecutionRecord.__required_keys__)
+    if not required.issubset(record):
+        raise AdmissionError('execution record is missing required metadata')
+    validate_identity(record['identity'], expected=expected_identity)
+    _attempt(record['attempt'], 'execution attempt')
+    _attempt(record['owner_token'], 'execution owner token')
+    if (type(record['schema']) is not int or record['schema'] != 1
+            or not isinstance(record['phase'], str) or record['phase'] not in {'running', 'closing'}
+            or any(type(record[name]) is not bool for name in
+                   ('evidence_complete', 'scientific_result_published', 'cancelled'))
+            or record['quality'] is not None and type(record['quality']) is not bool
+            or not isinstance(record['cleanup_errors'], list)
+            or any(not isinstance(error, dict) for error in record['cleanup_errors'])
+            or record['error'] is not None and not isinstance(record['error'], dict)
+            or not isinstance(record['derived_status'], str)
+            or record['derived_status'] not in {'not_run', 'running', 'succeeded', 'failed', 'cancelled', 'unknown'}):
+        raise AdmissionError('execution record has invalid observations')
+    status = record['candidate_status']
+    if record['phase'] == 'running':
+        if status is not None or record['scientific_result_published'] or record['evidence_complete']:
+            raise AdmissionError('running execution cannot be a closed scientific publication')
+    elif not isinstance(status, str) or status not in {'succeeded', 'failed', 'cancelled', 'unknown'}:
+        raise AdmissionError('closing execution requires a terminal candidate')
+    if status == 'succeeded' and (not record['scientific_result_published'] or record['error']
+                                  or record['cleanup_errors'] or record['cancelled']
+                                  or record['derived_status'] not in {'not_run', 'succeeded'}):
+        raise AdmissionError('successful execution contradicts its saved facts')
+    return record
+
+
 def project_execution(record: dict, result: dict, *, busy: bool, complete: bool = True) -> dict:
-    """Project one fixed attempt; callers decide whether its owner is still held."""
+    """Project one indexed attempt using the same constraints as the writer."""
     status = record.get('candidate_status')
-    valid = (type(record.get('schema')) is int and record['schema'] == 1 and record.get('phase') == 'closing'
-             and isinstance(status, str) and status in {'succeeded', 'failed', 'cancelled', 'unknown'}
-             and isinstance(record.get('evidence_complete'), bool)
-             and (record.get('quality') is None or isinstance(record['quality'], bool))
-             and isinstance(record.get('scientific_result_published'), bool)
-             and isinstance(record.get('cancelled'), bool)
-             and isinstance(record.get('cleanup_errors'), list)
-             and (record.get('error') is None or isinstance(record['error'], dict)))
-    published = record.get('scientific_result_published') is True
-    if published:
-        valid = valid and (result.get('status') == 'succeeded'
-                           and result.get('identity') == record.get('identity')
-                           and result.get('attempt') == record.get('attempt')
-                           and isinstance(result.get('evidence_complete'), bool)
-                           and result.get('quality') == record.get('quality'))
-    elif result:
+    try:
+        validate_execution_record(record)
+        valid = record['phase'] == 'closing'
+        if record['scientific_result_published']:
+            validate_run_record(result, expected_identity=record['identity'], attempt=record['attempt'])
+            valid = valid and result['quality'] == record['quality']
+        elif result:
+            valid = False
+    except (ValueError, TypeError):
         valid = False
-    if status == 'succeeded' and not published:
-        valid = False
-    if status == 'succeeded' and (record.get('error') or record.get('cleanup_errors')
-                                  or record.get('cancelled')
-                                  or record.get('derived_status') not in {'not_run', 'succeeded'}):
-        valid = False
-    return {**result, 'id': record.get('identity', {}).get('id'),
+    observed = record.get('identity')
+    return {**result, 'id': observed.get('id') if isinstance(observed, dict) else None,
             'identity': record.get('identity'), 'attempt': record.get('attempt'),
             'status': status if valid and complete and not busy else 'unknown',
             'quality': record.get('quality') if valid else None,

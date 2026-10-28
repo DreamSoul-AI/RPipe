@@ -15,7 +15,7 @@ def test_real_mnist_public_cli_preserves_sources_and_completes_expected_runs(tmp
         pytest.skip('requires explicitly pre-staged read-only RPIPE_TEST_MNIST_ROOT; no downloads')
     import yaml
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.cli import main
     import torch
     if not torch.cuda.is_available():
@@ -39,7 +39,7 @@ def test_real_mnist_public_cli_preserves_sources_and_completes_expected_runs(tmp
     assert [s.config['algorithm']['mode'] for s in specs] == ['train', 'eval']
     for command in ('make', 'launch', 'process'):
         assert main([command, str(study), '--run-root', str(root)]) == 0
-    results = [read_run(spec) for spec in specs]
+    results = [read_run(spec.ref) for spec in specs]
     assert all(row['status'] == 'succeeded' for row in results)
     assert results[1]['execute']['step'] is not None
     assert all('accuracy' in row['metrics'] for row in results)

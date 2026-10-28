@@ -382,7 +382,7 @@ def mapping() -> dict[str, Any]:
             'scheduler': 'cosine', 'T_max': 60, 'eta_min': 0., 'resume': False}
 
 
-def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[Any, Any, Any, Any, Any], *, cancel_check) -> dict[str, Any]:
+def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[Any, Any, Any, Any, Any], *, cancel_check, checkpoint_dir: Path) -> dict[str, Any]:
     cancel_check()
     bootstrap()
     import torch
@@ -422,8 +422,8 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
     save_json(workspace / 'ENVIRONMENT.json', environment)
 
     class CapturedTrain(TrainAlgorithm):
-        def __init__(self, config: Any):
-            super().__init__(config)
+        def __init__(self, config: Any, *, checkpoint_dir: Path):
+            super().__init__(config, checkpoint_dir=checkpoint_dir)
             self.snapshots: dict[int, Any] = {}
         def on_checkpoint(self, tracker: Any, logger: Any, data: Any, model: Any, system: Any, extra: Any = None):
             super().on_checkpoint(tracker, logger, data, model, system, extra)
@@ -496,11 +496,12 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
             current_init = model_state(model.module)
             current_init_rng = rng(device)
             with observe_native(data, model.module) as obs_new:
-                algorithm = CapturedTrain(AlgorithmConfig.from_mapping(mapping()))
+                algorithm = CapturedTrain(AlgorithmConfig.from_mapping(mapping()), checkpoint_dir=checkpoint_dir)
                 algorithm.observations = obs_new
                 summary = algorithm.compute(data, model, system, tracker, cancel_check=cancel_check)
-            new_best = cpu_tree(system.load_checkpoint('best'))
-            current_best_path = str(system.checkpoint_dir() / 'best.pt')
+            from rpipe.structure.artifact.checkpoint import load_snapshot
+            current_best_path = str(checkpoint_dir / 'best.pt')
+            new_best = cpu_tree(load_snapshot(Path(current_best_path)))
             del model, data, system, tracker
             release_memory(device)
             # Original independent eval reconstructs the model/DataLoader and
@@ -529,7 +530,7 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
                 eval_tracker = AlgorithmTracker(eval_assets)
                 eval_mapping = mapping()
                 eval_mapping.update(mode='eval', resume_from=current_best_path)
-                eval_summary = EvalAlgorithm(AlgorithmConfig.from_mapping(eval_mapping)).compute(eval_data, eval_model, eval_system, eval_tracker, cancel_check=cancel_check)
+                eval_summary = EvalAlgorithm(AlgorithmConfig.from_mapping(eval_mapping), checkpoint_dir=(eval_assets / 'checkpoints').resolve()).compute(eval_data, eval_model, eval_system, eval_tracker, cancel_check=cancel_check)
                 new_eval = eval_tracker.segment_mean('test')
                 raw = {'old_init': old_init, 'old_init_rng': old_init_rng,
                     'current_init': current_init, 'current_init_rng': current_init_rng,

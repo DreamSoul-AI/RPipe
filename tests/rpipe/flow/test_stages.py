@@ -70,7 +70,7 @@ def test_study_hook_configuration_change_cannot_publish_success(
 
 def test_process_hook_failure_preserves_published_scientific_success(source_study, run_root, science_factory, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.run import run
 
     _hook(source_study, 'process', 'def run(ctx):\n    raise ValueError("derived processing failed")\n')
@@ -79,7 +79,7 @@ def test_process_hook_failure_preserves_published_scientific_success(source_stud
     outcome = run(spec)
     stored = spec.result_path.read_bytes()
     assert outcome.status == 'failed' and outcome.error['type'] == 'ValueError'
-    result = read_run(spec)
+    result = read_run(spec.ref)
     assert result['status'] == outcome.status == 'failed'
     assert result['scientific_status'] == 'succeeded'
     assert result['derived_status'] == 'failed'
@@ -195,7 +195,9 @@ def test_prepare_builds_runtime_system_logger_and_research_hook_before_scientifi
         assert isinstance(system, System)
         events.append('model')
         return SimpleNamespace(module=None, close=lambda: None)
-    def build_algorithm(config):
+    def build_algorithm(config, *, checkpoint_dir, train_checkpoint_dir=None):
+        assert checkpoint_dir == ctx.spec.assets_dir / 'checkpoints'
+        assert train_checkpoint_dir is None
         events.append('algorithm')
         return SimpleNamespace(mode=config.mode, close=lambda: None)
     def before(source, phase, ctx, study, *, entry='run'):

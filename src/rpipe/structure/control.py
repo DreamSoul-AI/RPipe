@@ -352,6 +352,60 @@ def _component(value: Any, name: str) -> None:
 
 
 @dataclass(frozen=True)
+class RunRef:
+    """A saved Run identity and location; construction never accesses storage."""
+
+    id: str
+    seed: int
+    experiment: str
+    study_root: Path
+    run_root: Path
+    source_digest: str
+    config_digest: str
+    version: str = 'default'
+    train_id: str | None = None
+
+    def __post_init__(self) -> None:
+        for name in ('id', 'version'):
+            _component(getattr(self, name), name)
+        if self.train_id is not None:
+            _component(self.train_id, 'train_id')
+        if type(self.seed) is not int or self.seed < 0:
+            raise AdmissionError('seed must be a nonnegative integer')
+        if not isinstance(self.experiment, str) or not self.experiment:
+            raise AdmissionError('experiment must be an explicit group identity')
+        for name in ('study_root', 'run_root'):
+            path = Path(getattr(self, name))
+            if not path.is_absolute() or '..' in path.parts:
+                raise AdmissionError(f'{name} must be an explicit absolute path without parent traversal')
+            object.__setattr__(self, name, path)
+        if self.study_root.parent.parent != self.run_root or self.study_root.name != self.version:
+            raise AdmissionError('Study location must belong to its explicit output root and version')
+        for name in ('source_digest', 'config_digest'):
+            value = getattr(self, name)
+            if (not isinstance(value, str) or len(value) != 64
+                    or any(character not in '0123456789abcdef' for character in value)):
+                raise AdmissionError(f'{name} must be a SHA-256 hex digest')
+
+    @property
+    def identity(self) -> dict[str, str]:
+        return {'id': self.id, 'source_digest': self.source_digest,
+                'config_digest': self.config_digest, 'version': self.version}
+
+    @property
+    def run_dir(self) -> Path:
+        return self.study_root / 'runs' / self.id
+
+    @property
+    def result_path(self) -> Path:
+        return self.run_dir / 'result.json'
+
+    @property
+    def assets_dir(self) -> Path:
+        return self.run_dir / 'assets'
+
+
+@dataclass(frozen=True)
 class RunSpec:
     id: str
     seed: int
@@ -406,6 +460,13 @@ class RunSpec:
     @property
     def assets_dir(self) -> Path:
         return self.run_dir / 'assets'
+
+    @property
+    def ref(self) -> RunRef:
+        config = json.dumps(self.to_config(), sort_keys=True, separators=(',', ':'), allow_nan=False)
+        return RunRef(self.id, self.seed, self.experiment, self.study_root, self.run_root,
+                      self.source_digest, hashlib.sha256(config.encode()).hexdigest(),
+                      self.version, self.train_id)
 
     def to_config(self) -> dict[str, Any]:
         return thaw(self.config)

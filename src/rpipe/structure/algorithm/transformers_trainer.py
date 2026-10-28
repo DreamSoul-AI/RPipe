@@ -19,15 +19,15 @@ from rpipe.structure.algorithm.progress import (
     crossed_percents,
     due_period,
     infer_steps_per_epoch,
+    hook_observation,
     resolve_budget,
 )
 from rpipe.structure.algorithm.train import (
     TrainAlgorithm,
     bind_step_train_loader,
-    _build_payload,
-    _current_lr,
-    _hook_extra,
 )
+from rpipe.structure.algorithm.resume import admit_resume, apply_resume, build_training_snapshot, load_resume, partial_resume_warning
+from rpipe.structure.algorithm.optim import current_lr
 
 
 def _require_transformers() -> Any:
@@ -150,7 +150,8 @@ class HfEvalAlgorithm(TrainAlgorithm):
                 cancel_check: CancelCheck) -> ComputationObservation:
         from rpipe.structure.algorithm.evaluation import EvalAlgorithm
 
-        out = EvalAlgorithm(self.config).compute(data, model, system, tracker, cancel_check)
+        out = EvalAlgorithm(self.config, checkpoint_dir=self.checkpoint_dir,
+                            train_checkpoint_dir=self.train_checkpoint_dir).compute(data, model, system, tracker, cancel_check)
         out['source'] = 'transformers_trainer'
         return out
 
@@ -193,7 +194,11 @@ def _run_hf_trainer(
     keep_best = algo.save_best()
     already_percent: set[float] = set()
     resume_extra: dict[str, Any] = {}
-    restored = algo.resume(data, model, system, tracker, resume_extra)
+    restored = load_resume(config, checkpoint_dir=algo.checkpoint_dir,
+                           train_checkpoint_dir=algo.train_checkpoint_dir, observation=resume_extra)
+    admit_resume(restored, model=model, tracker=tracker)
+    if restored:
+        partial_resume_warning(logger)
     optimizer = algo.make_optimizer(module)
     inner_sched = algo.make_scheduler(optimizer, budget.scheduler_t_max())
     spe = budget.steps_per_epoch or infer_steps_per_epoch(data) or 1
@@ -215,6 +220,7 @@ def _run_hf_trainer(
             algo._best_test = restored['best_value']
         elif restored.get('best_accuracy') is not None:
             algo._best_test = restored['best_accuracy']
+    apply_resume(restored, model=model, tracker=tracker)
     epoch = int(restored.get('epoch') or 0) if restored else 0
     steps = int(restored.get('step') or 0) if restored else 0
     bind_step_train_loader(data, config, step=0, budget=budget)
@@ -251,7 +257,7 @@ def _run_hf_trainer(
         extra['progress'] = tracker.progress
         extra['best_accuracy'] = algo._best_test
         extra['checkpoint_names'] = names
-        extra['payload'] = _build_payload(module, optimizer, inner_sched, extra, tracker, logger)
+        extra['payload'] = build_training_snapshot(module, optimizer, inner_sched, extra, tracker)
         algo.on_checkpoint(tracker, logger, data, model, system, extra)
         if ckpt_mode == 'percent':
             for hit in crossed_percents(current, budget.total, percents, already_percent):
@@ -261,7 +267,7 @@ def _run_hf_trainer(
     wrote_last_ckpt = False
     if already_done:
         tracker.begin_run((restored or {}).get('tracker'))
-        extra = _hook_extra(epoch=epoch, lr=_current_lr(optimizer, lr), step=steps)
+        extra = hook_observation(epoch=epoch, lr=current_lr(optimizer, lr), step=steps)
         extra['best_accuracy'] = algo._best_test
         fire_eval(extra)
         return _summary(algo, data, tracker, budget, steps, epoch)
@@ -313,7 +319,7 @@ def _run_hf_trainer(
             update_progress(state)
             if budget.unit == UNIT_EPOCH:
                 return control
-            extra = _hook_extra(epoch=epoch, lr=_current_lr(optimizer, lr), step=steps)
+            extra = hook_observation(epoch=epoch, lr=current_lr(optimizer, lr), step=steps)
             progress = {'step': steps, 'epoch': epoch_origin + float(state.epoch or 0)}
             improved = False
             if due_period(eval_period, steps):
@@ -334,7 +340,7 @@ def _run_hf_trainer(
             nonlocal epoch, steps, wrote_last_ckpt
             cancel_check()
             update_progress(state)
-            extra = _hook_extra(epoch=epoch, lr=_current_lr(optimizer, lr), step=steps)
+            extra = hook_observation(epoch=epoch, lr=current_lr(optimizer, lr), step=steps)
             if tracker.has_samples('train'):
                 if logger is not None:
                     logger.report(tracker, 'train', extra=extra)
@@ -361,7 +367,7 @@ def _run_hf_trainer(
             nonlocal epoch, steps
             cancel_check()
             update_progress(state)
-            extra = _hook_extra(epoch=epoch, lr=_current_lr(optimizer, lr), step=steps)
+            extra = hook_observation(epoch=epoch, lr=current_lr(optimizer, lr), step=steps)
             extra['best_accuracy'] = algo._best_test
             if eval_period <= 0:
                 fire_eval(extra)
@@ -370,7 +376,7 @@ def _run_hf_trainer(
             tracker.flush_state()
             return control
 
-    output_dir = str(system.checkpoint_dir() / 'hf')
+    output_dir = str(algo.checkpoint_dir / 'hf')
     args = build_training_arguments(config, output_dir=output_dir, data=data, seed=seed)
     # Trainer starts a new session; checkpoint coordinates and the budget stay cumulative.
     args.max_steps = budget.num_steps - step_origin

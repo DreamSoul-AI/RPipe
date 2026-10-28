@@ -18,6 +18,28 @@ pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.result_type('categorical', detail='summary')]
 
 
+def test_checkpoint_summary_reads_committed_safe_snapshot_without_rewriting(tmp_path):
+    from rpipe.structure.artifact.checkpoint import save_snapshot
+    source = Path(__file__).resolve().parents[5] / 'studies/main_exp/flow/process/curves.py'
+    spec = importlib.util.spec_from_file_location('_study_checkpoint_summary', source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    root = tmp_path / 'run'
+    path = root / 'assets/checkpoints/latest.pt'
+    payload = {'step': 80000, 'best_metric': 'Accuracy', 'best_value': 80.,
+               'best_accuracy': 80., 'test_accuracy': 79.,
+               'tracker': {'step': 1200, 'progress': {'step': 80000},
+                           'splits': {'test': {'Accuracy': {'history': [78., 79.]}}}}}
+    save_snapshot(path, payload)
+    before = path.read_bytes()
+    result = module.checkpoint_summary(root, 'latest')
+    assert result == {'path': str(path), 'step': 80000, 'best_metric': 'Accuracy',
+                      'best_value': 80., 'best_accuracy': 80., 'test_accuracy': 79.,
+                      'tracker_step': 1200, 'tracker_progress': {'step': 80000},
+                      'test_history': [78., 79.]}
+    assert path.read_bytes() == before
+
+
 @pytest.fixture
 def study_plot_case(tmp_path, old):
     import matplotlib.pyplot as plt
@@ -219,7 +241,7 @@ def test_study_plot_stream_close_io_keeps_primary_and_success_close_stays_strict
 @pytest.fixture
 def curve_audit_case(tmp_path, monkeypatch):
     """Synthetic 400-point evidence; checkpoint reading never imports Torch."""
-    import rpipe.api
+    from rpipe.structure.artifact import provenance
 
     source = Path(__file__).resolve().parents[5] / 'studies/main_exp/flow/process/curves.py'
     spec = importlib.util.spec_from_file_location('study_curve_audit_under_test', source)
@@ -228,7 +250,7 @@ def curve_audit_case(tmp_path, monkeypatch):
     monkeypatch.setattr(module, 'DATA_NAMES', ('MNIST',))
     monkeypatch.setattr(module, 'MODEL_NAMES', ('linear',))
     monkeypatch.setattr(module, 'SEEDS', (0,))
-    monkeypatch.setattr(rpipe.api, 'source_digest', lambda path: 'current-source')
+    monkeypatch.setattr(provenance, 'source_digest', lambda path: 'c' * 64)
     study = tmp_path / 'research-version'
     roots = {mode: study / 'runs' / mode for mode in ('train', 'eval')}
     best_path = roots['train'] / 'assets' / 'checkpoints' / 'best.pt'
@@ -252,9 +274,10 @@ def curve_audit_case(tmp_path, monkeypatch):
         (root / 'assets' / 'logs').mkdir()
         entries[mode] = {'id': mode, 'seed': 0, 'run_dir': mode}
         results[mode] = {
+            'id': mode,
             'status': 'succeeded', 'attempt': ('a' if mode == 'train' else 'b') * 32,
             'quality': None, 'evidence_complete': True,
-            'identity': {'id': mode, 'source_digest': 'current-source', 'version': study.name},
+            'identity': {'id': mode, 'source_digest': 'c' * 64, 'config_digest': 'd' * 64, 'version': study.name},
             'metrics': {'accuracy': 80.0, 'best_accuracy': 80.0, 'eval_accuracy': 80.0},
             'execute': {'mode': mode, 'resume_count': 0 if mode == 'train' else 1,
                         'resume_path': None if mode == 'train' else str(best_path),
@@ -281,7 +304,7 @@ def _save_curve_result(case, mode):
     result, root = case.results[mode], case.roots[mode]
     (root / 'result.json').write_text(json.dumps(result), encoding='utf-8')
     record = {'schema': 1, 'identity': result['identity'], 'attempt': result['attempt'],
-              'owner_token': 'fixture-owner', 'phase': 'closing', 'candidate_status': 'succeeded',
+              'owner_token': 'e' * 32, 'phase': 'closing', 'candidate_status': 'succeeded',
               'quality': None, 'evidence_complete': True, 'scientific_result_published': True,
               'derived_status': 'succeeded', 'error': None, 'cleanup_errors': [], 'cancelled': False}
     outcome = root / 'attempts' / record['attempt'] / 'outcome.json'
@@ -318,7 +341,7 @@ def _write_curve_legacy_logs(case):
 
 def _inspect_curve(case, mode):
     return case.module.inspect_run(case.study, case.entries[mode], 'MNIST', 'linear', mode, 0,
-                                   expected_source='current-source')
+                                   expected_source='c' * 64)
 
 
 @pytest.mark.parametrize('filename', ['events.jsonl', 'events.1.jsonl'])

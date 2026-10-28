@@ -50,13 +50,14 @@ def test_svhn_mat_train_checkpoint_eval(tmp_path, monkeypatch, request):
     request.addfinalizer(data.close)
     train = algorithm_api(AlgorithmConfig(
         mode='train', config={'num_steps': 1, 'eval_period': 1, 'save_best': True},
-    ))
+    ), checkpoint_dir=tmp_path / 'checkpoints')
     result = train.compute(data, model, system, make_tracker(tmp_path / 'train'), cancel_check=lambda: None)
     assert result['steps'] == 1
     assert 'stub' not in result
-    assert system.load_checkpoint('best')['step'] == 1
+    from rpipe.structure.artifact.checkpoint import load_snapshot
+    assert load_snapshot(tmp_path / 'checkpoints/best.pt')['step'] == 1
     independent_model = model_api(ModelConfig(name='linear'), tmp_path, data_meta=data.meta, system=system)
-    evaluate = algorithm_api(AlgorithmConfig(mode='eval'))
+    evaluate = algorithm_api(AlgorithmConfig(mode='eval'), checkpoint_dir=tmp_path / 'eval-checkpoints', train_checkpoint_dir=tmp_path / 'checkpoints')
     evaluated = evaluate.compute(data, independent_model, system, make_tracker(tmp_path / 'eval'), cancel_check=lambda: None)
     assert evaluated['accuracy'] == pytest.approx(result['accuracy'])
     assert evaluated['step'] == 1

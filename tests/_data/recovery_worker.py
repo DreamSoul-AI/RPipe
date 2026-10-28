@@ -57,17 +57,19 @@ if int(stop):
     settings.update(best_split='train', best_metric='Loss', best_mode='min', early_stop_min_delta=100.0)
 system = build_system(SystemConfig.from_mapping({'device': device}), root)
 model.module = system.place_module(model.module)
-save = system.save_checkpoint
+from rpipe.structure.artifact import checkpoint
+save = checkpoint.save_snapshot
 
 
-def interrupt(payload, name):
-    result = save(payload, name)
+def interrupt(path, payload):
+    result = save(path, payload)
+    name = Path(path).stem
     if action.startswith('interrupt') and name == 'latest' and payload['step'] == (int(interrupt_step) if unit == 'step' else len(loader) // int(period)):
         raise RuntimeError('fixture interruption after committed checkpoint')
     return result
 
 
-system.save_checkpoint = interrupt
+checkpoint.save_snapshot = interrupt
 
 
 class CustomMetrics(MetricBundle):
@@ -76,7 +78,7 @@ class CustomMetrics(MetricBundle):
 
 try:
     tracker = AlgorithmTracker(root, CustomMetrics() if action.endswith('-custom-metrics') else None)
-    result = TrainAlgorithm(AlgorithmConfig.from_mapping(settings)).compute(data, model, system, tracker, cancel_check=lambda: None)
+    result = TrainAlgorithm(AlgorithmConfig.from_mapping(settings), checkpoint_dir=root / 'checkpoints').compute(data, model, system, tracker, cancel_check=lambda: None)
 except RuntimeError as exc:
     if str(exc) != 'fixture interruption after committed checkpoint' or not action.startswith('interrupt'):
         raise

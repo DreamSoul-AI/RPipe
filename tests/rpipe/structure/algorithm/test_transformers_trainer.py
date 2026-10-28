@@ -1,5 +1,7 @@
 import pytest
 
+from rpipe.structure.artifact import checkpoint
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.external,
@@ -87,7 +89,7 @@ def test_hf_trainer_records_actual_progress(tmp_path, budget):
                 'lr': 0.1,
                 'scheduler': 'cosine',
             }
-        )
+        ), checkpoint_dir=tmp_path / 'checkpoints'
     )
     system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
     data, model = _Data(), _Model()
@@ -109,10 +111,10 @@ def test_hf_trainer_records_actual_progress(tmp_path, budget):
         second = HfTrainAlgorithm(AlgorithmConfig.from_mapping({
             'mode': 'train', 'source': 'transformers_trainer', 'num_epochs': 2,
             'progress_unit': 'epoch', 'eval_period': 1, 'optimizer': 'SGD', 'lr': 0.1,
-        }))
+        }), checkpoint_dir=tmp_path / 'checkpoints')
         second.compute(data, model, system, AlgorithmTracker(tmp_path), cancel_check=lambda: None)
-        checkpoint = system.load_checkpoint('latest')
-        assert checkpoint['tracker']['progress']['step'] == len(updates)
+        snapshot = checkpoint.load_snapshot(tmp_path / 'checkpoints/latest.pt')
+        assert snapshot['tracker']['progress']['step'] == len(updates)
         rows = [json.loads(line) for line in (tmp_path / 'tracker' / 'scalars.jsonl').read_text(encoding='utf-8').splitlines()]
         assert rows[-1]['optimizer_step'] == len(updates)
 
@@ -120,7 +122,7 @@ def test_hf_trainer_records_actual_progress(tmp_path, budget):
 @pytest.mark.parametrize('unit,eval_period,interrupt_step', [
     ('step', 1, 2), ('step', 0, 1), ('step', 3, 1), ('epoch', 1, 2),
 ])
-def test_hf_resume_only_runs_remaining_updates_and_keeps_total_coordinates(tmp_path, unit, eval_period, interrupt_step):
+def test_hf_resume_only_runs_remaining_updates_and_keeps_total_coordinates(tmp_path, monkeypatch, unit, eval_period, interrupt_step):
     pytest.importorskip('transformers')
     pytest.importorskip('accelerate')
     import json
@@ -163,10 +165,11 @@ def test_hf_resume_only_runs_remaining_updates_and_keeps_total_coordinates(tmp_p
     updates = []
     module.weight.register_hook(lambda gradient: updates.append(1))
     system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
-    original = system.save_checkpoint
+    original = checkpoint.save_snapshot
 
-    def interrupt(payload, name):
-        path = original(payload, name)
+    def interrupt(path, payload):
+        name = path.stem
+        path = original(path, payload)
         if name == 'latest' and payload['step'] == interrupt_step:
             assert payload['tracker']['progress'] == {'step': interrupt_step, 'epoch': interrupt_step / 2}
             raise RuntimeError('owned checkpoint interruption')
@@ -176,17 +179,17 @@ def test_hf_resume_only_runs_remaining_updates_and_keeps_total_coordinates(tmp_p
         return AlgorithmTracker(tmp_path, MetricBundle({'train': ['Loss'], 'test': ['Loss']}))
 
     try:
-        system.save_checkpoint = interrupt
+        monkeypatch.setattr(checkpoint, 'save_snapshot', interrupt)
         with pytest.raises(RuntimeError, match='owned checkpoint interruption'):
-            HfTrainAlgorithm(config).compute(Data(), SimpleNamespace(module=module), system, tracker(), cancel_check=lambda: None)
+            HfTrainAlgorithm(config, checkpoint_dir=tmp_path / 'checkpoints').compute(Data(), SimpleNamespace(module=module), system, tracker(), cancel_check=lambda: None)
         assert len(updates) == interrupt_step
-        system.save_checkpoint = original
+        monkeypatch.setattr(checkpoint, 'save_snapshot', original)
         with pytest.warns(RuntimeWarning, match='resume is partial'):
-            result = HfTrainAlgorithm(config).compute(Data(), SimpleNamespace(module=module), system, tracker(), cancel_check=lambda: None)
+            result = HfTrainAlgorithm(config, checkpoint_dir=tmp_path / 'checkpoints').compute(Data(), SimpleNamespace(module=module), system, tracker(), cancel_check=lambda: None)
         assert len(updates) == result['steps'] == 4
         assert result['epochs'] == 2
         assert 'accuracy' not in result and 'best_accuracy' not in result
-        latest = system.load_checkpoint('latest')
+        latest = checkpoint.load_snapshot(tmp_path / 'checkpoints/latest.pt')
         assert latest['step'] == latest['tracker']['progress']['step'] == 4
         rows = [json.loads(line) for line in (tmp_path / 'tracker/scalars.jsonl').read_text(encoding='utf-8').splitlines()]
         rows = [row for row in rows if 'mean' in row]

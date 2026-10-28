@@ -36,7 +36,7 @@ class PureImports(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, PureImports())
 from rpipe.flow.context import Budget, Cancellation, RunContext, ScienceContext, StudyProcessContext
 from rpipe.structure.artifact.io import project_execution
-from rpipe.structure.readout import read_run
+from rpipe.structure.artifact.readout import read_run
 assert Budget().timeout_seconds is None
 assert not Cancellation().is_set()
 """

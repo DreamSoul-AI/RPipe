@@ -39,7 +39,7 @@ def registration(monkeypatch):
 def test_probe_cancellation_cleanup_reaches_execution_outcome(
         registration, monkeypatch, tmp_path, cleanup_failed, science_factory, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.structure.algorithm.factory import AlgorithmRegistry
     from rpipe.structure.control import AlgorithmConfig
     from rpipe.flow.context import Cancelled
@@ -64,7 +64,8 @@ def test_probe_cancellation_cleanup_reaches_execution_outcome(
                                                    config={'system': {'device': 'cpu'}}),
                                   ('MNIST', 'linear'))
             factory = AlgorithmRegistry.get('train', 'main_probe')
-            ctx.state['algorithm'] = factory(AlgorithmConfig.from_mapping({'mode': 'train'}))
+            ctx.state['algorithm'] = factory(AlgorithmConfig.from_mapping({'mode': 'train'}),
+                                             checkpoint_dir=ctx.layout.assets_dir / 'checkpoints')
 
         def execute(self, ctx):
             ctx.state['algorithm'].compute(None, None, None, None, cancel_check=lambda: None)
@@ -80,7 +81,7 @@ def test_probe_cancellation_cleanup_reaches_execution_outcome(
     outcome = run(spec)
     record = json.loads((spec.run_dir / 'execution.json').read_text(encoding='utf-8'))
     status = 'failed' if cleanup_failed else 'cancelled'
-    assert outcome.status == read_run(spec)['status'] == record['candidate_status'] == status
+    assert outcome.status == read_run(spec.ref)['status'] == record['candidate_status'] == status
     assert outcome.error['type'] == 'Cancelled'
     assert bool(outcome.cleanup_errors) is cleanup_failed
     if cleanup_failed:

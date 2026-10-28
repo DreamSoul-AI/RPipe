@@ -6,7 +6,7 @@ from pathlib import Path
 from rpipe.structure.api import CancelCheck, ComputationObservation, DataPort, ModelPort, SystemPort, TrackerPort
 from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.optim import make_optimizer as _make_optimizer, make_scheduler as _make_scheduler
-from rpipe.structure.algorithm.resume import (apply_module_state, resolve_checkpoint_ref, resume_stem, sibling_train_checkpoint, partial_resume_warning)
+from rpipe.structure.algorithm.resume import checkpoint_directory
 
 from rpipe.structure.algorithm.progress import (
     CHECKPOINT_LATEST,
@@ -73,15 +73,19 @@ class AlgorithmHook:
         system: Any,
         extra: dict[str, Any] | None = None,
     ) -> None:
-        """Write weights via ``system.save_checkpoint``. Not a Flow phase."""
+        """Publish algorithm-owned state. Not a Flow phase."""
         del tracker, logger, data, model, system, extra
 
 class Algorithm(AlgorithmHook):
     """Computation for one mode. Optimizer / scheduler / resume live here."""
 
-    def __init__(self, config: AlgorithmConfig) -> None:
+    def __init__(self, config: AlgorithmConfig, *, checkpoint_dir: Path,
+                 train_checkpoint_dir: Path | None = None) -> None:
         self.config = config
         self.mode = 'train' if config.mode is None else config.mode
+        self.checkpoint_dir = checkpoint_directory(checkpoint_dir)
+        self.train_checkpoint_dir = (checkpoint_directory(train_checkpoint_dir)
+                                     if train_checkpoint_dir is not None else None)
 
     def make_optimizer(self, module: Any) -> Any:
         return _make_optimizer(module, self.config)
@@ -89,54 +93,6 @@ class Algorithm(AlgorithmHook):
     def make_scheduler(self, optimizer: Any, t_max: int) -> Any:
         return _make_scheduler(optimizer, self.config, t_max)
 
-    def resume(
-        self,
-        data: Any,
-        model: Any,
-        system: Any,
-        tracker: TrackerPort,
-        extra: dict[str, Any] | None = None,
-    ) -> dict[str, Any] | None:
-        extra = extra if extra is not None else {}
-        extra.setdefault('resume_count', 0)
-        del data
-        stem = resume_stem(self.config, mode=self.mode)
-        extra['resume_stem'] = stem
-        if stem is None:
-            return None
-        target = resolve_checkpoint_ref(stem, system, mode=self.mode)
-        extra['resume_path'] = target
-        loader = getattr(system, 'load_checkpoint', None)
-        payload = loader(target) if callable(loader) else None
-        logger = getattr(system, 'logger', None)
-        if payload is None and self.mode == 'eval':
-            fallback = sibling_train_checkpoint(system, stem=Path(str(target)).stem)
-            if fallback is not None and callable(loader):
-                payload = loader(str(fallback))
-                extra['resume_path'] = str(fallback)
-        if payload is None:
-            if self.mode == 'eval':
-                raise FileNotFoundError(f'eval resume missing checkpoint {stem!r}')
-            extra['resume_skipped'] = stem
-            return None
-        apply_module_state(getattr(model, 'module', None), payload)
-        extra['resume_count'] += 1
-        extra['resume_payload'] = payload
-        if self.mode == 'train':
-            if payload.get('training_state') is None or self.config.source == 'transformers_trainer':
-                partial_resume_warning(logger)
-            tracker_state = payload.get('tracker')
-            if tracker_state:
-                tracker.load_state_dict(tracker_state)
-            logger_state = payload.get('logger')
-            if logger is not None and logger_state is not None and hasattr(logger, 'load_state_dict'):
-                logger.load_state_dict(logger_state)
-        if logger is not None:
-            logger.info(
-                f"target={target} epoch={payload.get('epoch')} step={payload.get('step')}",
-                event='resume',
-            )
-        return payload
 
     def compute(self, data: DataPort, model: ModelPort, system: SystemPort, tracker: TrackerPort,
                 cancel_check: CancelCheck) -> ComputationObservation:
@@ -177,10 +133,11 @@ class AlgorithmRegistry:
     def list(cls) -> list[tuple[str, str]]:
         return sorted(set(cls._store()) | {('train', 'transformers_trainer'), ('eval', 'transformers_trainer')})
 
-def build_algorithm(algorithm_config: AlgorithmConfig) -> Algorithm:
+def build_algorithm(algorithm_config: AlgorithmConfig, *, checkpoint_dir: Path,
+                    train_checkpoint_dir: Path | None = None) -> Algorithm:
     mode = 'train' if algorithm_config.mode is None else algorithm_config.mode
     source = 'custom_torch' if algorithm_config.source is None else algorithm_config.source
     impl = AlgorithmRegistry.get(mode, source)
     if impl is None:
         raise ValueError(f'unknown algorithm mode/source: {mode}/{source}')
-    return impl(algorithm_config)
+    return impl(algorithm_config, checkpoint_dir=checkpoint_dir, train_checkpoint_dir=train_checkpoint_dir)

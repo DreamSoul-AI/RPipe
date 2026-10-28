@@ -312,9 +312,3 @@ class Logger:
                 self._send(self._record('WARNING', 'logging.sink_failed', 'Log retention cleanup unavailable',
                                         {'sink': 'file', 'operation': 'retention_cleanup',
                                          'drop_reason': 'cleanup_unconfirmed'}), {'stdout'})
-
-    def state_dict(self) -> dict[str, Any]:
-        return {'path': str(self.path)}
-
-    def load_state_dict(self, state: dict[str, Any] | None) -> None:
-        del state

@@ -387,30 +387,6 @@ def test_recipe_nonlocal_imports_keep_current_python_import_hook(tmp_path, monke
     assert caught.value is refusal
 
 
-def test_missing_study_checkpoint_class_does_not_use_foreign_cache(tmp_path, monkeypatch):
-    import importlib.util
-    import pickle
-    from rpipe.flow.study import load_recipe, _recipe_pickle_module
-
-    helper = '_recipe_isolation_' + uuid4().hex
-    study = tmp_path / 'strict-class'
-    _recipe(study, helper, 'current', False, False)
-    (study / f'{helper}.py').write_text('class CurrentState:\n    pass\n', encoding='utf-8')
-    (study / 'recipe.py').write_text(
-        f'from {helper} import CurrentState\ndef register(ctx):\n    pass\n', encoding='utf-8')
-    foreign_file = tmp_path / 'foreign.py'
-    foreign_file.write_text('class RemovedState:\n    pass\n', encoding='utf-8')
-    spec = importlib.util.spec_from_file_location(helper, foreign_file)
-    foreign = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, helper, foreign)
-    spec.loader.exec_module(foreign)
-    blob = pickle.dumps(foreign.RemovedState())
-    load_recipe(study, {'recipe': 'recipe.py'})
-    reader = _recipe_pickle_module(study)
-    import io
-    with pytest.raises(AttributeError):
-        reader.Unpickler(io.BytesIO(blob)).load()
-    assert sys.modules[helper] is foreign
 
 
 @pytest.mark.parametrize('from_import', [False, True], ids=['importlib-module', 'import-module-function'])

@@ -35,7 +35,7 @@ def _declare(source, inputs, *, data=None, model=None, stats=None):
 def test_declared_pin_drift_is_rejected_without_resigning_saved_success(
         source_study, run_root, tmp_path, science_factory, file_bytes, kind, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.run import run
     from rpipe.structure.artifact.provenance import validate_source
     from rpipe.structure.control import SourceMismatch
@@ -54,8 +54,10 @@ def test_declared_pin_drift_is_rejected_without_resigning_saved_success(
     item.write_bytes(b'modified')
     with pytest.raises(SourceMismatch):
         validate_source(spec)
-    with pytest.raises(SourceMismatch):
-        read_run(spec)
+    saved = read_run(spec.ref)
+    assert saved['status'] == 'succeeded' and saved['identity'] == spec.ref.identity
+    rejected = run(spec)
+    assert rejected.status == 'rejected' and rejected.error['type'] == 'SourceMismatch'
     with pytest.raises(SourceMismatch):
         plan(source_study, run_root=run_root)
     assert file_bytes(run_root) == stored
@@ -148,7 +150,7 @@ def test_environment_snapshot_is_actual_and_does_not_import_scientific_modules(m
 def test_execution_records_input_and_environment_as_observations(
         source_study, run_root, tmp_path, science_factory, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.run import run
     from rpipe.structure.artifact.io import read_json
 
@@ -158,7 +160,7 @@ def test_execution_records_input_and_environment_as_observations(
     spec = plan(source_study, run_root=run_root)[0]
     science_worker(science_factory())
     outcome = run(spec)
-    row = read_run(spec)
+    row = read_run(spec.ref)
     record = read_json(spec.run_dir / 'execution.json')
     assert outcome.status == 'succeeded' and outcome.quality is None
     assert record['input_provenance'] == row['input_provenance'] == outcome.result['input_provenance']
@@ -190,7 +192,7 @@ def test_planning_rejects_input_overlap_before_writing_any_output(
 
 def test_pinned_shared_input_sibling_is_allowed(source_study, run_root, science_factory, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.run import run
 
     shared = run_root / 'shared' / 'data'
@@ -201,7 +203,7 @@ def test_pinned_shared_input_sibling_is_allowed(source_study, run_root, science_
     spec = plan(source_study, run_root=run_root)[0]
     science_worker(science_factory())
     assert run(spec).status == 'succeeded'
-    assert read_run(spec)['input_provenance']['references']['data.path']['status'] == 'verified'
+    assert read_run(spec.ref)['input_provenance']['references']['data.path']['status'] == 'verified'
     assert item.read_bytes() == b'fixed shared input'
 
 
@@ -267,7 +269,7 @@ def test_explicit_vision_statistics_override_implicit_profile(source_study, run_
 def test_published_provenance_uses_observed_statistics_source_after_prepare(
         source_study, run_root, tmp_path, science_factory, actual_source, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.run import run
 
     raw = tmp_path / 'input'
@@ -296,7 +298,7 @@ def test_published_provenance_uses_observed_statistics_source_after_prepare(
     science_worker(ObservedStats())
     outcome = run(spec)
     assert outcome.status == 'succeeded'
-    row = read_run(spec)['input_provenance']
+    row = read_run(spec.ref)['input_provenance']
     assert row['references']['data.implicit_stats_path']['status'] == (
         'builtin_fallback' if actual_source == 'builtin_fallback' else 'unverified')
     assert row['complete'] is (actual_source == 'builtin_fallback')
@@ -325,7 +327,7 @@ def test_builtin_statistics_do_not_verify_unpinned_default_data_cache(
 def test_actual_statistics_reference_survives_default_profile_removal(
         source_study, run_root, tmp_path, science_factory, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.run import run
 
     raw = tmp_path / 'input'
@@ -347,7 +349,7 @@ def test_actual_statistics_reference_survives_default_profile_removal(
                 'stats_source': 'study_profile', 'stats_reference': str(actual.resolve())}}}
     science_worker(ObservedReference())
     assert run(spec).status == 'succeeded'
-    observed = read_run(spec)['input_provenance']['references']['data.implicit_stats_path']
+    observed = read_run(spec.ref)['input_provenance']['references']['data.implicit_stats_path']
     assert observed['resolved_path'] == str(actual.resolve())
     assert observed['status'] == 'unverified'
 

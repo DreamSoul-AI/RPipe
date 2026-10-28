@@ -86,15 +86,13 @@ def read_tracker(root):
 
 
 def checkpoint_summary(root, stem):
-    """Read committed bundle; the split JSON mirror is not authoritative."""
-    import torch
+    """Read the explicitly selected committed snapshot."""
+    from rpipe.structure.artifact.checkpoint import load_snapshot
 
     path = root / 'assets' / 'checkpoints' / f'{stem}.pt'
     if not path.is_file():
         return None
-    body = torch.load(path, map_location='cpu', weights_only=False)
-    if not isinstance(body, dict):
-        raise ValueError(f'{path}: expected checkpoint object')
+    body = load_snapshot(path)
     tracker = body.get('tracker') or {}
     return {
         'path': str(path), 'step': body.get('step'),

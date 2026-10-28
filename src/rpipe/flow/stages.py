@@ -9,7 +9,7 @@ from rpipe.structure.control import (AdmissionError, SourceMismatch, AlgorithmCo
                                     ModelConfig, SystemConfig, resolve_control, validate_control)
 from rpipe.structure.artifact import io, provenance
 from .context import Cancelled, validate_draft
-from .study import RecipeContext, apply_recipe, _recipe_pickle_module, run_study_phase
+from .study import RecipeContext, apply_recipe, run_study_phase
 
 _registry_lock = RLock()
 
@@ -74,13 +74,6 @@ def prepare(ctx):
                           logging_context=ctx.state['logging_context'])
     ctx.register_resource(system)
     system.meta.update(ctx.state['runtime'])
-    system.study_root = Path(ctx.layout.study_root)
-    system.source_dir = Path(ctx.study_dir)
-    system.run_id = str(ctx.spec.id)
-    train_id = getattr(ctx.spec, 'train_id', None)
-    system.train_run_dir = system.study_root / 'runs' / train_id if train_id else None
-    system.checkpoint_pickle_module = lambda: _recipe_pickle_module(ctx.study_dir)
-    system.logger.run_id = system.run_id
     ctx.state.update(system=system, logger=system.logger, seed=ctx.control.seed)
     _phase(ctx, 'prepare')
     _cancel(ctx)
@@ -120,7 +113,12 @@ def prepare(ctx):
                                data_meta=data.meta, system=system, origin=origin)
     ctx.state['model'] = ctx.register_resource(model)
     algorithm_config = AlgorithmConfig.from_mapping(ctx.control.algorithm)
-    ctx.state['algorithm'] = ctx.register_resource(build_algorithm(algorithm_config))
+    train_id = ctx.spec.train_id
+    train_checkpoints = (ctx.spec.study_root / 'runs' / train_id / 'assets' / 'checkpoints'
+                         if train_id else None)
+    ctx.state['algorithm'] = ctx.register_resource(build_algorithm(
+        algorithm_config, checkpoint_dir=ctx.layout.assets_dir / 'checkpoints',
+        train_checkpoint_dir=train_checkpoints))
     ctx.state['tracker'] = ctx.register_resource(make_tracker(ctx.layout.assets_dir, algorithm_config))
     ctx.state.setdefault('observations', [])
     system.logger.info(f'prepared control={ctx.control.id}')
@@ -256,11 +254,16 @@ def write(ctx, record, draft=None):
                   'identity': io.identity(ctx.spec), 'attempt': ctx.state['attempt'],
                   'input_provenance': record['input_provenance'],
                   'environment': ctx.state.get('worker_environment', record.get('environment'))}
+        io.validate_run_record(result, expected_identity=io.identity(ctx.spec), attempt=ctx.state['attempt'])
+        prospective = {**record, 'scientific_result_published': True,
+                       'quality': result['quality'], 'evidence_complete': result['evidence_complete']}
+        io.validate_execution_record(prospective, expected_identity=io.identity(ctx.spec))
         ctx.owner.verify()
         io.write_json(ctx.spec.result_path, result)
         ctx.state['published_result'] = result
         record.update(scientific_result_published=True, quality=result['quality'],
                       evidence_complete=result['evidence_complete'], scientific_result='result.json')
+    io.validate_execution_record(record, expected_identity=io.identity(ctx.spec))
     ctx.owner.verify()
     if record['phase'] == 'closing':
         io.write_json(ctx.spec.run_dir / 'attempts' / ctx.state['attempt'] / 'outcome.json', record)

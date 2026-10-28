@@ -25,7 +25,8 @@ def test_process_rejects_summary_link_before_writing_source_or_input(
     config['data']['path'] = str(inputs)
     write_config(source_study / 'experiment_config.yaml', config)
     spec = planning.plan(source_study, run_root=run_root)[0]
-    spec.study_root.mkdir(parents=True)
+    planning.publish([spec])
+    spec.study_root.mkdir(parents=True, exist_ok=True)
     target = source_study if target_kind == 'source' else inputs
     (spec.study_root / 'summary').symlink_to(target, target_is_directory=True)
     peer = tmp_path / 'peer'
@@ -49,6 +50,8 @@ def test_process_rechecks_source_before_output_or_hook(
     from rpipe.structure.control import SourceMismatch
 
     spec = planning.plan(source_study, run_root=run_root)[0]
+    planning.publish([spec])
+    stored = file_bytes(run_root)
     with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
         stream.write('# changed after planning\n')
     before = file_bytes(source_study)
@@ -57,7 +60,8 @@ def test_process_rechecks_source_before_output_or_hook(
     with pytest.raises(SourceMismatch):
         process_study([spec])
     assert file_bytes(source_study) == before
-    assert not run_root.exists()
+    assert file_bytes(run_root) == stored
+    assert not (spec.study_root / 'summary').exists()
     assert not hooks
 
 
@@ -92,6 +96,7 @@ def test_source_drift_during_aggregation_preserves_existing_summary_and_peer_byt
     from rpipe.structure.control import SourceMismatch
 
     spec = planning.plan(source_study, run_root=run_root)[0]
+    planning.publish([spec])
     summary = spec.study_root / 'summary' / 'process.json'
     summary.parent.mkdir(parents=True)
     summary.write_bytes(b'previous verified summary')
@@ -99,8 +104,8 @@ def test_source_drift_during_aggregation_preserves_existing_summary_and_peer_byt
     before = file_bytes(run_root)
     module = importlib.import_module('rpipe.flow.process')
     aggregate, hooks = module.aggregate, []
-    def drift(specs):
-        result = aggregate(specs)
+    def drift(refs):
+        result = aggregate(refs)
         declaration = source_study / 'study.yaml'
         declaration.write_text(declaration.read_text(encoding='utf-8') + '# changed during aggregate\n',
                                encoding='utf-8')
@@ -111,3 +116,68 @@ def test_source_drift_during_aggregation_preserves_existing_summary_and_peer_byt
         process_study([spec])
     assert file_bytes(run_root) == before
     assert hooks == []
+
+
+@pytest.mark.parametrize('target', ['index', 'result', 'outcome', 'owner'])
+def test_saved_input_drift_during_aggregation_rejects_without_replacing_summary(
+        source_study, run_root, file_bytes, science_factory, science_worker, monkeypatch, target):
+    from rpipe.flow.run import run
+    from rpipe.structure.control import SourceMismatch
+
+    specs = planning.plan(source_study, run_root=run_root)
+    planning.publish(specs)
+    science_worker(science_factory())
+    assert run(specs[0]).status == 'succeeded'
+    summary = specs[0].study_root / 'summary/process.json'
+    summary.parent.mkdir(parents=True, exist_ok=True)
+    summary.write_bytes(b'previous derived summary')
+    peer = summary.parent / 'peer.json'
+    peer.write_bytes(b'peer unchanged')
+    from rpipe.structure.artifact.io import read_json
+    attempt = read_json(specs[0].run_dir / 'execution.json')['attempt']
+    selected = {'index': specs[0].study_root / 'index.json', 'result': specs[0].result_path,
+                'outcome': specs[0].run_dir / 'attempts' / attempt / 'outcome.json',
+                'owner': specs[0].run_dir / '.execution'}[target]
+    before = file_bytes(run_root)
+    module = importlib.import_module('rpipe.flow.process')
+    aggregate, hooks = module.aggregate, []
+    def drift(refs):
+        result = aggregate(refs)
+        if target == 'owner':
+            selected.mkdir()
+        else:
+            selected.write_bytes(selected.read_bytes() + b'\n')
+        return result
+    monkeypatch.setattr(module, 'aggregate', drift)
+    monkeypatch.setattr(module, 'run_study_phase', lambda *args, **kwargs: hooks.append(args))
+    with pytest.raises(SourceMismatch):
+        process_study(specs)
+    assert summary.read_bytes() == b'previous derived summary'
+    assert peer.read_bytes() == b'peer unchanged' and not hooks
+    after = file_bytes(run_root)
+    relative = selected.relative_to(run_root).as_posix()
+    assert {key: value for key, value in after.items() if key != relative} == {
+        key: value for key, value in before.items() if key != relative}
+
+
+def test_run_process_does_not_equate_boolean_with_saved_integer(
+        source_study, run_root, science_factory, science_worker, monkeypatch):
+    from rpipe.flow.run import run
+    from rpipe.flow.process import process_run
+    from rpipe.structure.artifact.io import read_json
+    from rpipe.structure.control import AdmissionError
+
+    spec = planning.plan(source_study, run_root=run_root)[0]
+    planning.publish([spec])
+    actions = science_factory()
+    actions.collect = lambda ctx: {'metrics': {'value': 1}}
+    science_worker(actions)
+    assert run(spec).status == 'succeeded'
+    before = spec.result_path.read_bytes()
+    record = read_json(spec.result_path)
+    record['metrics']['value'] = True
+    module = importlib.import_module('rpipe.flow.process')
+    monkeypatch.setattr(module, 'run_study_phase', lambda *args, **kwargs: pytest.fail('invalid record reached process hook'))
+    with pytest.raises(AdmissionError):
+        process_run(spec, record)
+    assert spec.result_path.read_bytes() == before

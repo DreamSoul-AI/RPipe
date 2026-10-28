@@ -7,12 +7,11 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
               pytest.mark.result_type('categorical', detail='summary')]
 
 
-def test_source_drift_rejects_read_and_start_without_changing_old_success(
+def test_source_drift_preserves_saved_reads_and_rejects_new_execution(
         source_study, run_root, science_factory, file_bytes, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.run import run
-    from rpipe.structure.control import SourceMismatch
 
     spec = plan(source_study, run_root=run_root)[0]
     science_worker(science_factory())
@@ -20,8 +19,7 @@ def test_source_drift_rejects_read_and_start_without_changing_old_success(
     before = file_bytes(run_root)
     (source_study / 'helper.py').write_text('VALUE = 2\n', encoding='utf-8')
     payload = science_factory()
-    with pytest.raises(SourceMismatch):
-        read_run(spec)
+    assert read_run(spec.ref)['status'] == 'succeeded'
     new_spec = plan(source_study, run_root=run_root)[0]
     science_worker(payload)
     _rejected = run(new_spec)
@@ -34,14 +32,14 @@ def test_source_drift_rejects_read_and_start_without_changing_old_success(
 def test_read_run_is_readonly_and_quality_is_not_inferred_from_execution(
         source_study, run_root, science_factory, file_bytes, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.run import run
 
     spec = plan(source_study, run_root=run_root)[0]
     science_worker(science_factory())
     outcome = run(spec)
     before = file_bytes(run_root)
-    result = read_run(spec)
+    result = read_run(spec.ref)
     assert result['status'] == outcome.status == 'succeeded'
     assert outcome.quality is None
     assert outcome.evidence_complete is True
@@ -50,17 +48,17 @@ def test_read_run_is_readonly_and_quality_is_not_inferred_from_execution(
 
 def test_truncated_result_is_rejected_without_repair(source_study, run_root, science_factory, science_worker):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.run import run
-    from rpipe.structure.control import AdmissionError
 
     spec = plan(source_study, run_root=run_root)[0]
     science_worker(science_factory())
     assert run(spec).status == 'succeeded'
     spec.result_path.write_bytes(b'{"status": "succeeded",')
     before = spec.result_path.read_bytes()
-    with pytest.raises(AdmissionError):
-        read_run(spec)
+    record = read_run(spec.ref)
+    assert record['status'] == 'unknown' and record['scientific_status'] == 'invalid'
+    assert record['evidence_complete'] is False and record['record_error']['type'] == 'JSONDecodeError'
     assert spec.result_path.read_bytes() == before
 
 

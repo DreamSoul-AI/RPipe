@@ -1,12 +1,17 @@
-"""Study-level curves from report observations, falling back to tracker history."""
+"""Derived curves and exports from the explicit published Run list."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from pathlib import Path
 from typing import Any
 
-from rpipe.structure.readout import collect_from_index, load_curve_series, summarize_curve_series
+from rpipe.structure.artifact.readout import (refs_from_index, read_run,
+                                              load_curve_series, summarize_curve_series)
+from rpipe.structure.artifact import io
+from rpipe.structure.control import AdmissionError, SourceMismatch
 from rpipe.structure.artifact.io import atomic_replace
 DOCS_DIRNAME = "summary"
 STATUS_SUCCEEDED = "succeeded"
@@ -39,27 +44,54 @@ def _label(factors: dict[str, Any]) -> str:
     return ' '.join(parts)
 
 
-def _history(study_dir: Path, run_dir: str, split: str, name: str) -> list[float]:
-    return load_curve_series(study_dir, run_dir).get(split, {}).get(name, {}).get('values', [])
+def _export_snapshot(study, index=None, *, selected=None):
+    path = io.contained(study / 'index.json', study)
+    raw = path.read_bytes()
+    saved = json.loads(raw)
+    if index is not None and json.dumps(index, sort_keys=True, allow_nan=False) != json.dumps(saved, sort_keys=True, allow_nan=False):
+        raise SourceMismatch('export requires the saved current Study index')
+    refs = refs_from_index(study, saved)
+    if selected is not None:
+        if selected - {ref.id for ref in refs}:
+            raise ValueError('selected Run is absent from the published plan')
+        refs = tuple(ref for ref in refs if ref.id in selected)
+    inputs = _export_inputs(study, refs)
+    inputs['index_sha256'] = hashlib.sha256(raw).hexdigest()
+    return saved, refs, inputs
+
+
+def _export_inputs(study, refs):
+    path = io.contained(study / 'index.json', study)
+    scalars = {}
+    for ref in refs:
+        scalar = io.contained(ref.assets_dir / io.TRACKER_JSONL, study)
+        scalars[ref.id] = hashlib.sha256(scalar.read_bytes()).hexdigest() if scalar.exists() else None
+    return {'index_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+            'runs': [io.record_inputs(ref) for ref in refs], 'scalars_sha256': scalars}
+
+
+def _check_export_inputs(study, refs, inputs):
+    if _export_inputs(study, refs) != inputs:
+        raise SourceMismatch('export inputs changed while processing')
+
 
 
 def collect_curve_groups(study_dir: Path, index: dict[str, Any] | None) -> list[dict[str, Any]]:
-    if not index:
-        return []
-    groups: list[dict[str, Any]] = []
-    for exp in collect_from_index(study_dir, index):
-        factors = dict(exp.get('factors') or {})
-        if str(factors.get('algorithm.mode') or '').lower() == 'eval':
+    from rpipe.structure.artifact.io import load_index
+    if index is None:
+        index = load_index(study_dir)
+    refs = refs_from_index(study_dir, index)
+    factors = {row['id']: row['factors'] for row in index['experiments']} if index else {}
+    groups = {}
+    for ref in refs:
+        conditions = factors[ref.experiment]
+        if str(conditions.get('algorithm.mode', '')).lower() == 'eval':
             continue
-        run_dirs = [
-            str(run.get('run_dir') or run.get('id') or '')
-            for run in (exp.get('runs') or []) if run.get('status') == STATUS_SUCCEEDED
-        ]
-        run_dirs = [name for name in run_dirs if name]
-        if not run_dirs:
+        if read_run(ref)['status'] != STATUS_SUCCEEDED:
             continue
-        groups.append({'label': _label(factors), 'run_dirs': run_dirs})
-    return groups
+        group = groups.setdefault(ref.experiment, {'label': _label(conditions), 'refs': []})
+        group['refs'].append(ref)
+    return list(groups.values())
 
 
 def write_learning_curves(
@@ -69,14 +101,15 @@ def write_learning_curves(
     title: str | None = None,
 ) -> Path | None:
     """Write output ``summary/figures/learning_curves.png``; never source docs."""
-    study_dir = Path(study_dir)
+    study_dir = Path(study_dir).resolve()
+    index, refs, inputs = _export_snapshot(study_dir, index)
     groups = collect_curve_groups(study_dir, index)
     panels = {}
     for group in groups:
         for split, name, _title in _PANELS:
             series = [
-                row for run_dir in group['run_dirs']
-                if (row := load_curve_series(study_dir, run_dir).get(split, {}).get(name))
+                row for ref in group['refs']
+                if (row := load_curve_series(ref).get(split, {}).get(name))
             ]
             summary = summarize_curve_series(series)
             if summary:
@@ -86,9 +119,12 @@ def write_learning_curves(
     if not units:
         return None
 
+    dest = learning_curves_path(study_dir)
+    if dest.resolve() != dest:
+        raise AdmissionError('curve output must use its own summary path without aliases')
+    io.contained(dest, study_dir)
     import matplotlib.pyplot as plt
 
-    dest = learning_curves_path(study_dir)
     dest.parent.mkdir(parents=True, exist_ok=True)
     palette = plt.rcParams['axes.prop_cycle'].by_key()['color']
     tmp = dest.with_name(f'{uuid.uuid4().hex}.tmp')
@@ -134,7 +170,7 @@ def write_learning_curves(
         stream = tmp.open('xb')
         owned = True
         try:
-            fig.savefig(stream, format='png', dpi=140)
+            fig.savefig(stream, format='png', dpi=140, metadata={'RPipeInputs': json.dumps(inputs)})
         except BaseException:
             try:
                 stream.close()
@@ -145,6 +181,7 @@ def write_learning_curves(
             stream.close()
         if mode is not None:
             tmp.chmod(mode)
+        _check_export_inputs(study_dir, refs, inputs)
         return atomic_replace(tmp, dest)
     finally:
         try:
@@ -168,10 +205,7 @@ def export_tensorboard(study_dir: Path | str, destination: Path | str, *,
                        run_ids: list[str] | tuple[str, ...] | None = None) -> Path:
     """Export one immutable JSONL trajectory snapshot, separately from formal results."""
     from urllib.parse import quote
-    from rpipe.structure.readout import _jsonl_curve_series
-    from rpipe.structure.artifact.io import contained, kinds
     from rpipe.structure.artifact.io import validate_run_root
-    RUNS_DIRNAME = "runs"
 
     study, dest = Path(study_dir).resolve(), Path(destination).resolve()
     validate_run_root(Path(__file__).resolve().parent, dest)
@@ -187,14 +221,17 @@ def export_tensorboard(study_dir: Path | str, destination: Path | str, *,
         selected = set(run_ids)
     series = []
     seen = set()
-    runs = contained(study / RUNS_DIRNAME, study)
-    for path in sorted(runs.glob(f'*/assets/{kinds.TRACKER_JSONL}')):
-        run = path.parents[2].name
+    index, refs, inputs = _export_snapshot(study, selected=selected)
+    if selected is not None and selected - {ref.id for ref in refs}:
+        raise ValueError('selected Run is absent from the published plan')
+    for ref in refs:
+        run = ref.id
         if selected is not None and run not in selected:
             continue
-        path = contained(path, study)
-        seen.add(run)
-        for split, names in _jsonl_curve_series(path).items():
+        curves = load_curve_series(ref)
+        if curves:
+            seen.add(run)
+        for split, names in curves.items():
             for name, row in names.items():
                 if row['unit'] == 'observation' or any(
                     point != int(point) or not 0 <= point < 2**63 for point in row['x']
@@ -208,6 +245,7 @@ def export_tensorboard(study_dir: Path | str, destination: Path | str, *,
         raise ValueError('no JSONL scalar trajectories to export')
     from torch.utils.tensorboard import SummaryWriter
 
+    _check_export_inputs(study, refs, inputs)
     # A new directory prevents previous exports from reviving a rolled-back tail.
     dest.mkdir(parents=True, exist_ok=False)
     for run in dict.fromkeys(run for run, _, _ in series):
@@ -217,4 +255,6 @@ def export_tensorboard(study_dir: Path | str, destination: Path | str, *,
                     for step, value in zip(row['x'], row['values']):
                         writer.add_scalar(tag, value, global_step=int(step),
                                           new_style=True, double_precision=True)
+    io.write_json(dest / 'EXPORT_INPUTS.json', {'inputs': inputs, 'runs': [ref.identity for ref in refs],
+                                              'scope': 'saved scalar trajectory export'})
     return dest

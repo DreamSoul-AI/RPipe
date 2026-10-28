@@ -2,13 +2,12 @@
 root_package = rpipe
 
 [importlinter:contract:mechanisms-do-not-know-flow]
-name = Structure does not depend on flow or public assembly
+name = Structure does not depend on flow
 type = forbidden
 source_modules =
     rpipe.structure
 forbidden_modules =
     rpipe.flow
-    rpipe.api
 
 [importlinter:contract:pure-control]
 name = Configuration contracts have no implementation dependency
@@ -19,8 +18,8 @@ source_modules =
 forbidden_modules =
     rpipe.structure.make
     rpipe.structure.artifact
-    rpipe.structure.readout
-    rpipe.structure.comparison
+    rpipe.structure.artifact.readout
+    rpipe.structure.artifact.comparison
     rpipe.structure.data
     rpipe.structure.model
     rpipe.structure.algorithm
@@ -32,8 +31,8 @@ type = forbidden
 source_modules =
     rpipe.structure.make
 forbidden_modules =
-    rpipe.structure.readout
-    rpipe.structure.comparison
+    rpipe.structure.artifact.readout
+    rpipe.structure.artifact.comparison
     rpipe.structure.data
     rpipe.structure.model
     rpipe.structure.algorithm
@@ -43,9 +42,9 @@ forbidden_modules =
 name = Readout does not acquire execution or scientific components
 type = forbidden
 source_modules =
-    rpipe.structure.readout
+    rpipe.structure.artifact.readout
 forbidden_modules =
-    rpipe.structure.comparison
+    rpipe.structure.artifact.comparison
     rpipe.structure.data
     rpipe.structure.model
     rpipe.structure.algorithm

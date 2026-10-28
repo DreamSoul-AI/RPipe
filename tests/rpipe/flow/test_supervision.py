@@ -493,7 +493,7 @@ def test_real_windows_active_cancel_and_observer_failure_retain_owner(module, sp
 @pytest.mark.skipif(os.name != 'nt', reason='Windows Job Object process-tree contract')
 def test_real_public_run_owns_and_releases_tiny_train_eval(module, tensor_study, run_root, tmp_path):
     from rpipe.structure.make import plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     specs = plan(tensor_study, run_root=run_root)
     limits = SupervisionLimits(run_seconds=20, batch_seconds=45, rss_bytes=2 * 1024 ** 3,
                                output_bytes=8 * 1024 ** 2, poll_seconds=.02, cleanup_seconds=1)
@@ -501,9 +501,9 @@ def test_real_public_run_owns_and_releases_tiny_train_eval(module, tensor_study,
     assert report['status'] == 'succeeded', report
     assert report['evidence_complete'] and report['tree_empty']
     assert len(report['completed']) == 2
-    assert all(read_run(spec)['scientific_status'] == 'succeeded' for spec in specs)
+    assert all(read_run(spec.ref)['scientific_status'] == 'succeeded' for spec in specs)
     assert all(not (spec.run_dir / '.execution').exists() for spec in specs)
-    assert read_run(specs[0])['execute']['steps'] == 2
+    assert read_run(specs[0].ref)['execute']['steps'] == 2
 
 
 @pytest.mark.integration

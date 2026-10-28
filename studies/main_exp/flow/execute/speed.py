@@ -198,7 +198,7 @@ def main(recipe, argv):
                     segments[-1]['checkpoint_seconds'] += elapsed
                     segments[-1]['memory']['checkpoint'] = memory()
                 self.segment_start = time.perf_counter()
-        algorithm = MeasuredTrain(AlgorithmConfig.from_mapping(mapping))
+        algorithm = MeasuredTrain(AlgorithmConfig.from_mapping(mapping), checkpoint_dir=(assets / 'checkpoints').resolve())
         sync()
         setup = time.perf_counter() - start
         setup_memory = memory()

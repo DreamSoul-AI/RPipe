@@ -86,12 +86,6 @@ def pair_run(tmp_path, monkeypatch):
             at(name)
             self.logger = Resource(name + '_logger')
 
-        def load_checkpoint(self, name):
-            return {}
-
-        def checkpoint_dir(self):
-            return tmp_path
-
     class Tracker:
         def __init__(self, assets=None):
             at('eval_tracker')
@@ -100,7 +94,7 @@ def pair_run(tmp_path, monkeypatch):
             return {'Loss': 0.0}
 
     class Train:
-        def __init__(self, config):
+        def __init__(self, config, *, checkpoint_dir, train_checkpoint_dir=None):
             pass
 
         def compute(self, data, model, system, tracker, cancel_check):
@@ -160,6 +154,8 @@ def pair_run(tmp_path, monkeypatch):
     monkeypatch.setattr(paired, 'seed_runtime', lambda device: None)
     monkeypatch.setattr(paired, 'release_memory', lambda device: None)
     monkeypatch.setattr(paired, 'cpu_tree', lambda value: value)
+    import rpipe.structure.artifact.checkpoint as checkpoint
+    monkeypatch.setattr(checkpoint, 'load_snapshot', lambda path: {})
     monkeypatch.setattr(paired, 'native_data', lambda *args: Data('eval_data'))
     monkeypatch.setattr(paired, 'native_model', lambda *args, **kwargs: Model('eval_model'))
     monkeypatch.setattr(paired.subprocess, 'check_output', lambda *args, **kwargs: 'fixed-head')
@@ -169,7 +165,7 @@ def pair_run(tmp_path, monkeypatch):
     native = (Data('caller_data'), Model('caller_model'), System('caller_system'),
               Tracker(), {'cpu': None})
     state.run = lambda: paired.run_pair(tmp_path, 'cpu', ('MNIST', 'linear'), native,
-                                      cancel_check=lambda: None)
+                                      cancel_check=lambda: None, checkpoint_dir=tmp_path / 'checkpoints')
     state.paired = paired
     state.native = native
     return state

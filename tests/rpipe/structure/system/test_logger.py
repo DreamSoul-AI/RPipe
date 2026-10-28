@@ -199,8 +199,7 @@ def test_report_keeps_diagnostic_metrics_without_arbitrary_extra(tmp_path, capsy
     assert '[split] test [metric] Accuracy=0.8000 Loss=0.5000' in row['message']
     assert 'lr=0.1 step=2' in row['message'] and 'PRIVATE_BODY' not in str(row)
     assert row['event'] == 'metrics.reported'
-    assert logger.state_dict() == {'path': str(logger.path)}
-    logger.load_state_dict({'path': '/must/not/be/read'})
+    assert not hasattr(logger, 'state_dict') and not hasattr(logger, 'load_state_dict')
     assert capsys.readouterr().out
 
 

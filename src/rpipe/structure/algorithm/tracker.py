@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import closing
 
 import json
+import math
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -200,9 +201,47 @@ class AlgorithmTracker:
             'last_segment': self._last_segment,
         }
 
+    def validate_state_dict(self, state: dict[str, Any]) -> None:
+        if not isinstance(state, dict) or type(state.get('step')) is not int or state['step'] < 0:
+            raise ValueError('invalid checkpoint tracker progress')
+        if (not isinstance(state.get('jsonl_path'), str) or type(state.get('jsonl_offset')) is not int
+                or state['jsonl_offset'] < 0):
+            raise ValueError('invalid checkpoint tracker evidence reference')
+        for field in ('segment_batches', 'splits', 'last_segment'):
+            if not isinstance(state.get(field), dict):
+                raise ValueError(f'invalid checkpoint tracker {field}')
+        if any(type(value) is not int or value < 0 for value in state['segment_batches'].values()):
+            raise ValueError('invalid checkpoint tracker batch counts')
+        progress = state.get('progress')
+        if progress is not None and (not isinstance(progress, dict)
+                or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0
+                       for v in progress.values())):
+            raise ValueError('invalid checkpoint tracker coordinates')
+        for metrics in state['splits'].values():
+            if not isinstance(metrics, dict):
+                raise ValueError('invalid checkpoint tracker metrics')
+            for body in metrics.values():
+                if not isinstance(body, dict) or type(body.get('n')) is not int or body['n'] < 0:
+                    raise ValueError('invalid checkpoint tracker samples')
+                for name in ('last', 'mean', 'weighted_sum'):
+                    value = body.get(name)
+                    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                        raise ValueError('invalid checkpoint tracker accumulation')
+                if not isinstance(body.get('history'), list):
+                    raise ValueError('invalid checkpoint tracker history')
+                if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+                       for value in body['history']):
+                    raise ValueError('invalid checkpoint tracker history values')
+        for metrics in state['last_segment'].values():
+            if (not isinstance(metrics, dict) or any(isinstance(value, bool)
+                    or not isinstance(value, (int, float)) or not math.isfinite(value)
+                    for value in metrics.values())):
+                raise ValueError('invalid checkpoint tracker segment')
+
     def load_state_dict(self, state: dict[str, Any] | None) -> None:
         if not state:
             return
+        self.validate_state_dict(state)
         self.step = int(state.get('step') or 0)
         self.progress = state.get('progress')
         self._last_segment = dict(state.get('last_segment') or {})

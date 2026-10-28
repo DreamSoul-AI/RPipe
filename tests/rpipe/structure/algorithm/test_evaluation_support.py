@@ -23,19 +23,19 @@ class _Model:
     module = object()
 
 
-def test_algorithm_is_algorithm_hook():
+def test_algorithm_is_algorithm_hook(tmp_path):
     assert issubclass(Algorithm, AlgorithmHook)
-    algo = Algorithm(AlgorithmConfig.from_mapping({'mode': 'train'}))
+    algo = Algorithm(AlgorithmConfig.from_mapping({'mode': 'train'}), checkpoint_dir=tmp_path / 'checkpoints')
     assert isinstance(algo, AlgorithmHook)
 
 
-def test_eval_period_default_every_epoch():
-    algo = Algorithm(AlgorithmConfig.from_mapping({'mode': 'train'}))
+def test_eval_period_default_every_epoch(tmp_path):
+    algo = Algorithm(AlgorithmConfig.from_mapping({'mode': 'train'}), checkpoint_dir=tmp_path / 'checkpoints')
     assert algo.eval_period() == 1
     assert algo.progress_unit() == 'step'
     assert algo.checkpoint_mode() == 'latest'
     assert algo.save_best() is False
-    algo = Algorithm(AlgorithmConfig.from_mapping({'mode': 'train', 'eval_period': 0}))
+    algo = Algorithm(AlgorithmConfig.from_mapping({'mode': 'train', 'eval_period': 0}), checkpoint_dir=tmp_path / 'checkpoints')
     assert algo.eval_period() == 0
 
 
@@ -47,7 +47,7 @@ def test_due_eval_period_cadence():
 
 
 def test_base_on_eval_period_is_noop(tmp_path):
-    algo = Algorithm(AlgorithmConfig.from_mapping({'mode': 'train'}))
+    algo = Algorithm(AlgorithmConfig.from_mapping({'mode': 'train'}), checkpoint_dir=tmp_path / 'checkpoints')
     tracker = AlgorithmTracker(tmp_path)
     assert algo.on_eval_period(tracker, None, None, None, None, {'epoch': 1}, cancel_check=lambda: None) is False
 
@@ -204,7 +204,7 @@ def test_loss_only_eval_summary_does_not_invent_accuracy(tmp_path):
     data = SimpleNamespace(iter_batches=lambda split: iter([
         (torch.ones(2, 1), torch.zeros(2, dtype=torch.long)),
     ]))
-    result = EvalAlgorithm(AlgorithmConfig.from_mapping({'mode': 'eval', 'resume': False})).compute(
+    result = EvalAlgorithm(AlgorithmConfig.from_mapping({'mode': 'eval', 'resume': False}), checkpoint_dir=tmp_path / 'checkpoints').compute(
         data, SimpleNamespace(module=torch.nn.Linear(1, 2)), SimpleNamespace(device='cpu'),
         AlgorithmTracker(tmp_path, MetricBundle({'test': ['Loss']})), cancel_check=lambda: None,
     )
@@ -223,7 +223,7 @@ def test_on_eval_period_runs_eval_and_can_stop(tmp_path, monkeypatch):
     algo = TrainAlgorithm(
         AlgorithmConfig.from_mapping(
             {'mode': 'train', 'early_stop_patience': 1, 'early_stop_min_delta': 1.0}
-        )
+        ), checkpoint_dir=tmp_path / 'checkpoints'
     )
     tracker = AlgorithmTracker(tmp_path)
     first = algo.on_eval_period(tracker, None, None, _Model(), None, {'epoch': 1}, cancel_check=lambda: None)

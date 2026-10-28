@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from rpipe.structure.artifact.checkpoint import load_snapshot
+
 pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
               pytest.mark.structure_layer, pytest.mark.module_algorithm,
               pytest.mark.result_type('categorical', detail='summary')]
@@ -54,8 +56,8 @@ def _recovery(tmp_path, unit, device, period, stop, eval_period=1, interrupt_ste
     assert continuous['trace'] == partial['trace'] + resumed['trace']
     for key in ('steps', 'epochs', 'best_value', 'best_metric', 'train_loss'):
         assert continuous['result'][key] == resumed['result'][key]
-    left = torch.load(tmp_path / 'continuous/checkpoints/latest.pt', weights_only=False, map_location='cpu')
-    right = torch.load(tmp_path / 'recovered/checkpoints/latest.pt', weights_only=False, map_location='cpu')
+    left = load_snapshot(tmp_path / 'continuous/checkpoints/latest.pt', map_location='cpu')
+    right = load_snapshot(tmp_path / 'recovered/checkpoints/latest.pt', map_location='cpu')
     for key in ('model', 'optimizer', 'scheduler', 'training_state'):
         _equal(left[key], right[key])
     for key in ('splits', 'segment_batches', 'last_segment', 'step', 'progress'):
@@ -84,7 +86,7 @@ def test_custom_metric_runtime_is_not_marked_as_exact_resume(tmp_path):
     import torch
 
     _run(tmp_path, 'continuous-custom-metrics', 'step', 'cpu', 1, 0)
-    payload = torch.load(tmp_path / 'checkpoints/latest.pt', weights_only=False, map_location='cpu')
+    payload = load_snapshot(tmp_path / 'checkpoints/latest.pt', map_location='cpu')
     assert payload['training_state']['data'] is None
 
 

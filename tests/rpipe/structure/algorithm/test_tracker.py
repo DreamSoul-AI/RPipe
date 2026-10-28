@@ -70,14 +70,16 @@ def test_checkpoint_preserves_accumulator_without_mean_round_trip(tmp_path):
     assert restored.state_dict()['splits'] == state['splits']
 
 
-def test_legacy_tracker_without_accumulator_still_loads(tmp_path):
+def test_incomplete_tracker_accumulator_is_rejected_before_mutation(tmp_path):
     tracker = AlgorithmTracker(tmp_path)
     tracker.append('train', n=3, values={'Loss': 2.0})
     state = tracker.state_dict()
     state['splits']['train']['Loss'].pop('weighted_sum')
     restored = AlgorithmTracker(tmp_path / 'restored')
-    restored.load_state_dict(state)
-    assert restored.mean('train')['Loss'] == 2.0
+    before = restored.state_dict()
+    with pytest.raises(ValueError, match='tracker accumulation'):
+        restored.load_state_dict(state)
+    assert restored.state_dict() == before
 
 
 def test_tracker_constructor_preserves_evidence_arriving_before_open(tmp_path, monkeypatch):

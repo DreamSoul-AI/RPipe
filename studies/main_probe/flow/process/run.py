@@ -9,7 +9,7 @@ def run(ctx):
         return
     expected = {(data, model) for data in ('MNIST', 'CIFAR10')
                 for model in ('linear', 'mlp', 'cnn', 'resnet18')}
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     specs = {spec.id: spec for spec in ctx.specs}
     rows, missing, pairs, sources = [], [], [], set()
     index = load_index(ctx.layout.study_root)
@@ -25,7 +25,7 @@ def run(ctx):
                 continue
             if run['id'] not in specs:
                 raise ValueError('probe index contains a Run outside the current plan')
-            result = read_run(specs[run['id']])
+            result = read_run(specs[run['id']].ref)
             report = json.loads(report_path.read_text(encoding='utf-8'))
             if result.get('status') != 'succeeded' or len(report.get('runs', [])) != 1:
                 missing.append(run['id'])

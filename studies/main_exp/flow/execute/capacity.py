@@ -68,7 +68,8 @@ def main(recipe, argv):
     from rpipe.structure.artifact.io import load_config, write_config
     from rpipe.structure.make import plan, publish
     from rpipe.flow.run import run as run_spec
-    from rpipe.api import read_run, compare_runs
+    from rpipe.structure.artifact.readout import read_run
+    from rpipe.structure.artifact.comparison import compare
     ident = 'capacity-' + time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8]
     root = args.run_root / 'validation' / ident
     root.mkdir(parents=True, exist_ok=False)
@@ -126,7 +127,7 @@ def main(recipe, argv):
             for spec in specs:
                 run = spec.run_dir
                 cfg = spec.to_config()
-                result = read_run(spec)
+                result = read_run(spec.ref)
                 if result.get('status') != 'succeeded' or not (run / 'assets/capacity.json').is_file():
                     group['runs'].append({'run_id': spec.id, 'status': result.get('status'), 'error': result.get('error')})
                     passed = False
@@ -137,9 +138,9 @@ def main(recipe, argv):
                 passed &= capacity['execute']['steps'] == 800 and len(history) == 4
                 key = (model, cfg['model']['name'], cfg['seed'])
                 if round_size == 1:
-                    baseline[key] = run
+                    baseline[key] = spec.ref
                 else:
-                    comparison = compare_runs(baseline[key], run, checkpoints=['latest', 'best'])
+                    comparison = compare(baseline[key], spec.ref, checkpoints=['latest', 'best'])
                     # Elapsed time differs by design; checkpoint/history remain strict zero-tolerance gates.
                     passed &= all(item['passed'] for name, item in comparison['items'].items() if name != 'metrics')
                     group['comparisons'].append(comparison)

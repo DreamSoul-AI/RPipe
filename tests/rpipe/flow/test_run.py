@@ -15,26 +15,24 @@ pytestmark = [pytest.mark.content, pytest.mark.p1,
 def test_native_public_run_trains_two_updates_then_independently_evaluates_own_best(
         tensor_study, run_root, file_bytes):
     from rpipe.structure.make import publish, plan
-    from rpipe.api import read_run
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.process import process_study as process
     from rpipe.flow.run import run
-    from rpipe.structure.system.factory import build_system
-    from rpipe.structure.control import SystemConfig
 
     before = file_bytes(tensor_study)
     train, evaluate = plan(tensor_study, run_root=run_root)
     assert evaluate.train_id == train.id
     publish((train, evaluate))
     assert run(train).status == 'succeeded'
-    trained = read_run(train)
+    trained = read_run(train.ref)
     assert trained['execute']['steps'] == 2
-    system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), train.assets_dir)
-    best = system.load_checkpoint('best')
-    latest = system.load_checkpoint('latest')
+    from rpipe.structure.artifact.checkpoint import load_snapshot
+    best = load_snapshot(train.assets_dir / 'checkpoints/best.pt')
+    latest = load_snapshot(train.assets_dir / 'checkpoints/latest.pt')
     assert best is not None and latest['step'] == 2
     assert set(('model', 'optimizer', 'scheduler', 'training_state')) <= set(latest)
     assert run(evaluate).status == 'succeeded'
-    evaluated = read_run(evaluate)
+    evaluated = read_run(evaluate.ref)
     assert evaluated['execute']['step'] == best['step']
     assert 'eval_accuracy' in evaluated['metrics']
     science = {s.id: s.result_path.read_bytes() for s in (train, evaluate)}

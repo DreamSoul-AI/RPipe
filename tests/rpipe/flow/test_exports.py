@@ -10,7 +10,6 @@ from types import SimpleNamespace
 import pytest
 
 from rpipe.flow.exports import learning_curves_path, write_learning_curves
-from rpipe.structure.artifact.io import write_json as write_result
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.flow_layer, pytest.mark.module_process,
@@ -19,18 +18,20 @@ pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
 
 
 @pytest.fixture
-def curve_case(tmp_path, old):
+def curve_case(tmp_path, old, published_specs, science_factory, science_worker):
     import matplotlib.pyplot as plt
+    from rpipe.flow.run import run
+    from rpipe.structure.artifact.io import read_json
 
-    directory = tmp_path / 'runs' / 'one'
-    layout = SimpleNamespace(root=directory, result_path=directory / 'result.json', assets_dir=directory / 'assets')
-    write_result(layout.result_path, {'status': 'succeeded', 'control': {}, 'metrics': {}, 'paths': {}})
-    history = layout.assets_dir / 'tracker' / 'tracker_state.json'
+    spec = published_specs[0]
+    science_worker(science_factory())
+    assert run(spec).status == 'succeeded'
+    history = spec.assets_dir / 'tracker' / 'scalars.jsonl'
     history.parent.mkdir(parents=True, exist_ok=True)
-    history.write_text(json.dumps({'splits': {'test': {'Accuracy': {'history': [50.0]}}}}), encoding='utf-8')
-    index = {'study': 'synthetic', 'experiments': [
-        {'factors': {}, 'runs': [{'id': 'one', 'seed': 0}]}]}
-    dest = learning_curves_path(tmp_path)
+    history.write_text(json.dumps({'split': 'test', 'name': 'Accuracy', 'optimizer_step': 1, 'mean': 50.0}) + '\n',
+                       encoding='utf-8')
+    index = read_json(spec.study_root / 'index.json')
+    dest = learning_curves_path(spec.study_root)
     dest.parent.mkdir(parents=True, exist_ok=True)
     peer = dest.parent / 'peer.tmp'
     peer.write_bytes(b'peer writer evidence')
@@ -38,11 +39,12 @@ def curve_case(tmp_path, old):
     if old:
         peer_figure.savefig(dest)
         dest.chmod(0o640 if os.name != 'nt' else 0o666)
-    case = {'root': tmp_path, 'index': index, 'dest': dest,
+    case = {'root': spec.study_root, 'index': index, 'dest': dest,
             'old': dest.read_bytes() if old else None,
             'mode': stat.S_IMODE(dest.stat().st_mode) if old else None,
             'figures': set(plt.get_fignums()), 'peers': {'peer.tmp'},
-            'inputs': {path: path.read_bytes() for path in (layout.result_path, history, peer)}}
+            'inputs': {path: path.read_bytes() for path in spec.study_root.rglob('*')
+                       if path.is_file() and path != dest}}
     try:
         yield case
     finally:

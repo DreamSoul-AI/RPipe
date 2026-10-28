@@ -172,8 +172,8 @@ def preflight(data_root: Path | str, output_dir: Path | str, *, steps: int = 200
     start = time.perf_counter()
 
     class CapturedTrain(TrainAlgorithm):
-        def __init__(self, config: Any) -> None:
-            super().__init__(config)
+        def __init__(self, config: Any, *, checkpoint_dir: Path) -> None:
+            super().__init__(config, checkpoint_dir=checkpoint_dir)
             self.snapshots: dict[int, dict[str, Any]] = {}
 
         def make_optimizer(self, module: Any):
@@ -244,7 +244,7 @@ def preflight(data_root: Path | str, output_dir: Path | str, *, steps: int = 200
         init_rng = _rng_equal(original_init_rng, _rng_state())
         data.observations = {'train': Observation(), 'test': Observation()}
         tracker = AlgorithmTracker(assets)
-        algorithm = CapturedTrain(AlgorithmConfig.from_mapping(mapping))
+        algorithm = CapturedTrain(AlgorithmConfig.from_mapping(mapping), checkpoint_dir=(assets / 'checkpoints').resolve())
         summary = algorithm.compute(data, model, system, tracker, cancel_check=lambda: None)
         final = _compare_states(original_final, _state_cpu(model.module))
         final_rng = _rng_equal(original_rng, _rng_state())

@@ -60,3 +60,11 @@ def register(ctx):
     DataRegistry.register('TinyCPU', 'fixture', build)
 ''', encoding='utf-8')
     return source_study
+
+
+@pytest.fixture
+def published_specs(source_study, run_root):
+    from rpipe.structure.make import plan, publish
+    specs = plan(source_study, run_root=run_root)
+    publish(specs)
+    return specs

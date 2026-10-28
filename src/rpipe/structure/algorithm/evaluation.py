@@ -9,6 +9,7 @@ from rpipe.structure.api import CancelCheck, ComputationObservation, DataPort, M
 from rpipe.structure.algorithm.factory import Algorithm
 from rpipe.structure.algorithm.evaluation_support import eval_batch_limit, eval_test_split
 from rpipe.structure.algorithm.progress import format_hms
+from rpipe.structure.algorithm.resume import admit_resume, apply_resume, load_resume
 
 
 class EvalAlgorithm(Algorithm):
@@ -26,7 +27,10 @@ class EvalAlgorithm(Algorithm):
             return {'mode': 'eval', 'stub': True, 'resume_count': 0, 'resume_path': None}
         if getattr(model, 'module', None) is None or not callable(getattr(data, 'iter_batches', None)):
             raise ValueError('eval requires a model module and data.iter_batches; use explicit stub data for flow checks')
-        restored = self.resume(data, model, system, tracker, extra)
+        restored = load_resume(self.config, checkpoint_dir=self.checkpoint_dir,
+                               train_checkpoint_dir=self.train_checkpoint_dir, observation=extra)
+        admit_resume(restored, model=model)
+        apply_resume(restored, model=model)
         tracker.begin_run()
         import time
 

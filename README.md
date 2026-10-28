@@ -4,7 +4,7 @@ RPipe（Research Pipeline，研究流水线）是用于搭建研究实验的参�
 
 RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他项目长期安装调用的通用 package 为产品目标，也不要求衍生项目持续跟随本仓接口。模板自身仍需讲清职责、保持可运行并验证示例，帮助研究者把有效配置、执行事实、科学结果和比较分析连接起来。Python 包名 `rpipe`、安装命令和打包配置是当前源码的组织与运行方式，不构成跨项目稳定 API 的承诺。仓库为 [DreamSoul-AI/RPipe](https://github.com/DreamSoul-AI/RPipe)，采用 [MIT 许可](LICENSE.md)。
 
-当前包元数据为 **0.4.1**。实际实现和支持限制见下文；版本号不代表所有兼容变化已发布。架构设计以单一 Markdown 完整维护整体组成、结构与部件、流程与扩展、观测恢复及产物合同，作为实施依据；代码结构设计已据此重新推导为单一完整文档，写明目标目录、部件接口、生命周期和依赖；control/make 与 artifact 配置/清单链路、flow 生命周期/持权/唯一 write、轻量部件合同及科学装配已落地；checkpoint、读端及其余清理继续按批次落实。实际差距、清理工作与校准事项见[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)。正式数值、GPU 和长程性能仍待验收。
+当前包元数据为 **0.4.1**。实际实现和支持限制见下文；版本号不代表所有兼容变化已发布。架构设计以单一 Markdown 完整维护整体组成、结构与部件、流程与扩展、观测恢复及产物合同，作为实施依据；代码结构设计已据此重新推导为单一完整文档，写明目标目录、部件接口、生命周期和依赖；control/make 与 artifact 配置/清单链路、flow 生命周期/持权/唯一 write、轻量部件合同及科学装配已落地；checkpoint、正式读端与派生已落实；其余入口和交付核验接续实施。实际差距、清理工作与校准事项见[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)。正式数值、GPU 和长程性能仍待验收。
 
 ## 文档与阅读顺序
 
@@ -50,7 +50,7 @@ python -m rpipe --help
 python -m rpipe --version
 ```
 
-安装后 `rpipe` 与 `python -m rpipe` 同走 [flow/cli.py](src/rpipe/flow/cli.py) 的 main()，模块入口为 [__main__.py](src/rpipe/__main__.py)，规划与发布直接使用 [structure.make](src/rpipe/structure/make.py) 的 plan/expand/publish；单次执行使用 [flow.run.run](src/rpipe/flow/run.py)，批次使用 [flow.supervision](src/rpipe/flow/supervision.py)，派生使用 [flow.process](src/rpipe/flow/process.py)；读端与受信比较继续按计划归位。HF/TensorBoard 功能另需相应依赖。只读路径延迟导入科学栈，不等于安装元数据没有科学依赖。
+安装后 `rpipe` 与 `python -m rpipe` 同走 [flow/cli.py](src/rpipe/flow/cli.py) 的 main()，模块入口为 [__main__.py](src/rpipe/__main__.py)，规划与发布直接使用 [structure.make](src/rpipe/structure/make.py) 的 plan/expand/publish；单次执行使用 [flow.run.run](src/rpipe/flow/run.py)，批次使用 [flow.supervision](src/rpipe/flow/supervision.py)，派生使用 [flow.process](src/rpipe/flow/process.py)；正式读取使用 [artifact.readout](src/rpipe/structure/artifact/readout.py) 的 RunRef 接口，比较使用 [artifact.comparison](src/rpipe/structure/artifact/comparison.py) 的明确对象接口。HF/TensorBoard 功能另需相应依赖。只读路径延迟导入科学栈，不等于安装元数据没有科学依赖。
 
 已有环境可显式使用本仓源码，PowerShell 示例：
 
@@ -80,11 +80,13 @@ python -m rpipe report studies/_template --run-root <external-run-root>
 
 | **命令** | **作用与边界** |
 | --- | --- |
-| `plan/status/logs/report/shared` | 读取，不启动、清理或补写；旧目录读取使用显式 legacy 入口 |
+| `plan/shared` | 只读当前声明，不启动、清理或补写 |
+| `status/logs/report` | 按已发布清单和保存身份读取，不核当前源码；显式 --version 可在源码不在场时定位历史版本 |
+| `compare <left-run-dir> <right-run-dir>` | 两端须在各自正式 index 中；容差和 checkpoint 选择明确，--out 必须在输入 Study 域外 |
 | `make` | 经 structure.make.publish 发布配置与索引，不准备科学数据或生成旧 jobs/脚本 |
 | `run` / `study` | 先 make 再 launch，显式执行 |
 | `launch/run-one` | 执行明确规格，核来源与自身 train 依赖，默认每 Run 独立科学子进程 |
-| `process [--figures]` | 写外部派生摘要及明确请求的图，不训练或覆盖科学结果 |
+| `process [--figures]` | 核当前源码、正式清单、配置与结果，写派生摘要及明确请求的图；输入漂移拒绝发布，不覆盖科学结果 |
 | `data [--download]` / `tensorboard --out` | 显式 profile/下载或导出，遵守输入、输出与来源约束 |
 | `supervise` | 显式 Windows 批次监管，不自动 make、预留 GPU 或恢复旧队列 |
 
@@ -95,11 +97,15 @@ python -m rpipe run <study-dir> --run-root <external-run-root>
 python -m rpipe process <study-dir> --run-root <external-run-root>
 ```
 
-四类部件的程序化构造分别使用各职责模块的 build_data/build_model/build_algorithm/build_system，轻量能力合同在 [structure.api](src/rpipe/structure/api.py)。模型接 data_meta 和 System，算法 compute 接注入部件及只读取消检查器；runtime/System/Logger 和研究准备有明确顺序。不同来源的数据游标与恢复支持分别解释，不因接口相同就保证跨后端等价。
+四类部件的程序化构造分别使用各职责模块的 build_data/build_model/build_algorithm/build_system，轻量能力合同在 [structure.api](src/rpipe/structure/api.py)。模型接 data_meta 和 System，算法构造显式接本次 checkpoint_dir 和可选 train_checkpoint_dir，compute 接注入部件及只读取消检查器；runtime/System/Logger 和研究准备有明确顺序。不同来源的数据游标与恢复支持分别解释，不因接口相同就保证跨后端等价。
 
-持权前 busy、来源失配或无效请求只返回 status=rejected 的 RunReport，不给目标 Run 写失败记录。成功定稿须先核源码与有效配置、科学响应和资源关闭；未确认释放时保留 owner 和 unknown 事实，禁止成功发布或新派发。正式结果后的 process 仅使用已保存记录，派生失败单独报告。
+持权前 busy、来源失配或无效请求只返回 status=rejected 的 RunReport，不给目标 Run 写失败记录。成功定稿须先核源码与有效配置、科学响应和资源关闭；未确认释放时保留 owner 和 unknown 事实，禁止成功发布或新派发。正式结果后的 process 仅使用已保存记录，派生失败单独报告。Study 摘要记录 index/config/result/execution、明确 outcome 及 busy 状态的输入指纹，汇总期间变化时保全旧文件。
 
 已有正式 result 拒绝原地重跑，须使用显式新 version。无 result 的已确认 failed/cancelled 仅允许显式 --retry（flow.run.run 的 retry=True），unknown/busy 不重放。execution.json 明确索引当前 attempt，执行、科学结果、派生分析、证据完整度分列，不由 mtime、UUID、退出码或日志推断整体成功。
+
+只读命令省略 --version 时，仅读取当前声明的版本字段定位输出；需要查看另一版本或源码已移走时显式提供 --version，不按目录时间猜选。正式轨迹和导出只使用清单列出的 Run 及 JSONL 有效观测，不扫描旧目录或用 state-history 回退补齐。
+
+完整快照由 [artifact.checkpoint](src/rpipe/structure/artifact/checkpoint.py) 的 save_snapshot/load_snapshot 存取，明确绝对 .pt 文件，以原子替换为完成点，只接受安全 Tensor 与基础状态，不加载研究类或旧格式。保存失败保全先前完整文件；恢复准入归算法，CPU 原生与 HF 的支持范围分别验证。
 
 provenance.inputs 可固定外部文件或目录清单，未固定 path/stats_path、默认缓存与隐式 profile 分列未验证。以上命令和能力说明对应当前实现；目标结构见两份设计，实施差距与接口清理见开发计划，实际演进和验证见日期记录。
 
@@ -129,6 +135,8 @@ python tests/run.py --core --results-root <external-test-root> --timeout-seconds
 生命周期批次的最终合同回归 741 通过、1 项既有静态豁免，原 fixture 反例定向 381 通过，另有真实六命令旅程；扩大运行的预算结束、缺项和依赖跳过仍保留，见[生命周期验证记录](<docs/运行记录 Run Record/2026-10-29 生命周期与唯一发布验证.md>)。
 
 部件批次另以分组合同、原数值、10 个 CPU 独立进程恢复、315 项 Flow 集成及最后形状补验核对，当前版本六命令旅程通过；分组重叠、失败/中断及未执行范围见[科学部件验证记录](<docs/运行记录 Run Record/2026-10-29 科学部件合同与装配验证.md>)，不将部分证据合成全仓或正式研究通过。
+
+快照与读端批次保留真实 CPU 恢复失败及修复、402 项读端/比较、原失败文件174与研究reader69的分组证据，最终六命令和比较 CLI 通过；完整范围、重叠和 SDK 跳过见[快照读端验证记录](<docs/运行记录 Run Record/2026-10-29 快照读端与派生职责验证.md>)。
 
 历史与当前的本地有界 CPU、有限原生/HF、安装 smoke 与远端 CI 分别按运行记录中的固定身份核对。重构先执行受影响合同回归，再按实际范围验证科学装配、Study 与制品旅程。正式 MNIST/CIFAR、GPU、长程性能、矩阵外环境与原始历史归档可恢复性仍未验收。
 

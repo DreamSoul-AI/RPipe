@@ -94,3 +94,10 @@ def make_scheduler(optimizer: Any, config: AlgorithmConfig, t_max: int) -> Any:
     blob.setdefault('total_iters', horizon)
     kwargs = filter_args(cls, blob)
     return cls(optimizer, **kwargs)
+
+
+def current_lr(optimizer: Any, fallback: float) -> float:
+    groups = getattr(optimizer, 'param_groups', None)
+    if not groups:
+        return fallback
+    return float(groups[0].get('lr', fallback))
