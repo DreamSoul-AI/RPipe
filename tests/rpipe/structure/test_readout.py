@@ -11,7 +11,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
 
 def test_aggregate_missing_seed_keeps_gap_and_does_not_fill_zero(
         source_study, run_root, payload_factory, file_bytes):
-    from rpipe.api import aggregate, plan, run
+    from rpipe.api import aggregate, run
+    from rpipe.structure.make import plan
 
     specs = plan(source_study, run_root=run_root)
     assert run(specs[0], payload=payload_factory()).status == 'succeeded'
@@ -28,7 +29,8 @@ def test_aggregate_missing_seed_keeps_gap_and_does_not_fill_zero(
                          ids=['list', 'string', 'boolean', 'nonfinite'])
 def test_bad_optional_metrics_preserve_good_peer_and_original_bytes(
         source_study, run_root, payload_factory, file_bytes, metrics):
-    from rpipe.api import aggregate, plan, run
+    from rpipe.api import aggregate, run
+    from rpipe.structure.make import plan
 
     specs = plan(source_study, run_root=run_root)
     for spec in specs:
@@ -47,7 +49,8 @@ def test_bad_optional_metrics_preserve_good_peer_and_original_bytes(
 
 def test_aggregate_factor_combinations_do_not_share_seed_statistics(
         source_study, run_root, payload_factory):
-    from rpipe.api import aggregate, plan, run
+    from rpipe.api import aggregate, run
+    from rpipe.structure.make import plan
 
     with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
         stream.write('axes: {algorithm.lr: [0.1, 0.2]}\n')
@@ -60,8 +63,9 @@ def test_aggregate_factor_combinations_do_not_share_seed_statistics(
 
 
 def test_duplicate_run_cannot_inflate_aggregate_sample_count(source_study, run_root, payload_factory):
-    from rpipe.api import aggregate, plan, run
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.api import aggregate, run
+    from rpipe.structure.make import plan
+    from rpipe.structure.control import AdmissionError
 
     spec = plan(source_study, run_root=run_root)[0]
     assert run(spec, payload=payload_factory()).status == 'succeeded'
@@ -72,7 +76,8 @@ def test_duplicate_run_cannot_inflate_aggregate_sample_count(source_study, run_r
 @pytest.mark.parametrize('bad_value', [True, float('nan')])
 def test_compare_non_numeric_optional_metric_has_no_numeric_difference(
         source_study, run_root, payload_factory, bad_value):
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
     from rpipe.structure.readout import compare
 
     specs = plan(source_study, run_root=run_root)
@@ -87,7 +92,8 @@ def test_compare_non_numeric_optional_metric_has_no_numeric_difference(
 def test_cross_seed_statistics_keep_sample_standard_deviation(
         source_study, run_root, payload_factory):
     import math
-    from rpipe.api import aggregate, plan, run
+    from rpipe.api import aggregate, run
+    from rpipe.structure.make import plan
 
     class Measurements(payload_factory):
         def collect(self, ctx):
@@ -103,7 +109,8 @@ def test_cross_seed_statistics_keep_sample_standard_deviation(
 
 def test_aggregate_mean_preserves_small_contribution_in_finite_values(
         source_study, run_root, payload_factory):
-    from rpipe.api import aggregate, plan, run
+    from rpipe.api import aggregate, run
+    from rpipe.structure.make import plan
 
     (source_study / 'study.yaml').write_text('seeds: [0, 1, 2]\n', encoding='utf-8')
     values = (1e16, 1.0, -1e16)
@@ -123,7 +130,8 @@ def test_aggregate_mean_preserves_small_contribution_in_finite_values(
                                         ('evidence_complete', 'yes')])
 def test_invalid_result_flags_keep_valid_peer_and_unknown_fact(
         source_study, run_root, payload_factory, file_bytes, field, value):
-    from rpipe.api import aggregate, plan, read_run, run
+    from rpipe.api import aggregate, read_run, run
+    from rpipe.structure.make import plan
 
     specs = plan(source_study, run_root=run_root)
     for spec in specs:
@@ -143,7 +151,8 @@ def test_invalid_result_flags_keep_valid_peer_and_unknown_fact(
 @pytest.mark.parametrize('kind', ['failure', 'cancel'])
 def test_read_run_exposes_explicit_failed_or_cancelled_attempt_without_writing(
         source_study, run_root, payload_factory, file_bytes, kind):
-    from rpipe.api import Cancellation, plan, read_run, run
+    from rpipe.api import Cancellation, read_run, run
+    from rpipe.structure.make import plan
 
     cancellation = Cancellation()
     class Attempt(payload_factory):
@@ -164,7 +173,8 @@ def test_read_run_exposes_explicit_failed_or_cancelled_attempt_without_writing(
 
 def test_result_only_legacy_record_remains_readable_without_migration(
         source_study, run_root, payload_factory, file_bytes):
-    from rpipe.api import plan, read_run, run
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
 
     spec = plan(source_study, run_root=run_root)[0]
     assert run(spec, payload=payload_factory()).status == 'succeeded'
@@ -178,9 +188,10 @@ def test_result_only_legacy_record_remains_readable_without_migration(
 
 def test_unindexed_legacy_attempts_are_unknown_and_cannot_be_selected_by_order(
         source_study, run_root, payload_factory, file_bytes):
-    from rpipe.api import plan, read_run, run
-    from rpipe.structure.artifacts import identity, write_json
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
+    from rpipe.structure.artifact.io import identity, write_json
+    from rpipe.structure.control import AdmissionError
 
     spec = plan(source_study, run_root=run_root)[0]
     for attempt, status in [('f' * 32, 'succeeded'), ('0' * 32, 'failed')]:
@@ -198,8 +209,9 @@ def test_unindexed_legacy_attempts_are_unknown_and_cannot_be_selected_by_order(
 @pytest.mark.parametrize('damage', ['missing-attempt', 'mismatched-attempt', 'typed-attempt', 'bad-schema', 'bad-path'])
 def test_active_execution_record_requires_matching_bounded_attempt_evidence(
         source_study, run_root, payload_factory, file_bytes, damage):
-    from rpipe.api import plan, read_run, run
-    from rpipe.structure.artifacts import read_json, write_json
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
+    from rpipe.structure.artifact.io import read_json, write_json
 
     spec = plan(source_study, run_root=run_root)[0]
     assert run(spec, payload=payload_factory()).status == 'succeeded'

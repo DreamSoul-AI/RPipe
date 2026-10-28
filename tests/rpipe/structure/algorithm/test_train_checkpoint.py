@@ -2,10 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.tracker import AlgorithmTracker
 from rpipe.structure.algorithm.train import TrainAlgorithm
-from rpipe.structure.contracts import SystemConfig
+from rpipe.structure.control import SystemConfig
 from rpipe.structure.system.factory import SystemFactory
 
 pytestmark = [
@@ -430,7 +430,7 @@ def test_cnn_trains_on_cifar_shaped_batches(tmp_path: Path):
     import torch
 
     from rpipe.structure.model.factory import ModelFactory as model_api
-    from rpipe.structure.contracts import ModelConfig
+    from rpipe.structure.control import ModelConfig
 
     class _Data:
         name = 'CIFAR10'

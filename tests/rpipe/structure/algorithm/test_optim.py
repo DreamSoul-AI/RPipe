@@ -1,6 +1,6 @@
 import pytest
 
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.optim import clip_gradients, make_optimizer, make_scheduler
 from rpipe.structure.algorithm.resume import resume_stem
 

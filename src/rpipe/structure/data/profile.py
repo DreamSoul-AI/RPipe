@@ -13,8 +13,9 @@ from typing import Any, Iterable
 
 import yaml
 
-from rpipe.structure.artifacts import _read_text, atomic_write_text, contained
-from rpipe.structure.contracts import AdmissionError, DataConfig, validate_run_root
+from rpipe.structure.artifact.io import _read_text, atomic_write_text, contained
+from rpipe.structure.control import AdmissionError, DataConfig
+from rpipe.structure.artifact.io import validate_run_root
 from rpipe.structure.data.factory import DataFactory, vision_root
 from rpipe.structure.system.origin import normalize_origin
 

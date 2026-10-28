@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import Any
 import json
 
-from .contracts import AdmissionError, RunSpec, SourceMismatch, project_execution
-from .artifacts import contained, identity, read_execution, read_json, safe_error_record, validate_source
+from rpipe.structure.control import AdmissionError, RunSpec, SourceMismatch
+from rpipe.structure.contracts import project_execution
+from rpipe.structure.artifact.io import contained, identity, read_execution, read_json, safe_error_record
+from rpipe.structure.artifact.provenance import validate_source
 
 
 _TERMINAL = {'succeeded', 'failed', 'cancelled', 'unknown'}
@@ -156,7 +158,7 @@ def compare(a: RunSpec, b: RunSpec, *, differences: tuple[str, ...] = ()) -> dic
     return {'left': left, 'right': right, 'metrics': differences, 'changed_conditions': sorted(changed)}
 
 import statistics
-from .artifacts import _owned_stream, _read_text, kinds, read_json as load_result
+from rpipe.structure.artifact.io import _owned_stream, _read_text, kinds, read_json as load_result
 CorruptArtifactError = AdmissionError
 PROCESS_NAME = "process.json"
 RESULT_NAME = "result.json"

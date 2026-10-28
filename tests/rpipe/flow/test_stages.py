@@ -18,7 +18,8 @@ def _hook(source, phase, body):
 
 
 def test_stage_order_runs_write_gate_before_scientific_publication(source_study, run_root, payload_factory):
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
 
     for phase in ('prepare', 'execute', 'collect', 'summarize', 'write'):
         body = f'def run(ctx):\n    ctx.state.setdefault("hooks", []).append("{phase}")\n'
@@ -33,7 +34,8 @@ def test_stage_order_runs_write_gate_before_scientific_publication(source_study,
 
 
 def test_write_hook_failure_cannot_publish_success(source_study, run_root, payload_factory):
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
 
     _hook(source_study, 'write', 'def run(ctx):\n    raise ValueError("write gate failed")\n')
     spec = plan(source_study, run_root=run_root)[0]
@@ -46,7 +48,8 @@ def test_write_hook_failure_cannot_publish_success(source_study, run_root, paylo
 @pytest.mark.parametrize('target', ['config', 'control'])
 def test_study_hook_configuration_change_cannot_publish_success(
         source_study, run_root, payload_factory, file_bytes, phase, target):
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
 
     _hook(source_study, phase, 'def run(ctx):\n    ctx.control.run.data.name = "changed"\n'
           if target == 'control' else
@@ -63,7 +66,8 @@ def test_study_hook_configuration_change_cannot_publish_success(
 
 
 def test_process_hook_failure_preserves_published_scientific_success(source_study, run_root, payload_factory):
-    from rpipe.api import plan, read_run, run
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
 
     _hook(source_study, 'process', 'def run(ctx):\n    raise ValueError("derived processing failed")\n')
     spec = plan(source_study, run_root=run_root)[0]
@@ -76,7 +80,7 @@ def test_process_hook_failure_preserves_published_scientific_success(source_stud
     assert result['derived_status'] == 'failed'
     assert outcome.scientific_status == 'succeeded' and outcome.derived_status == 'failed'
     assert outcome.result['status'] == 'succeeded'
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.control import AdmissionError
     with pytest.raises(AdmissionError, match='immutable'):
         run(spec, payload=payload_factory(), retry=True)
     assert spec.result_path.read_bytes() == stored

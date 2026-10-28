@@ -12,10 +12,10 @@ import threading
 import time
 import uuid
 
-from rpipe.structure.artifacts import (contained, identity, read_json, validate_input_paths,
-                                       write_json)
-from rpipe.structure.contracts import (AdmissionError, Cancellation, RunSpec, SupervisionLimits,
-                                       validate_run_root)
+from rpipe.structure.artifact.io import contained, identity, read_json, validate_input_paths, write_json
+from rpipe.structure.control import AdmissionError, RunSpec
+from rpipe.structure.contracts import Cancellation, SupervisionLimits
+from rpipe.structure.artifact.io import validate_run_root
 from rpipe.structure.execution import error_record
 from rpipe.structure.system.resources import WindowsJob, output_growth, output_snapshot
 
@@ -23,7 +23,7 @@ from rpipe.structure.system.resources import WindowsJob, output_growth, output_s
 def _spec_body(spec):
     return {name: str(getattr(spec, name)) if name in {'source_dir', 'run_root'}
             else spec.to_config() if name == 'config' else getattr(spec, name)
-            for name in RunSpec.__dataclass_fields__}
+            for name, descriptor in RunSpec.__dataclass_fields__.items() if descriptor.init}
 
 
 def _successful(outcome):

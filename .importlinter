@@ -10,15 +10,15 @@ forbidden_modules =
     rpipe.flow
     rpipe.api
 
-[importlinter:contract:pure-contracts]
+[importlinter:contract:pure-control]
 name = Configuration contracts have no implementation dependency
 type = forbidden
 source_modules =
-    rpipe.structure.contracts
+    rpipe.structure.control
 forbidden_modules =
-    rpipe.structure.plan
+    rpipe.structure.make
     rpipe.structure.execution
-    rpipe.structure.artifacts
+    rpipe.structure.artifact
     rpipe.structure.readout
     rpipe.structure.comparison
     rpipe.structure.data
@@ -26,14 +26,13 @@ forbidden_modules =
     rpipe.structure.algorithm
     rpipe.structure.system
 
-[importlinter:contract:pure-plan]
-name = Pure planning only depends on contracts
+[importlinter:contract:planning-does-not-execute]
+name = Planning and publication do not import execution or scientific components
 type = forbidden
 source_modules =
-    rpipe.structure.plan
+    rpipe.structure.make
 forbidden_modules =
     rpipe.structure.execution
-    rpipe.structure.artifacts
     rpipe.structure.readout
     rpipe.structure.comparison
     rpipe.structure.data

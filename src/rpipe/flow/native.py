@@ -10,10 +10,7 @@ from rpipe.structure.system.runtime import check_cancelled
 
 _registry_lock = RLock()
 
-from rpipe.structure.contracts import (
-    AlgorithmConfig, DataConfig, ModelConfig, SystemConfig,
-    control_from_config, validate_control,
-)
+from rpipe.structure.control import AlgorithmConfig, DataConfig, ModelConfig, SystemConfig, resolve_control, validate_control
 
 
 class NativeRun:
@@ -40,7 +37,7 @@ class NativeRun:
                                     for registry in (AlgorithmRegistry, DataRegistry, ModelRegistry)]
 
         cfg = copy.deepcopy(ctx.config)
-        ctx.control = control_from_config(cfg)
+        ctx.control = resolve_control(cfg)
         validate_control(ctx.control)
         system_config = SystemConfig.from_mapping(ctx.control.system)
         ctx.state['runtime'] = apply_runtime(ctx.control.seed, system_config)

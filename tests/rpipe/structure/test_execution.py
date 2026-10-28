@@ -14,8 +14,9 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
 
 
 def test_same_run_competing_starts_invoke_only_one_payload(source_study, run_root, payload_factory):
-    from rpipe.api import plan, run
-    from rpipe.structure.contracts import BusyError
+    from rpipe.structure.make import plan
+    from rpipe.api import run
+    from rpipe.structure.control import BusyError
 
     entered, finish = Event(), Event()
 
@@ -48,7 +49,8 @@ def test_same_run_competing_starts_invoke_only_one_payload(source_study, run_roo
 ])
 def test_phase_failure_and_close_failure_preserve_first_error(
         source_study, run_root, payload_factory, phase, expected):
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
 
     payload = payload_factory(fail=phase, close_error='secondary close failure')
     outcome = run(plan(source_study, run_root=run_root)[0], payload=payload)
@@ -60,7 +62,8 @@ def test_phase_failure_and_close_failure_preserve_first_error(
 
 
 def test_cancel_before_start_does_not_call_payload(source_study, run_root, payload_factory):
-    from rpipe.api import cancel, plan, run
+    from rpipe.api import cancel, run
+    from rpipe.structure.make import plan
     from rpipe.structure.contracts import Cancellation
 
     token = Cancellation()
@@ -73,7 +76,8 @@ def test_cancel_before_start_does_not_call_payload(source_study, run_root, paylo
 
 
 def test_cancel_during_execute_prevents_collect(source_study, run_root, payload_factory):
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
     from rpipe.structure.contracts import Cancellation
 
     token = Cancellation()
@@ -93,8 +97,10 @@ def test_cancel_during_execute_prevents_collect(source_study, run_root, payload_
 @pytest.mark.parametrize('limit', [{'timeout_seconds': 1}, {'memory_bytes': 1048576}])
 def test_unsupported_hard_budget_rejects_before_payload_start(
         source_study, run_root, payload_factory, limit):
-    from rpipe.api import plan, run
-    from rpipe.structure.contracts import AdmissionError, Budget
+    from rpipe.structure.make import plan
+    from rpipe.api import run
+    from rpipe.structure.control import AdmissionError
+    from rpipe.structure.contracts import Budget
 
     payload = payload_factory()
     spec = plan(source_study, run_root=run_root)[0]
@@ -106,8 +112,10 @@ def test_unsupported_hard_budget_rejects_before_payload_start(
 
 def test_payload_boolean_claim_cannot_grant_itself_hard_timeout_capability(
         source_study, run_root, payload_factory):
-    from rpipe.api import plan, run
-    from rpipe.structure.contracts import AdmissionError, Budget
+    from rpipe.structure.make import plan
+    from rpipe.api import run
+    from rpipe.structure.control import AdmissionError
+    from rpipe.structure.contracts import Budget
 
     payload = payload_factory()
     payload.hard_timeout = True
@@ -121,8 +129,10 @@ def test_payload_boolean_claim_cannot_grant_itself_hard_timeout_capability(
 @pytest.mark.parametrize('stop_fails', [False, True], ids=['confirmed-stop', 'unknown-stop'])
 def test_cancel_cleans_only_owned_process_and_unknown_owner_remains_busy(
         source_study, run_root, payload_factory, monkeypatch, stop_fails):
-    from rpipe.api import plan, run
-    from rpipe.structure.contracts import BusyError, Cancellation
+    from rpipe.structure.make import plan
+    from rpipe.api import run
+    from rpipe.structure.control import BusyError
+    from rpipe.structure.contracts import Cancellation
 
     def child():
         return subprocess.Popen([sys.executable, '-B', '-c', 'import time; time.sleep(30)'],
@@ -165,8 +175,9 @@ def test_cancel_cleans_only_owned_process_and_unknown_owner_remains_busy(
 def test_eval_cannot_bind_successful_training_from_another_seed(
         source_study, run_root, payload_factory, file_bytes):
     from dataclasses import replace
-    from rpipe.api import plan, run
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.make import plan
+    from rpipe.api import run
+    from rpipe.structure.control import AdmissionError
 
     with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
         stream.write('axes: {algorithm.mode: [train, eval]}\n')

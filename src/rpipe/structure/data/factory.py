@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Iterator, Callable
-from rpipe.structure.contracts import DataConfig
+from rpipe.structure.control import DataConfig
 
-from rpipe.structure.artifacts import cache_lock, reference_tree, contained
+from rpipe.structure.artifact.io import cache_lock, reference_tree, contained
 
 from rpipe.structure.system.origin import apply_model_origin, bind_endpoint, discard_bad_archive, endpoint_for
 

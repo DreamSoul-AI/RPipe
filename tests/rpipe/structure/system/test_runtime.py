@@ -10,7 +10,7 @@ pytestmark = [
     pytest.mark.result_type('categorical', detail='summary'),
 ]
 
-from rpipe.structure.contracts import SystemConfig
+from rpipe.structure.control import SystemConfig
 from rpipe.structure.system.runtime import apply_runtime, make_generator
 
 

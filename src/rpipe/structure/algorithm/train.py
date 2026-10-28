@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from rpipe.structure.algorithm.factory import Algorithm
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.batch import prepare_tensors
 from rpipe.structure.algorithm.evaluation_support import (
     _is_better,

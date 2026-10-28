@@ -1,5 +1,6 @@
 """Thin explicit CLI. All writes require an external --run-root."""
 from __future__ import annotations
+from rpipe.structure import make as planning
 import argparse
 import json
 from pathlib import Path
@@ -80,7 +81,7 @@ def main(argv=None) -> int:
             limits = api.SupervisionLimits(args.run_seconds, args.batch_seconds, args.rss_bytes,
                                           args.output_bytes, args.poll_seconds, args.cleanup_seconds)
             limits.validate()
-        specs = api.plan(args.study_dir, run_root=args.run_root, version=args.study_version)
+        specs = planning.plan(args.study_dir, run_root=args.run_root, version=args.study_version)
         selected = getattr(args, 'run_id', None) or args.selected_id
         if selected:
             specs = tuple(s for s in specs if s.id == selected)
@@ -89,14 +90,14 @@ def main(argv=None) -> int:
             value = [{'id': s.id, 'experiment': s.experiment, 'seed': s.seed, 'source_digest': s.source_digest,
                       'run_dir': str(s.run_dir), 'train_id': s.train_id} for s in specs]
         elif args.command == 'make':
-            value = api.make(specs)
+            value = planning.publish(specs)
         elif args.command == 'supervise':
             value = api.supervise(specs, limits=limits, evidence_dir=args.evidence_dir, retry=args.retry)
             print(json.dumps(value, default=str))
             return 0 if value['status'] == 'succeeded' else 1
         elif args.command in ('run', 'study', 'launch', 'run-one'):
             if args.command in ('run', 'study'):
-                api.make(specs)
+                planning.publish(specs)
             # A single coordinator handles all public launch paths and the train/eval barrier.
             value = [{'status': r.status, 'quality': r.quality, 'evidence_complete': r.evidence_complete,
                       'attempt': r.attempt, 'scientific_status': r.scientific_status,
@@ -117,7 +118,7 @@ def main(argv=None) -> int:
             value = {'data': str(args.run_root.resolve() / 'shared' / 'data'),
                      'model': str(args.run_root.resolve() / 'shared' / 'model')}
         elif args.command == 'data':
-            from rpipe.structure.artifacts import validate_source
+            from rpipe.structure.artifact.provenance import validate_source
             for spec in specs:
                 validate_source(spec)
             from rpipe.structure.data.profile import profile_study
@@ -125,8 +126,8 @@ def main(argv=None) -> int:
                                   shared_data_dir=args.run_root / 'shared' / 'data',
                                   profiles_dir=specs[0].study_root / 'shared' / 'data', download=args.download)
         elif args.command == 'tensorboard':
-            from rpipe.structure.contracts import validate_run_root
-            from rpipe.structure.artifacts import validate_input_paths
+            from rpipe.structure.artifact.io import validate_run_root
+            from rpipe.structure.artifact.io import validate_input_paths
             for spec in specs:
                 validate_run_root(spec.source_dir, args.out)
                 validate_input_paths(spec, output_root=args.out)
@@ -137,7 +138,7 @@ def main(argv=None) -> int:
             value = api.process(specs)
             if args.figures:
                 from .exports import write_learning_curves
-                from rpipe.structure.artifacts import load_index
+                from rpipe.structure.artifact.io import load_index
                 write_learning_curves(specs[0].study_root, load_index(specs[0].study_root))
         print(json.dumps(value, default=str))
         return 0

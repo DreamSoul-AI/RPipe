@@ -35,7 +35,7 @@ def worker_prepare(ctx):
 
 def worker_write(ctx):
     import torch
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
     body = {'peak_allocated_bytes': torch.cuda.max_memory_allocated(),
             'peak_reserved_bytes': torch.cuda.max_memory_reserved(),
             'flow_seconds': time.perf_counter() - ctx.state['capacity_started'],
@@ -64,9 +64,10 @@ def main(recipe, argv):
     if args.rounds[0] != 1 or len(set(args.rounds)) != len(args.rounds) or len(set(args.models)) != len(args.models):
         parser.error('use unique models and rounds, starting with round1 as the strict baseline')
     recipe.bootstrap()
-    from rpipe.structure.artifacts import atomic_write_text
-    from rpipe.structure.artifacts import load_config, write_config
-    from rpipe.api import plan, make, run as run_spec, read_run, compare_runs
+    from rpipe.structure.artifact.io import atomic_write_text
+    from rpipe.structure.artifact.io import load_config, write_config
+    from rpipe.structure.make import plan, publish
+    from rpipe.api import run as run_spec, read_run, compare_runs
     ident = 'capacity-' + time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8]
     root = args.run_root / 'validation' / ident
     root.mkdir(parents=True, exist_ok=False)
@@ -106,7 +107,7 @@ def main(recipe, argv):
                 atomic_write_text(path / '__init__.py', 'from .run import before, run\n' if phase == 'prepare' else 'from .run import run\n')
             # Mixed factors use seed0 consistently; the same cells repeat in every round.
             specs = plan(folder, run_root=root / 'output')
-            make(specs)
+            publish(specs)
             samples = _gpu_sample()
             if samples[0]['free_bytes'] < round_size * 4 * 1024**3 * 1.25:
                 raise RuntimeError('not enough free GPU memory for the bounded capacity measurement')

@@ -13,7 +13,7 @@ pytestmark = [
 from pathlib import Path
 
 from rpipe.structure.data.factory import DataFactory as data_api
-from rpipe.structure.contracts import DataConfig
+from rpipe.structure.control import DataConfig
 
 
 def test_stub_source_does_not_download(tmp_path: Path):
@@ -28,7 +28,7 @@ def test_stub_source_does_not_download(tmp_path: Path):
 
 @pytest.mark.parametrize('linked', ['dataset', 'native-raw', 'canonical-raw'])
 def test_owned_vision_cache_cannot_publish_through_links_into_source(tmp_path, monkeypatch, file_bytes, linked):
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.control import AdmissionError
     import torchvision.datasets
 
     source, cache = tmp_path / 'source', tmp_path / 'cache'
@@ -89,7 +89,7 @@ def test_cifar10_builder_uses_fake_dataset(tmp_path: Path, monkeypatch, record_s
     downloads = []
 
     from rpipe.structure.data.factory import DataFactory as data_api
-    from rpipe.structure.contracts import DataConfig
+    from rpipe.structure.control import DataConfig
 
     class _Fake:
         def __init__(self, root, train=True, download=False, transform=None):
@@ -141,7 +141,7 @@ def test_svhn_builder_uses_fake_dataset(tmp_path: Path, monkeypatch):
     from PIL import Image
 
     from rpipe.structure.data.factory import DataFactory as data_api
-    from rpipe.structure.contracts import DataConfig
+    from rpipe.structure.control import DataConfig
 
     class _Fake:
         def __init__(self, root, split='train', download=False, transform=None):
@@ -175,7 +175,7 @@ def test_fashionmnist_and_cifar100_builders(tmp_path, monkeypatch):
     from PIL import Image
 
     from rpipe.structure.data.factory import DataFactory as data_api
-    from rpipe.structure.contracts import DataConfig
+    from rpipe.structure.control import DataConfig
 
     class _Gray:
         def __init__(self, root, train=True, download=False, transform=None):
@@ -233,7 +233,7 @@ def test_dataloader_honors_pin_memory_and_workers(tmp_path, monkeypatch):
     from PIL import Image
 
     from rpipe.structure.data.factory import DataFactory as data_api
-    from rpipe.structure.contracts import DataConfig
+    from rpipe.structure.control import DataConfig
 
     class _Fake:
         def __init__(self, root, train=True, download=False, transform=None):

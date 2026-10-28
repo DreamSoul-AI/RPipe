@@ -151,7 +151,7 @@ def read_diagnostics(root, run_id, attempt):
 
 
 def read_execution_projection(root, result):
-    from rpipe.structure.artifacts import contained
+    from rpipe.structure.artifact.io import contained
     from rpipe.structure.contracts import project_execution
 
     busy = True
@@ -277,7 +277,7 @@ def threshold_gate(observed, expected, limit):
 
 
 def compare(study, reference, *, partial=False):
-    from rpipe.api import source_digest
+    from rpipe.structure.artifact.provenance import source_digest
     expected_source = source_digest(STUDY)
     contract = reference['acceptance_contract']
     report = {'schema': 'rpipe.historical_curve_comparison.v1',
@@ -423,7 +423,7 @@ def plot_report(report, reference, destination):
     import matplotlib.pyplot as plt
     import uuid
 
-    from rpipe.structure.artifacts import atomic_replace
+    from rpipe.structure.artifact.io import atomic_replace
 
     tmp = destination.with_name(f'{uuid.uuid4().hex}.tmp')
     owned = False
@@ -491,7 +491,7 @@ def plot_report(report, reference, destination):
 
 
 def main(argv=None):
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--study-root', type=Path, required=True, help='Explicit research version output root')

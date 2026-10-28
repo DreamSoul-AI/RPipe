@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.kwargs import algorithm_blob, filter_args, torch_attr
 
 OPTIM_ALIASES = {

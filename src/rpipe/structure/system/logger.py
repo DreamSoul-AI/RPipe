@@ -20,7 +20,7 @@ import unicodedata
 import uuid
 
 from rpipe import __version__
-from rpipe.structure.artifacts import _owned_stream, cache_lock
+from rpipe.structure.artifact.io import _owned_stream, cache_lock
 
 _RUNTIME_ID = uuid.uuid4().hex
 _TOKEN = re.compile(r'^\w[\w.:-]{0,127}$')
@@ -253,7 +253,7 @@ class Logger:
 
     def exception(self, message: str, exc: BaseException | dict[str, Any], *, event: str = 'task.failed', **fields: Any) -> None:
         try:
-            from rpipe.structure.artifacts import safe_error_record
+            from rpipe.structure.artifact.io import safe_error_record
             error = safe_error_record(exc)
             chain = error.get('traceback', '')
             causes = list(error.get('causes', []))

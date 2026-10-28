@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from rpipe.structure.artifacts import read_json as load_result, write_json as write_result
+from rpipe.structure.artifact.io import read_json as load_result, write_json as write_result
 
 pytestmark = [
     pytest.mark.integration, pytest.mark.content, pytest.mark.p1,

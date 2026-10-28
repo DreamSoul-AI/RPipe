@@ -39,7 +39,7 @@ def sha(path: Path) -> str:
 
 
 def save_json(path: Path, body: Any) -> None:
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
 
     atomic_write_text(path, json.dumps(body, ensure_ascii=False, indent=2) + '\n')
 
@@ -65,7 +65,7 @@ def owned(resource: Any, close: Any = None):
 
 
 def source_manifest() -> dict[str, str]:
-    from rpipe.api import source_digest
+    from rpipe.structure.artifact.provenance import source_digest
 
     study = Path(__file__).resolve().parents[2]
     return {'source_digest': source_digest(study)}
@@ -190,7 +190,7 @@ class MainArchive:
 
 
 def runtime_config(device: str) -> Any:
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.control import SystemConfig
     return SystemConfig.from_mapping({'device': device, 'deterministic': True,
                                      'cudnn_benchmark': False, 'cudnn_deterministic': True,
                                      'cudnn_allow_tf32': False, 'matmul_allow_tf32': False})
@@ -318,7 +318,7 @@ class Observations:
 
 
 def native_data(workspace: Path, name: str, assets: Path) -> Any:
-    from rpipe.structure.contracts import DataConfig
+    from rpipe.structure.control import DataConfig
     from rpipe.structure.data.factory import DataFactory
     return DataFactory.build(DataConfig.from_mapping({'name': name, 'source': 'torch', 'config': {
         'batch_size': 250, 'test_batch_ratio': 4, 'pin_memory': True, 'num_workers': 0, 'augment': True}}),
@@ -326,7 +326,7 @@ def native_data(workspace: Path, name: str, assets: Path) -> Any:
 
 
 def native_model(data: Any, name: str, assets: Path) -> Any:
-    from rpipe.structure.contracts import ModelConfig
+    from rpipe.structure.control import ModelConfig
     from rpipe.structure.model.factory import ModelFactory
     return ModelFactory.build(ModelConfig.from_mapping({'name': name, 'source': 'custom_torch'}),
                               assets, data_meta=data.meta)
@@ -385,7 +385,7 @@ def mapping() -> dict[str, Any]:
 def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[Any, Any, Any, Any, Any]) -> dict[str, Any]:
     bootstrap()
     import torch
-    from rpipe.structure.contracts import AlgorithmConfig
+    from rpipe.structure.control import AlgorithmConfig
     from rpipe.structure.algorithm.train import TrainAlgorithm
     from rpipe.structure.algorithm.evaluation import EvalAlgorithm
     from rpipe.structure.algorithm.tracker import AlgorithmTracker

@@ -14,14 +14,15 @@ pytestmark = [pytest.mark.content, pytest.mark.p1,
 @pytest.mark.e2e
 def test_native_public_run_trains_two_updates_then_independently_evaluates_own_best(
         tensor_study, run_root, file_bytes):
-    from rpipe.api import make, plan, process, read_run, run
+    from rpipe.structure.make import publish, plan
+    from rpipe.api import process, read_run, run
     from rpipe.structure.system.factory import SystemFactory
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.control import SystemConfig
 
     before = file_bytes(tensor_study)
     train, evaluate = plan(tensor_study, run_root=run_root)
     assert evaluate.train_id == train.id
-    make((train, evaluate))
+    publish((train, evaluate))
     assert run(train).status == 'succeeded'
     trained = read_run(train)
     assert trained['execute']['steps'] == 2
@@ -44,7 +45,8 @@ def test_native_public_run_trains_two_updates_then_independently_evaluates_own_b
 def test_silent_worker_cannot_reuse_previous_worker_response(
         source_study, run_root, monkeypatch):
     import importlib
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
 
     spec = plan(source_study, run_root=run_root)[0]
     spec.run_dir.mkdir(parents=True)
@@ -72,8 +74,9 @@ def test_abrupt_worker_exit_keeps_unknown_owner_when_descendants_cannot_be_verif
     import importlib
     import os
     from types import SimpleNamespace
-    from rpipe.api import plan, run
-    from rpipe.structure.contracts import BusyError
+    from rpipe.structure.make import plan
+    from rpipe.api import run
+    from rpipe.structure.control import BusyError
 
     with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
         stream.write('recipe: recipe.py\n' if extension == 'recipe' else
@@ -112,9 +115,10 @@ def test_windows_hard_timeout_admission_matches_possible_descendants(
     import importlib
     import os
     from types import SimpleNamespace
-    from rpipe.api import plan
-    from rpipe.structure.artifacts import load_config, write_config
-    from rpipe.structure.contracts import AdmissionError, Budget
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact.io import load_config, write_config
+    from rpipe.structure.control import AdmissionError
+    from rpipe.structure.contracts import Budget
 
     with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
         stream.write('recipe: recipe.py\n' if extension == 'recipe' else

@@ -11,7 +11,7 @@ pytestmark = [
 ]
 
 
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.progress import checkpoint_names, crossed_percents, due_period, format_hms, infer_steps_per_epoch, parse_checkpoint_mode, remaining_seconds, resolve_budget, snapshot_name
 
 

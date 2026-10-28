@@ -1,4 +1,5 @@
 """Explicit input pins verify bytes; environment observations stay separate from identity."""
+from rpipe.structure.artifact import provenance as source_provenance
 import hashlib
 import json
 import sys
@@ -33,9 +34,10 @@ def _declare(source, inputs, *, data=None, model=None, stats=None):
 @pytest.mark.parametrize('kind', ['file', 'directory'])
 def test_declared_pin_drift_is_rejected_without_resigning_saved_success(
         source_study, run_root, tmp_path, payload_factory, file_bytes, kind):
-    from rpipe.api import plan, read_run, run
-    from rpipe.structure.artifacts import validate_source
-    from rpipe.structure.contracts import SourceMismatch
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
+    from rpipe.structure.artifact.provenance import validate_source
+    from rpipe.structure.control import SourceMismatch
 
     root = tmp_path / 'input'
     root.mkdir()
@@ -58,8 +60,8 @@ def test_declared_pin_drift_is_rejected_without_resigning_saved_success(
 
 
 def test_directory_pin_rejects_undeclared_files(source_study, run_root, tmp_path):
-    from rpipe.api import plan
-    from rpipe.structure.contracts import SourceMismatch
+    from rpipe.structure.make import plan
+    from rpipe.structure.control import SourceMismatch
 
     root = tmp_path / 'input'
     root.mkdir()
@@ -73,8 +75,8 @@ def test_directory_pin_rejects_undeclared_files(source_study, run_root, tmp_path
 
 @pytest.mark.parametrize('name', ['../outside.bin', '/outside.bin', 'C:/outside.bin'])
 def test_directory_pin_rejects_escaping_member_names(source_study, run_root, tmp_path, name):
-    from rpipe.api import plan
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.make import plan
+    from rpipe.structure.control import AdmissionError
 
     root = tmp_path / 'input'
     root.mkdir()
@@ -84,8 +86,8 @@ def test_directory_pin_rejects_escaping_member_names(source_study, run_root, tmp
 
 
 def test_directory_pin_rejects_external_symlink_even_when_hash_matches(source_study, run_root, tmp_path):
-    from rpipe.api import plan
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.make import plan
+    from rpipe.structure.control import AdmissionError
 
     root = tmp_path / 'input'
     root.mkdir()
@@ -102,8 +104,8 @@ def test_directory_pin_rejects_external_symlink_even_when_hash_matches(source_st
 
 def test_input_provenance_distinguishes_verified_unverified_and_missing_without_hashing_unpinned(
         source_study, run_root, tmp_path, monkeypatch):
-    from rpipe.api import plan
-    from rpipe.structure import artifacts
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact import io as artifacts
 
     root = tmp_path / 'input'
     root.mkdir()
@@ -117,7 +119,7 @@ def test_input_provenance_distinguishes_verified_unverified_and_missing_without_
         assert path == stats, 'provenance hashed an unpinned input'
         return digest(path)
     monkeypatch.setattr(artifacts, '_digest', only_declared)
-    body = artifacts.input_provenance(spec)
+    body = source_provenance.input_provenance(spec)
     refs = body['references']
     assert refs['data.path']['status'] == 'unverified'
     assert refs['model.path']['status'] == 'missing'
@@ -127,7 +129,7 @@ def test_input_provenance_distinguishes_verified_unverified_and_missing_without_
 
 def test_environment_snapshot_is_actual_and_does_not_import_scientific_modules(monkeypatch):
     import builtins
-    from rpipe.structure.artifacts import environment_snapshot
+    from rpipe.structure.artifact.provenance import environment_snapshot
 
     native_import = builtins.__import__
     def reject_science(name, *args, **kwargs):
@@ -143,8 +145,9 @@ def test_environment_snapshot_is_actual_and_does_not_import_scientific_modules(m
 
 def test_execution_records_input_and_environment_as_observations(
         source_study, run_root, tmp_path, payload_factory):
-    from rpipe.api import plan, read_run, run
-    from rpipe.structure.artifacts import read_json
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
+    from rpipe.structure.artifact.io import read_json
 
     item = tmp_path / 'input.bin'
     item.write_bytes(b'scientific input')
@@ -163,8 +166,8 @@ def test_execution_records_input_and_environment_as_observations(
 @pytest.mark.parametrize('reference', ['pinned-directory', 'unpinned-directory', 'stats-file'])
 def test_planning_rejects_input_overlap_before_writing_any_output(
         source_study, run_root, payload_factory, file_bytes, reference):
-    from rpipe.api import plan
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.make import plan
+    from rpipe.structure.control import AdmissionError
 
     output = plan(source_study, run_root=run_root)[0].study_root
     output.mkdir(parents=True)
@@ -182,7 +185,8 @@ def test_planning_rejects_input_overlap_before_writing_any_output(
 
 
 def test_pinned_shared_input_sibling_is_allowed(source_study, run_root, payload_factory):
-    from rpipe.api import plan, read_run, run
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
 
     shared = run_root / 'shared' / 'data'
     shared.mkdir(parents=True)
@@ -198,8 +202,8 @@ def test_pinned_shared_input_sibling_is_allowed(source_study, run_root, payload_
 @pytest.mark.parametrize('profile_present', [False, True])
 def test_implicit_vision_profile_is_an_observed_unverified_input_without_hashing(
         source_study, run_root, tmp_path, monkeypatch, profile_present):
-    from rpipe.api import plan
-    from rpipe.structure import artifacts
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact import io as artifacts
 
     raw = tmp_path / 'input'
     raw.mkdir()
@@ -220,7 +224,7 @@ def test_implicit_vision_profile_is_an_observed_unverified_input_without_hashing
         assert path != profile, 'implicit unpinned profile must not be hashed'
         return native_digest(path)
     monkeypatch.setattr(artifacts, '_digest', only_declared)
-    body = artifacts.input_provenance(spec)
+    body = source_provenance.input_provenance(spec)
     row = body['references']['data.implicit_stats_path']
     assert row['resolved_path'] == str(profile.resolve())
     assert row['status'] == ('unverified' if profile_present else 'builtin_fallback')
@@ -228,8 +232,8 @@ def test_implicit_vision_profile_is_an_observed_unverified_input_without_hashing
 
 
 def test_explicit_vision_statistics_override_implicit_profile(source_study, run_root, tmp_path):
-    from rpipe.api import plan
-    from rpipe.structure.artifacts import input_provenance
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact.provenance import input_provenance
 
     raw = tmp_path / 'input'
     raw.mkdir()
@@ -256,7 +260,8 @@ def test_explicit_vision_statistics_override_implicit_profile(source_study, run_
 @pytest.mark.parametrize('actual_source', ['builtin_fallback', 'study_profile'])
 def test_published_provenance_uses_observed_statistics_source_after_prepare(
         source_study, run_root, tmp_path, payload_factory, actual_source):
-    from rpipe.api import plan, read_run, run
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
 
     raw = tmp_path / 'input'
     raw.mkdir()
@@ -292,8 +297,8 @@ def test_published_provenance_uses_observed_statistics_source_after_prepare(
 @pytest.mark.parametrize('cache_present', [False, True])
 def test_builtin_statistics_do_not_verify_unpinned_default_data_cache(
         source_study, run_root, cache_present):
-    from rpipe.api import plan
-    from rpipe.structure.artifacts import input_provenance
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact.provenance import input_provenance
 
     config_path = source_study / 'experiment_config.yaml'
     config = yaml.safe_load(config_path.read_text(encoding='utf-8'))
@@ -311,7 +316,8 @@ def test_builtin_statistics_do_not_verify_unpinned_default_data_cache(
 
 def test_actual_statistics_reference_survives_default_profile_removal(
         source_study, run_root, tmp_path, payload_factory):
-    from rpipe.api import plan, read_run, run
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
 
     raw = tmp_path / 'input'
     raw.mkdir()
@@ -338,9 +344,9 @@ def test_actual_statistics_reference_survives_default_profile_removal(
 
 def test_optional_output_root_protects_inputs_without_writing(
         source_study, run_root, tmp_path, file_bytes):
-    from rpipe.api import plan
-    from rpipe.structure.artifacts import validate_input_paths
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact.io import validate_input_paths
+    from rpipe.structure.control import AdmissionError
 
     raw = tmp_path / 'input'
     raw.mkdir()
@@ -357,8 +363,8 @@ def test_optional_output_root_protects_inputs_without_writing(
 
 def test_consumed_explicit_statistics_are_unverified_after_unpinned_file_disappears(
         source_study, run_root, tmp_path):
-    from rpipe.api import plan
-    from rpipe.structure.artifacts import input_provenance
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact.provenance import input_provenance
 
     stats = tmp_path / 'stats.yaml'
     stats.write_text('mean: [0.1]\nstd: [0.9]\n', encoding='utf-8')
@@ -374,9 +380,9 @@ def test_consumed_explicit_statistics_are_unverified_after_unpinned_file_disappe
 @pytest.mark.parametrize('destination', ['default-cache', 'canonical-cache', 'recorded-stats'])
 def test_export_output_guard_protects_default_cache_and_recorded_statistics(
         source_study, run_root, tmp_path, destination):
-    from rpipe.api import plan
-    from rpipe.structure.artifacts import identity, validate_input_paths, write_json
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact.io import identity, validate_input_paths, write_json
+    from rpipe.structure.control import AdmissionError
 
     config_path = source_study / 'experiment_config.yaml'
     config = yaml.safe_load(config_path.read_text(encoding='utf-8'))

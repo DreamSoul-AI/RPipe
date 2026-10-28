@@ -11,7 +11,7 @@ pytestmark = [
 ]
 
 
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.train import TrainAlgorithm, make_scheduler
 from rpipe.structure.algorithm.tracker import AlgorithmTracker
 
@@ -21,7 +21,7 @@ def test_train_summary_uses_last_evaluation_segment(tmp_path, unit):
     import torch
     from types import SimpleNamespace
     from rpipe.structure.system.factory import SystemFactory
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.control import SystemConfig
 
     class Batches:
         meta = {'train_size': 4, 'batch_size': 1}
@@ -68,7 +68,7 @@ def test_train_summary_omits_metrics_that_were_not_requested(tmp_path, names, ab
     from types import SimpleNamespace
     import torch
     from rpipe.structure.algorithm.metrics import MetricBundle
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.control import SystemConfig
     from rpipe.structure.system.factory import SystemFactory
 
     data = SimpleNamespace(meta={}, iter_batches=lambda split: iter([
@@ -123,7 +123,7 @@ def test_explicit_stub_is_supported_by_both_sources(tmp_path, mode, source):
 
     from rpipe.structure.algorithm.factory import AlgorithmFactory as algorithm_api
     from rpipe.structure.data.factory import DataFactory as data_api
-    from rpipe.structure.contracts import DataConfig
+    from rpipe.structure.control import DataConfig
 
     data = data_api.build(DataConfig(name='Toy', source='stub'), tmp_path, seed=2)
     algorithm = algorithm_api.build(AlgorithmConfig(mode=mode, source=source))
@@ -172,7 +172,7 @@ def test_train_reports_lr_used_by_completed_optimizer_step(tmp_path, eval_period
 
     import torch
 
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.control import SystemConfig
     from rpipe.structure.system.factory import SystemFactory
 
     images = torch.eye(2)
@@ -237,7 +237,7 @@ def test_checkpoint_progress_matches_completed_updates(tmp_path, unit, early_sto
 
     import torch
 
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.control import SystemConfig
     from rpipe.structure.system.factory import SystemFactory
 
     images, targets = torch.eye(2), torch.arange(2)
@@ -355,9 +355,9 @@ def test_train_final_flush_cannot_replace_primary_failure(tmp_path, monkeypatch,
     """Supervised train failure -> final flush refusal -> original error and old state survive."""
     from types import SimpleNamespace
     import torch
-    from rpipe.structure import artifacts as _atomic
+    from rpipe.structure.artifact import io as _atomic
     from rpipe.structure.system.factory import SystemFactory
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.control import SystemConfig
 
     tracker = AlgorithmTracker(tmp_path)
     tracker.flush_state()
@@ -415,9 +415,9 @@ def test_successful_train_final_flush_failure_still_propagates(tmp_path, monkeyp
     """Successful tiny CPU train body -> failed final flush -> publication error still propagates."""
     from types import SimpleNamespace
     import torch
-    from rpipe.structure import artifacts as _atomic
+    from rpipe.structure.artifact import io as _atomic
     from rpipe.structure.system.factory import SystemFactory
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.control import SystemConfig
 
     class Batches:
         meta = {'train_size': 2, 'batch_size': 2}

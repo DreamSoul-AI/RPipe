@@ -13,12 +13,12 @@ pytestmark = [
 from pathlib import Path
 from types import SimpleNamespace
 
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.evaluation import EvalAlgorithm
 from rpipe.structure.algorithm.resume import sibling_train_checkpoint
 from rpipe.structure.algorithm.tracker import AlgorithmTracker
-from rpipe.structure.artifacts import write_json
-from rpipe.structure.contracts import SystemConfig
+from rpipe.structure.artifact.io import write_json
+from rpipe.structure.control import SystemConfig
 from rpipe.structure.system.factory import SystemFactory
 
 

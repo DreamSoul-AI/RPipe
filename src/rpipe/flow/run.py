@@ -10,8 +10,10 @@ import sys
 import time
 import uuid
 
-from rpipe.structure.contracts import AdmissionError, Budget, Cancellation, RunSpec, control_from_config
-from rpipe.structure.artifacts import ArtifactLayout, environment_snapshot, identity, load_config, read_json, write_json
+from rpipe.structure.control import AdmissionError, RunSpec, resolve_control
+from rpipe.structure.contracts import Budget, Cancellation
+from rpipe.structure.artifact.io import ArtifactLayout, identity, load_config, read_json, write_json
+from rpipe.structure.artifact.provenance import environment_snapshot
 from rpipe.structure.execution import Cancelled, error_record, execute
 from rpipe.structure.execution import RunContext
 from rpipe.structure.system.logger import Logger
@@ -34,7 +36,7 @@ def configure(ctx, *, runtime_id=None, request_id=None, stdout=True):
     ctx.state['logger'].info('Run execution started', event='task.started')
     study = load_config(ctx.study_dir / 'study.yaml')
     ctx.state['study'] = study
-    ctx.control = control_from_config(ctx.config)
+    ctx.control = resolve_control(ctx.config)
     ctx.state['before_prepare'] = lambda current: run_study_phase(current.study_dir, 'prepare', current, study, entry='before')
     ctx.state['apply_recipe'] = lambda current: apply_recipe(current.study_dir, study, RecipeContext(
         current.study_dir, current.spec.id, current.spec.seed, current.config,
@@ -77,7 +79,7 @@ class ProcessRun:
         self.request = folder / 'worker-request.json'
         self.output = folder / 'worker-output.json'
         write_json(self.request, {'request': self.nonce, 'identity': identity(ctx.spec), 'spec':
-                                {'id': ctx.spec.id, 'experiment': ctx.spec.experiment, 'seed': ctx.spec.seed,
+                                {'id': ctx.spec.id, 'seed': ctx.spec.seed,
                                  'config': ctx.config, 'source_dir': str(ctx.study_dir),
                                  'run_root': str(ctx.spec.run_root), 'source_digest': ctx.spec.source_digest,
                                  'version': ctx.spec.version, 'train_id': ctx.spec.train_id},

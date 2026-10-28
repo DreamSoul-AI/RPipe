@@ -15,7 +15,7 @@ from pathlib import Path
 def _config(root, name):
     return root / 'configs' / (name + '.yaml')
 
-from rpipe.structure.artifacts import write_config
+from rpipe.structure.artifact.io import write_config
 from rpipe.structure.data.prepare import prepare_shared_data
 
 

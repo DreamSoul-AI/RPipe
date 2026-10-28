@@ -39,7 +39,7 @@ def main(recipe, argv):
               'complete': False, 'status': 'running', 'expected_groups': 4,
               'checkpoint_local_only': str(args.checkpoint.resolve()), 'groups': [],
               'scope': 'same checkpoint/full test; FP32 supported gate, TF32 diagnostic not a replacement baseline'}
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
     original = recipe.source_manifest()
     report['source_hashes'] = original
     for tf32 in (False, True):
@@ -79,18 +79,18 @@ def main(recipe, argv):
 
 
 def _worker(recipe, args):
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
 
     import torch
-    from rpipe.structure.contracts import AlgorithmConfig
+    from rpipe.structure.control import AlgorithmConfig
     from rpipe.structure.algorithm.evaluation import EvalAlgorithm
     from rpipe.structure.algorithm.metrics import MetricBundle
     from rpipe.structure.algorithm.tracker import AlgorithmTracker
-    from rpipe.structure.contracts import DataConfig
+    from rpipe.structure.control import DataConfig
     from rpipe.structure.data.factory import DataFactory
-    from rpipe.structure.contracts import ModelConfig
+    from rpipe.structure.control import ModelConfig
     from rpipe.structure.model.factory import ModelFactory
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.control import SystemConfig
     from rpipe.structure.system.factory import SystemFactory
     from rpipe.structure.system.runtime import apply_runtime
     torch.set_num_threads(2)

@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 
 
 def capture_rng() -> dict[str, Any]:
@@ -85,7 +85,7 @@ def sibling_train_checkpoint(
 def sibling_train_ids(study_dir: Path, run_id: str) -> list[str]:
     """Match the current index's factors and seed, even before checkpoints exist."""
     import json
-    from rpipe.structure.artifacts import _read_text
+    from rpipe.structure.artifact.io import _read_text
 
     def load_index(root):
         return json.loads(_read_text(Path(root) / 'index.json'))
@@ -166,7 +166,7 @@ def _has_checkpoint_material(path: Path) -> bool:
 def sibling_train_dependency(study_dir: Path, run_id: str) -> str | None:
     """Identify the train that launch must finish before this eval can run."""
     import yaml
-    from rpipe.structure.artifacts import _read_text
+    from rpipe.structure.artifact.io import _read_text
 
     def load_config(path):
         return yaml.safe_load(_read_text(path))

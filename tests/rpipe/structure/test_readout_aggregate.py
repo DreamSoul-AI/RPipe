@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from rpipe.structure.readout import load_curve_series, load_tracker_history
-from rpipe.structure import artifacts as kinds
+from rpipe.structure.artifact import io as kinds
 
 pytestmark = [
     pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
@@ -170,7 +170,7 @@ def test_optional_jsonl_keeps_unexpected_decoder_runtime_error(tmp_path, monkeyp
 
 
 def _result_read_inputs(root, payload):
-    from rpipe.structure.artifacts import write_json as write_result
+    from rpipe.structure.artifact.io import write_json as write_result
 
     index = {'study': 'synthetic', 'experiments': [{'factors': {}, 'runs': [
         {'id': 'bad', 'seed': 0}, {'id': 'peer', 'seed': 1}]}]}
@@ -234,8 +234,8 @@ def test_optional_result_stat_read_and_programming_error_boundary(tmp_path, monk
 
 @pytest.mark.parametrize('payload,kind', [('nonobject', 'artifact'), ('deep', 'recursion')])
 def test_optional_result_fix_does_not_relax_strict_public_loader(tmp_path, payload, kind):
-    from rpipe.structure.contracts import AdmissionError as CorruptArtifactError
-    from rpipe.structure.artifacts import read_json as load_result
+    from rpipe.structure.control import AdmissionError as CorruptArtifactError
+    from rpipe.structure.artifact.io import read_json as load_result
 
     _, bad, before = _result_read_inputs(tmp_path, payload)
     with pytest.raises(CorruptArtifactError if kind == 'artifact' else RecursionError):

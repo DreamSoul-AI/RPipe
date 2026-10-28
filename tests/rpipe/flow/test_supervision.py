@@ -12,8 +12,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from rpipe.structure.artifacts import identity, write_json
-from rpipe.structure.contracts import AdmissionError, Cancellation, RunOutcome, SupervisionLimits
+from rpipe.structure.artifact.io import identity, write_json
+from rpipe.structure.control import AdmissionError
+from rpipe.structure.contracts import Cancellation, RunOutcome, SupervisionLimits
 
 pytestmark = [pytest.mark.content, pytest.mark.p1,
               pytest.mark.cost(cost_class='c2'),
@@ -27,7 +28,7 @@ def module():
 
 @pytest.fixture
 def specs(source_study, run_root):
-    from rpipe.api import plan
+    from rpipe.structure.make import plan
     return plan(source_study, run_root=run_root)
 
 
@@ -60,7 +61,7 @@ def fake_parent(monkeypatch, module, specs, *, scenario=None, assign_error=False
                 body = json.loads(line)
                 state.sent.append(body)
                 if 'request_path' in body and scenario is not None:
-                    scenario(json.loads(Path(body['request_path']).read_text()), state)
+                    scenario(json.loads(Path(body['request_path']).read_text(encoding='utf-8')), state)
                 elif body.get('action') == 'cancel':
                     state.child.returncode = 1
 
@@ -289,7 +290,7 @@ def test_stop_keeps_partial_publication_and_busy_owner(module, specs, limits, tm
     assert report['interrupted']['scientific_status'] == 'succeeded'
     assert report['interrupted']['busy'] and not report['interrupted']['evidence_complete']
     assert (spec.run_dir / '.execution').is_dir()
-    assert json.loads(spec.result_path.read_text())['status'] == 'succeeded'
+    assert json.loads(spec.result_path.read_text(encoding='utf-8'))['status'] == 'succeeded'
 
 
 @pytest.mark.unit
@@ -332,7 +333,7 @@ def test_coordinator_stops_first_failure_using_existing_run_contract(module, spe
                           quality=fault != 'quality', evidence_complete=fault != 'incomplete')
     monkeypatch.setattr(api, 'run', run)
     assert module.coordinator() == 1
-    body = json.loads((tmp_path / 'progress.json').read_text())
+    body = json.loads((tmp_path / 'progress.json').read_text(encoding='utf-8'))
     assert len(calls) == 1 and calls[0][1]['retry'] is False
     assert body['done'] and len(body['completed']) == (0 if fault == 'exception' else 1)
 
@@ -346,7 +347,7 @@ def test_coordinator_eof_is_a_closed_gate(module, monkeypatch):
 _TINY_COORDINATOR = '''import json, subprocess, sys, time
 from pathlib import Path
 from rpipe import api
-from rpipe.structure.artifacts import identity, write_json
+from rpipe.structure.artifact.io import identity, write_json
 from rpipe.structure.contracts import RunOutcome
 from rpipe.flow.supervision import coordinator
 mode = sys.argv[1]
@@ -490,7 +491,8 @@ def test_real_windows_active_cancel_and_observer_failure_retain_owner(module, sp
 @pytest.mark.integration
 @pytest.mark.skipif(os.name != 'nt', reason='Windows Job Object process-tree contract')
 def test_real_public_run_owns_and_releases_tiny_train_eval(module, tensor_study, run_root, tmp_path):
-    from rpipe.api import plan, read_run
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run
     specs = plan(tensor_study, run_root=run_root)
     limits = SupervisionLimits(run_seconds=20, batch_seconds=45, rss_bytes=2 * 1024 ** 3,
                                output_bytes=8 * 1024 ** 2, poll_seconds=.02, cleanup_seconds=1)
@@ -507,7 +509,7 @@ def test_real_public_run_owns_and_releases_tiny_train_eval(module, tensor_study,
 @pytest.mark.skipif(os.name != 'nt', reason='Windows Job Object process-tree contract')
 def test_real_publication_hook_timeout_preserves_science_and_busy_owner(module, tensor_study,
                                                                        run_root, tmp_path):
-    from rpipe.api import plan
+    from rpipe.structure.make import plan
     with (tensor_study / 'study.yaml').open('a', encoding='utf-8') as stream:
         stream.write('flow: {study_phases: true}\n')
     (tensor_study / 'flow').mkdir()

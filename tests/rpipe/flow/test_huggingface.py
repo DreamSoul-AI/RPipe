@@ -17,10 +17,11 @@ def test_hf_two_step_training_publishes_own_best_for_independent_eval(tensor_stu
     pytest.importorskip('transformers')
     pytest.importorskip('accelerate')
     import yaml
-    from rpipe.api import plan, read_run, run
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
     from rpipe.flow.huggingface import HuggingFaceRun
     from rpipe.structure.system.factory import SystemFactory
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.control import SystemConfig
 
     path = tensor_study / 'experiment_config.yaml'
     config = yaml.safe_load(path.read_text())
@@ -45,7 +46,8 @@ class NoHF(importlib.abc.MetaPathFinder):
         if fullname.split('.')[0] in {'transformers', 'datasets', 'accelerate'}:
             raise ModuleNotFoundError('optional dependency absent: ' + fullname)
 sys.meta_path.insert(0, NoHF())
-from rpipe.api import plan, read_run, report
+from rpipe.structure.make import plan
+from rpipe.api import read_run, report
 from rpipe.flow.huggingface import HuggingFaceRun
 specs = plan(sys.argv[1], run_root=sys.argv[2])
 assert read_run(specs[0])['status'] == 'missing'

@@ -205,7 +205,7 @@ def test_report_keeps_diagnostic_metrics_without_arbitrary_extra(tmp_path, capsy
 
 
 def test_busy_cross_process_log_lock_never_waits_for_scientific_owner(tmp_path):
-    from rpipe.structure.artifacts import cache_lock
+    from rpipe.structure.artifact.io import cache_lock
     logger = Logger(tmp_path)
     before = logger.path.read_bytes()
     script = ('import sys; from rpipe.structure.system.logger import Logger; '
@@ -224,7 +224,7 @@ def test_busy_cross_process_log_lock_never_waits_for_scientific_owner(tmp_path):
 
 def test_explicit_factory_logger_injection_does_not_create_another_sink(tmp_path, monkeypatch):
     import rpipe.structure.system.factory as factory
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.control import SystemConfig
     logger = Logger(tmp_path)
     def unexpected(*args, **kwargs):
         raise AssertionError('must reuse the execution logger')

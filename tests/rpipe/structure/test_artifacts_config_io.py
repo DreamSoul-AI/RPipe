@@ -1,6 +1,6 @@
 from pathlib import Path
 import pytest
-from rpipe.structure.artifacts import load_config, write_config
+from rpipe.structure.artifact.io import load_config, write_config
 pytestmark=[pytest.mark.unit,pytest.mark.content,pytest.mark.p1,
             pytest.mark.structure_layer,pytest.mark.module_artifact,
             pytest.mark.cost(cost_class='c1'),pytest.mark.result_type('categorical',detail='summary')]

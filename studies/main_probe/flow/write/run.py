@@ -11,8 +11,8 @@ def write_observed_run(root, *, snapshots, best, data, model, implementation):
     import json
     import torch
     from types import SimpleNamespace
-    from rpipe.structure.artifacts import write_config, write_json as write_result
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import write_config, write_json as write_result
+    from rpipe.structure.artifact.io import atomic_write_text
 
     root = Path(root)
     if root.parent.name != 'runs':

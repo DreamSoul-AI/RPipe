@@ -9,7 +9,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
 
 
 def test_error_record_keeps_types_and_frames_without_private_exception_text():
-    from rpipe.structure.artifacts import safe_error_record
+    from rpipe.structure.artifact.io import safe_error_record
 
     try:
         try:
@@ -28,7 +28,7 @@ def test_error_record_keeps_types_and_frames_without_private_exception_text():
 
 
 def test_error_record_never_calls_exception_string_conversion():
-    from rpipe.structure.artifacts import safe_error_record
+    from rpipe.structure.artifact.io import safe_error_record
 
     class BrokenString(Exception):
         def __str__(self):
@@ -40,7 +40,7 @@ def test_error_record_never_calls_exception_string_conversion():
 
 
 def test_worker_error_record_is_normalized_without_trusting_remote_text():
-    from rpipe.structure.artifacts import safe_error_record
+    from rpipe.structure.artifact.io import safe_error_record
 
     error = RuntimeError('local-private')
     error.record = {'type': 'LookupError', 'message': 'token=remote-private',
@@ -56,7 +56,7 @@ def test_worker_error_record_is_normalized_without_trusting_remote_text():
 
 
 def test_error_cycles_and_cleanup_lists_have_a_finite_diagnostic_budget():
-    from rpipe.structure.artifacts import safe_error_record
+    from rpipe.structure.artifact.io import safe_error_record
 
     error = RuntimeError('private')
     error.__cause__ = error
@@ -70,7 +70,7 @@ def test_error_cycles_and_cleanup_lists_have_a_finite_diagnostic_budget():
 
 @pytest.mark.parametrize('code', [17, True, 'secret'])
 def test_worker_exit_code_preserves_only_actual_integer_fact(code):
-    from rpipe.structure.artifacts import safe_error_record
+    from rpipe.structure.artifact.io import safe_error_record
 
     error = RuntimeError('private')
     error.record = {'type': 'ChildExit', 'message': 'private', 'exit_code': code}

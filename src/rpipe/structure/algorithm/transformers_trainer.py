@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from rpipe.structure.algorithm.batch import maybe_flatten_images
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.hf_map import training_arguments_kwargs
 from rpipe.structure.algorithm.progress import (
     UNIT_EPOCH,

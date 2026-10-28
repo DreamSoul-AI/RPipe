@@ -34,7 +34,7 @@ _observed_dicts = _structure._observed_dicts
 
 
 def source_manifest() -> dict[str, str]:
-    from rpipe.api import source_digest
+    from rpipe.structure.artifact.provenance import source_digest
     return {'source_digest': source_digest(STUDY)}
 
 
@@ -138,19 +138,19 @@ def preflight(data_root: Path | str, output_dir: Path | str, *, steps: int = 200
     A new output directory is required so prior evidence cannot be overwritten.
     This probe verifies a prefix, never claims historical long-curve reproduction.
     """
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
 
     bootstrap()
     os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
     import torch
-    from rpipe.structure.contracts import AlgorithmConfig
+    from rpipe.structure.control import AlgorithmConfig
     from rpipe.structure.algorithm.train import TrainAlgorithm
     from rpipe.structure.algorithm.tracker import AlgorithmTracker
-    from rpipe.structure.contracts import DataConfig
+    from rpipe.structure.control import DataConfig
     from rpipe.structure.data.factory import DataFactory
-    from rpipe.structure.contracts import ModelConfig
+    from rpipe.structure.control import ModelConfig
     from rpipe.structure.model.factory import ModelFactory
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.control import SystemConfig
     from rpipe.structure.system.factory import SystemFactory
     from rpipe.structure.system.runtime import apply_runtime
 
@@ -334,8 +334,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(arguments)
     run_root = external_root(args.run_root)
     bootstrap()
-    from rpipe.structure.artifacts import atomic_write_text
-    from rpipe.api import plan
+    from rpipe.structure.artifact.io import atomic_write_text
+    from rpipe.structure.make import plan
 
     specs = plan(STUDY, run_root=run_root, version=args.version)
     before = source_manifest()

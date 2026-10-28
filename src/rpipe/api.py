@@ -3,20 +3,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .structure.contracts import AdmissionError, BusyError, SourceMismatch, Budget, Cancellation, RunOutcome, RunSpec, SupervisionLimits
-from .structure.artifacts import (Ownership, cache_lock, identity, load_config, source_digest,
-                                  validate_input_paths, validate_source, write_config, write_json)
-from .structure.plan import expand
+from rpipe.structure.control import AdmissionError, BusyError, SourceMismatch, RunSpec
+from rpipe.structure.contracts import Budget, Cancellation, RunOutcome, SupervisionLimits
+from rpipe.structure.artifact.io import validate_input_paths, write_json
+from rpipe.structure.artifact.provenance import validate_source
 from .structure.readout import read_run, aggregate, report, logs, compare, read_legacy
 
 
-def plan(study_dir: Path | str, *, run_root: Path | str, version: str | None = None) -> tuple[RunSpec, ...]:
-    source = Path(study_dir).resolve()
-    specs = expand(load_config(source / 'study.yaml'), load_config(source / 'experiment_config.yaml'),
-                   source_dir=source, run_root=run_root, source_digest=source_digest(source), version=version)
-    for spec in specs:
-        validate_input_paths(spec)
-    return specs
 
 
 def run(spec: RunSpec, *, payload=None, budget: Budget | None = None,
@@ -38,44 +31,6 @@ def supervise(specs, *, limits: SupervisionLimits, evidence_dir: Path | str,
                            cancellation=cancellation, retry=retry)
 
 
-def make(specs) -> dict:
-    """Explicit configuration publication; identical existing configs stay byte exact."""
-    specs = tuple(specs)
-    _one_root(specs)
-    for spec in specs:
-        validate_source(spec)
-        if (spec.run_dir / '.execution').exists():
-            raise BusyError(f'cannot write a busy Run: {spec.id}')
-        config = spec.run_dir / 'config.yaml'
-        if config.exists() and load_config(config) != spec.to_config():
-            raise SourceMismatch(f'existing config differs: {spec.id}')
-        if spec.result_path.exists() and read_run(spec).get('identity') != identity(spec):
-            raise SourceMismatch(f'existing result differs: {spec.id}')
-    experiments = {}
-    result = {'schema': 2, 'experiments': []}
-    if not specs:
-        return result
-    declaration = load_config(specs[0].source_dir / 'study.yaml')
-    keys = set((declaration.get('axes') or {}).keys()) - {'seed'}
-    keys.add('algorithm.mode')
-    def factor(cfg, key):
-        for part in key.split('.'):
-            cfg = cfg.get(part, {}) if isinstance(cfg, dict) else None
-        return cfg
-    with cache_lock(specs[0].study_root / '.planning'):
-        for spec in specs:
-            with Ownership(spec):
-                config = spec.run_dir / 'config.yaml'
-                if config.exists() and load_config(config) != spec.to_config():
-                    raise SourceMismatch('configuration changed before publication')
-                if not config.exists():
-                    write_config(config, spec.to_config())
-                factors = {key: factor(spec.to_config(), key) for key in sorted(keys)}
-                row = experiments.setdefault(spec.experiment, {'id': spec.experiment, 'factors': factors, 'runs': []})
-                row['runs'].append({'id': spec.id, 'run_dir': spec.id, 'seed': spec.seed})
-        result['experiments'] = list(experiments.values())
-        write_json(specs[0].study_root / 'index.json', result)
-    return result
 
 
 def _one_root(specs) -> None:

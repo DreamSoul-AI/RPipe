@@ -11,7 +11,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
                          ids=['not-mapping', 'nonfinite-measurement', 'not-serializable'])
 def test_invalid_collected_observation_fails_without_success_result(
         source_study, run_root, payload_factory, observation):
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
 
     class InvalidObservation(payload_factory):
         def collect(self, ctx):
@@ -31,7 +32,8 @@ def test_invalid_collected_observation_fails_without_success_result(
 @pytest.mark.parametrize('quality,complete', [(False, True), (None, False)])
 def test_scientific_quality_and_evidence_are_preserved_separately(
         source_study, run_root, payload_factory, quality, complete):
-    from rpipe.api import plan, read_run, run
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
 
     class ScientificFacts(payload_factory):
         def collect(self, ctx):
@@ -47,7 +49,8 @@ def test_scientific_quality_and_evidence_are_preserved_separately(
 
 
 def test_invalid_quality_does_not_publish_success(source_study, run_root, payload_factory):
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
 
     class InvalidQuality(payload_factory):
         def collect(self, ctx):
@@ -64,8 +67,9 @@ def test_invalid_quality_does_not_publish_success(source_study, run_root, payloa
 @pytest.mark.parametrize('target', ['config', 'control'])
 def test_payload_cannot_change_effective_configuration_after_planning(
         source_study, run_root, payload_factory, entry, phase, target):
-    from rpipe.api import plan, run
-    from rpipe.structure.contracts import control_from_config
+    from rpipe.structure.make import plan
+    from rpipe.api import run
+    from rpipe.structure.control import resolve_control
 
     spec = plan(source_study, run_root=run_root)[0]
     payload = payload_factory()
@@ -77,7 +81,7 @@ def test_payload_cannot_change_effective_configuration_after_planning(
             ctx.config['data']['name'] = 'changed_after_plan'
         else:
             if ctx.control is None:
-                ctx.control = control_from_config(ctx.config)
+                ctx.control = resolve_control(ctx.config)
             ctx.control.run.data.name = 'changed_after_plan'
         return result
 
@@ -99,8 +103,9 @@ def test_payload_cannot_change_effective_configuration_after_planning(
 
 def test_release_failure_is_unknown_in_return_record_and_readout(
         source_study, run_root, payload_factory, monkeypatch):
-    from rpipe.api import plan, read_run, run
-    from rpipe.structure.artifacts import Ownership, read_json
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
+    from rpipe.structure.artifact.io import Ownership, read_json
 
     def denied(owner):
         raise PermissionError('owner release denied')
@@ -123,7 +128,8 @@ def test_release_failure_is_unknown_in_return_record_and_readout(
 @pytest.mark.parametrize('target', ['attempt', 'execution'])
 def test_final_record_write_failure_keeps_owner_and_unknown_projection(
         source_study, run_root, payload_factory, monkeypatch, target):
-    from rpipe.api import plan, read_run, run
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
     from rpipe.structure import execution
 
     write = execution.write_json
@@ -145,8 +151,9 @@ def test_final_record_write_failure_keeps_owner_and_unknown_projection(
 
 def test_candidate_success_is_not_complete_until_owner_release(
         source_study, run_root, payload_factory, monkeypatch):
-    from rpipe.api import aggregate, plan, read_run, run
-    from rpipe.structure.artifacts import Ownership
+    from rpipe.api import aggregate, read_run, run
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact.io import Ownership
 
     spec = plan(source_study, run_root=run_root)[0]
     release = Ownership.release
@@ -164,9 +171,10 @@ def test_candidate_success_is_not_complete_until_owner_release(
 
 def test_retry_requires_explicit_admission_and_preserves_previous_attempt(
         source_study, run_root, payload_factory, file_bytes):
-    from rpipe.api import plan, read_run, run
-    from rpipe.structure.artifacts import read_json
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
+    from rpipe.structure.artifact.io import read_json
+    from rpipe.structure.control import AdmissionError
 
     spec = plan(source_study, run_root=run_root)[0]
     first = run(spec, payload=payload_factory(fail='execute'))
@@ -185,8 +193,9 @@ def test_retry_requires_explicit_admission_and_preserves_previous_attempt(
 
 def test_old_return_stays_bound_to_its_attempt_when_retry_finishes_during_release(
         source_study, run_root, payload_factory, monkeypatch):
-    from rpipe.api import plan, read_run, run
-    from rpipe.structure.artifacts import Ownership, read_json
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
+    from rpipe.structure.artifact.io import Ownership, read_json
 
     spec = plan(source_study, run_root=run_root)[0]
     release = Ownership.release
@@ -205,8 +214,8 @@ def test_old_return_stays_bound_to_its_attempt_when_retry_finishes_during_releas
 
 def test_changed_owner_cannot_receive_old_scientific_or_execution_writes(
         source_study, run_root, payload_factory):
-    from rpipe.api import plan
-    from rpipe.structure.artifacts import read_json, write_json
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact.io import read_json, write_json
     from rpipe.structure.execution import execute
 
     spec = plan(source_study, run_root=run_root)[0]
@@ -226,7 +235,8 @@ def test_changed_owner_cannot_receive_old_scientific_or_execution_writes(
 def test_supplied_cleanup_records_are_sanitized_before_return_or_persistence(
         source_study, run_root, payload_factory, kind):
     import json
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
 
     class RemoteCleanup(payload_factory):
         def close(self, ctx):

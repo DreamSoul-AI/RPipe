@@ -11,7 +11,7 @@ import uuid
 import pytest
 import yaml
 
-from rpipe.structure.artifacts import source_digest
+from rpipe.structure.artifact.provenance import source_digest
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.flow_layer, pytest.mark.module_data,

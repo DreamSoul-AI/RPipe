@@ -3,7 +3,8 @@ import dataclasses
 
 import pytest
 
-from rpipe.structure.contracts import AdmissionError, Budget, SupervisionLimits
+from rpipe.structure.control import AdmissionError
+from rpipe.structure.contracts import Budget, SupervisionLimits
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.structure_layer, pytest.mark.module_execution,

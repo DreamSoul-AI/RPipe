@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from rpipe.structure.readout import collect_from_index, load_curve_series, summarize_curve_series
-from rpipe.structure.artifacts import atomic_replace
+from rpipe.structure.artifact.io import atomic_replace
 DOCS_DIRNAME = "summary"
 STATUS_SUCCEEDED = "succeeded"
 
@@ -169,8 +169,8 @@ def export_tensorboard(study_dir: Path | str, destination: Path | str, *,
     """Export one immutable JSONL trajectory snapshot, separately from formal results."""
     from urllib.parse import quote
     from rpipe.structure.readout import _jsonl_curve_series
-    from rpipe.structure.artifacts import contained, kinds
-    from rpipe.structure.contracts import validate_run_root
+    from rpipe.structure.artifact.io import contained, kinds
+    from rpipe.structure.artifact.io import validate_run_root
     RUNS_DIRNAME = "runs"
 
     study, dest = Path(study_dir).resolve(), Path(destination).resolve()

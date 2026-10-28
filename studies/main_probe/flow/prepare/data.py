@@ -61,7 +61,7 @@ def prepare(workspace: Path, source_data: Path, pair: tuple[str, str]) -> dict[s
     runtime_source = verify_runtime()
     source_before = source_manifest()
     copied = verify_raw(source_data, pair[0])
-    from rpipe.structure.artifacts import link_input, reference_tree
+    from rpipe.structure.artifact.io import link_input, reference_tree
     bootstrap()
     import numpy as np
     import torch

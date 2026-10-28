@@ -16,8 +16,9 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
 @pytest.mark.parametrize('held_parent_log', [False, True])
 def test_noisy_worker_is_not_persisted_and_events_keep_child_identity(
         source_study, run_root, tmp_path, monkeypatch, worker_fails, held_parent_log):
-    from rpipe.api import plan, run
-    from rpipe.structure.artifacts import cache_lock
+    from rpipe.structure.make import plan
+    from rpipe.api import run
+    from rpipe.structure.artifact.io import cache_lock
     from rpipe.structure.system.logger import Logger
     module = importlib.import_module('rpipe.flow.run')
     native_popen = subprocess.Popen
@@ -101,7 +102,8 @@ while not Path(sys.argv[3]).exists():
 
 def test_in_process_logger_failure_does_not_change_scientific_success(
         source_study, run_root, payload_factory, monkeypatch):
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
     from rpipe.structure.system.logger import Logger
     monkeypatch.setattr(Logger, '_write_file', lambda *args: (_ for _ in ()).throw(PermissionError('PRIVATE')))
     spec = plan(source_study, run_root=run_root)[0]
@@ -115,7 +117,8 @@ def test_in_process_logger_failure_does_not_change_scientific_success(
 @pytest.mark.parametrize('logger_raises', [False, True])
 def test_parent_failure_logs_once_and_logger_cannot_replace_first_cause(
         source_study, run_root, payload_factory, monkeypatch, boundary, logger_raises):
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
     from rpipe.structure.system.logger import Logger
     flow = importlib.import_module('rpipe.flow.run')
     execution = importlib.import_module('rpipe.structure.execution')
@@ -160,7 +163,8 @@ def test_parent_failure_logs_once_and_logger_cannot_replace_first_cause(
 @pytest.mark.parametrize('logger_raises', [False, True])
 def test_cleanup_logs_complete_context_without_replacing_primary_or_secondary_error(
         source_study, run_root, payload_factory, monkeypatch, primary_fails, logger_raises):
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
     from rpipe.structure.system.logger import Logger
     spec = plan(source_study, run_root=run_root)[0]
     payload = payload_factory(fail='execute' if primary_fails else None,

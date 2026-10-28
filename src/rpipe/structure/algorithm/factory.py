@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 from pathlib import Path
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.optim import make_optimizer as _make_optimizer, make_scheduler as _make_scheduler
 from rpipe.structure.algorithm.resume import (apply_module_state, resolve_checkpoint_ref, resume_stem, sibling_train_checkpoint, partial_resume_warning)
 

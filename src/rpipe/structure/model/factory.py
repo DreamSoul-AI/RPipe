@@ -6,8 +6,8 @@ import math
 from pathlib import Path
 from typing import Any, Callable
 
-from rpipe.structure.contracts import ModelConfig
-from rpipe.structure.artifacts import cache_lock
+from rpipe.structure.control import ModelConfig
+from rpipe.structure.artifact.io import cache_lock
 from rpipe.structure.system.origin import apply_model_origin, normalize_origin
 
 

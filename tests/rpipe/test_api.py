@@ -1,4 +1,5 @@
 """The public API can inspect a declaration without importing scientific backends."""
+from rpipe.structure import make as planning
 
 import os
 from pathlib import Path
@@ -21,7 +22,7 @@ class RejectBackend(importlib.abc.MetaPathFinder):
         if fullname.split('.')[0] in {'torch', 'torchvision', 'transformers', 'datasets', 'kornia'}:
             raise AssertionError('unexpected scientific import: ' + fullname)
 sys.meta_path.insert(0, RejectBackend())
-from rpipe.api import plan
+from rpipe.structure.make import plan
 specs = plan(sys.argv[1], run_root=sys.argv[2])
 assert len(specs) == 2
 scientific = ('rpipe.structure.data', 'rpipe.structure.model', 'rpipe.structure.algorithm',
@@ -39,22 +40,23 @@ assert not any(name == prefix or name.startswith(prefix + '.')
 
 def test_make_mixed_study_versions_rejects_before_any_output(source_study, run_root):
     from dataclasses import replace
-    from rpipe.api import make, plan
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.make import publish, plan
+    from rpipe.structure.control import AdmissionError
 
     spec = plan(source_study, run_root=run_root)[0]
     with pytest.raises(AdmissionError):
-        make([spec, replace(spec, version='another')])
+        publish([spec, replace(spec, version='another')])
     assert not run_root.exists()
 
 
 def test_make_owns_run_while_writing_config(source_study, run_root, monkeypatch):
     from rpipe import api
-    from rpipe.structure.artifacts import Ownership
-    from rpipe.structure.contracts import BusyError
+    from rpipe.structure.artifact.io import Ownership
+    from rpipe.structure.control import BusyError
 
-    spec = api.plan(source_study, run_root=run_root)[0]
-    write_config = api.write_config
+    spec = planning.plan(source_study, run_root=run_root)[0]
+    from rpipe.structure.artifact import io
+    write_config = io.write_config
     checked = []
 
     def write_under_ownership(path, config):
@@ -63,8 +65,8 @@ def test_make_owns_run_while_writing_config(source_study, run_root, monkeypatch)
         checked.append(path)
         return write_config(path, config)
 
-    monkeypatch.setattr(api, 'write_config', write_under_ownership)
-    api.make([spec])
+    monkeypatch.setattr(io, 'write_config', write_under_ownership)
+    planning.publish([spec])
     assert checked == [spec.run_dir / 'config.yaml']
     assert not (spec.run_dir / '.execution').exists()
 
@@ -73,7 +75,7 @@ def test_launch_unknown_owner_stops_new_dispatch(source_study, run_root, monkeyp
     from rpipe import api
     from rpipe.structure.contracts import RunOutcome
 
-    specs = api.plan(source_study, run_root=run_root)
+    specs = planning.plan(source_study, run_root=run_root)
     calls = []
 
     def unresolved(spec, **kwargs):
@@ -89,7 +91,7 @@ def test_launch_preserves_explicit_retry_choice(source_study, run_root, monkeypa
     from rpipe import api
     from rpipe.structure.contracts import RunOutcome
 
-    specs = api.plan(source_study, run_root=run_root)
+    specs = planning.plan(source_study, run_root=run_root)
     calls = []
     def execute(spec, **kwargs):
         calls.append(kwargs['retry'])
@@ -104,8 +106,8 @@ def test_process_rejects_summary_link_before_writing_source_or_input(
         source_study, run_root, tmp_path, file_bytes, monkeypatch, target_kind):
     from rpipe import api
     from rpipe.flow import study
-    from rpipe.structure.artifacts import load_config, write_config
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.artifact.io import load_config, write_config
+    from rpipe.structure.control import AdmissionError
 
     inputs = run_root / 'shared' / 'input'
     inputs.mkdir(parents=True)
@@ -114,7 +116,7 @@ def test_process_rejects_summary_link_before_writing_source_or_input(
     config = load_config(source_study / 'experiment_config.yaml')
     config['data']['path'] = str(inputs)
     write_config(source_study / 'experiment_config.yaml', config)
-    spec = api.plan(source_study, run_root=run_root)[0]
+    spec = planning.plan(source_study, run_root=run_root)[0]
     spec.study_root.mkdir(parents=True)
     target = source_study if target_kind == 'source' else inputs
     (spec.study_root / 'summary').symlink_to(target, target_is_directory=True)
@@ -137,9 +139,9 @@ def test_process_rechecks_source_before_output_or_hook(
         source_study, run_root, file_bytes, monkeypatch):
     from rpipe import api
     from rpipe.flow import study
-    from rpipe.structure.contracts import SourceMismatch
+    from rpipe.structure.control import SourceMismatch
 
-    spec = api.plan(source_study, run_root=run_root)[0]
+    spec = planning.plan(source_study, run_root=run_root)[0]
     with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
         stream.write('# changed after planning\n')
     before = file_bytes(source_study)

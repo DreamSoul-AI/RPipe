@@ -81,7 +81,7 @@ def test_legacy_tracker_without_accumulator_still_loads(tmp_path):
 
 
 def test_tracker_constructor_preserves_evidence_arriving_before_open(tmp_path, monkeypatch):
-    from rpipe.structure import artifacts as kinds
+    from rpipe.structure.artifact import io as kinds
 
     target = tmp_path / kinds.TRACKER_JSONL
     native = Path.open
@@ -101,7 +101,7 @@ def test_tracker_constructor_preserves_evidence_arriving_before_open(tmp_path, m
 
 
 def test_tracker_constructor_still_rejects_directory(tmp_path):
-    from rpipe.structure import artifacts as kinds
+    from rpipe.structure.artifact import io as kinds
 
     target = tmp_path / kinds.TRACKER_JSONL
     target.mkdir(parents=True)
@@ -110,7 +110,7 @@ def test_tracker_constructor_still_rejects_directory(tmp_path):
 
 
 def test_tracker_constructor_does_not_reopen_existing_evidence(tmp_path, monkeypatch):
-    from rpipe.structure import artifacts as kinds
+    from rpipe.structure.artifact import io as kinds
 
     target = tmp_path / kinds.TRACKER_JSONL
     target.parent.mkdir(parents=True)
@@ -130,7 +130,7 @@ def test_tracker_constructor_does_not_reopen_existing_evidence(tmp_path, monkeyp
 
 def test_tracker_append_initialization_keeps_checkpoint_raw_suffix_and_marker(tmp_path):
     import json
-    from rpipe.structure import artifacts as kinds
+    from rpipe.structure.artifact import io as kinds
 
     path = tmp_path / kinds.TRACKER_JSONL
     path.parent.mkdir(parents=True)

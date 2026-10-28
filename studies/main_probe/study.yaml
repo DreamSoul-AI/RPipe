@@ -73,4 +73,3 @@ provenance:
     sha256: d0889ffe5da16f2f9e06253490eaf58b22bf3a0468fd96664cf147fe60708844
 flow:
   study_phases: true
-  prepare_shared: false

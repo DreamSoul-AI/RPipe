@@ -9,9 +9,9 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from rpipe.structure import artifacts as kinds
-from rpipe.structure.artifacts import _owned_stream
-from rpipe.structure.artifacts import atomic_write_text
+from rpipe.structure.artifact import io as kinds
+from rpipe.structure.artifact.io import _owned_stream
+from rpipe.structure.artifact.io import atomic_write_text
 from rpipe.structure.algorithm.metrics import MetricBundle
 
 

@@ -12,7 +12,7 @@ pytestmark = [
 
 from pathlib import Path
 
-from rpipe.structure.contracts import SystemConfig
+from rpipe.structure.control import SystemConfig
 from rpipe.structure.system.factory import SystemFactory
 
 
@@ -173,7 +173,7 @@ def test_checkpoint_windows_denial_commits_or_preserves_old_bundle(tmp_path, mon
         return replace(path, target)
 
     monkeypatch.setattr(Path, 'replace', denied)
-    monkeypatch.setattr('rpipe.structure.artifacts.time.sleep', lambda _: None)
+    monkeypatch.setattr('rpipe.structure.artifact.io.time.sleep', lambda _: None)
     if clears:
         assert system.save_checkpoint(new, 'latest') == bundle
         assert len(calls) == 3
@@ -191,7 +191,7 @@ def test_checkpoint_windows_denial_commits_or_preserves_old_bundle(tmp_path, mon
 def test_checkpoint_json_pieces_keep_bytes_presence_and_order(tmp_path, monkeypatch, tracker, logger):
     import json
     import os
-    from rpipe.structure import artifacts as artifact_api
+    from rpipe.structure.artifact import io as artifact_api
     from rpipe.structure.system import factory as factory
 
     system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
@@ -230,7 +230,7 @@ def test_checkpoint_json_pieces_keep_bytes_presence_and_order(tmp_path, monkeypa
 
 @pytest.mark.parametrize('failure_key', ['tracker', 'logger'])
 def test_checkpoint_json_write_failure_keeps_original_error_and_bundle(tmp_path, monkeypatch, failure_key):
-    from rpipe.structure import artifacts as artifact_api
+    from rpipe.structure.artifact import io as artifact_api
 
     system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
     old = {'step': 1, 'tracker': {'step': 1}, 'logger': {'path': 'run.log'}}

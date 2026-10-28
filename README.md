@@ -4,7 +4,7 @@ RPipe（Research Pipeline，研究流水线）是用于搭建研究实验的参�
 
 RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他项目长期安装调用的通用 package 为产品目标，也不要求衍生项目持续跟随本仓接口。模板自身仍需讲清职责、保持可运行并验证示例，帮助研究者把有效配置、执行事实、科学结果和比较分析连接起来。Python 包名 `rpipe`、安装命令和打包配置是当前源码的组织与运行方式，不构成跨项目稳定 API 的承诺。仓库为 [DreamSoul-AI/RPipe](https://github.com/DreamSoul-AI/RPipe)，采用 [MIT 许可](LICENSE.md)。
 
-当前包元数据为 **0.4.1**。实际实现和支持限制见下文；版本号不代表所有兼容变化已发布。架构设计以单一 Markdown 完整维护整体组成、结构与部件、流程与扩展、观测恢复及产物合同，作为下一步沟通底稿；代码结构设计已据此重新推导为单一完整文档，写明目标目录、部件接口、生命周期和依赖；尚未实施代码。实际差距、清理工作与校准事项见[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)。正式数值、GPU 和长程性能仍待验收。
+当前包元数据为 **0.4.1**。实际实现和支持限制见下文；版本号不代表所有兼容变化已发布。架构设计以单一 Markdown 完整维护整体组成、结构与部件、流程与扩展、观测恢复及产物合同，作为实施依据；代码结构设计已据此重新推导为单一完整文档，写明目标目录、部件接口、生命周期和依赖；第一批 control/make 与 artifact 配置/清单发布链路已落地，生命周期等后续职责尚未重组。实际差距、清理工作与校准事项见[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)。正式数值、GPU 和长程性能仍待验收。
 
 ## 文档与阅读顺序
 
@@ -15,9 +15,9 @@ RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他�
 | **成果** | **当前内容与边界** |
 | --- | --- |
 | [通用调研 General Research](<docs/通用调研 General Research 研究流水线.md>) | 机制、工程路线、直接来源、取舍与限制；项目历史执行只进入日期记录 |
-| [架构设计 Architecture Design](<docs/架构设计 Architecture Design 研究流水线.md>) | 单一完整正文：实验部件、流程扩展、观测恢复及产物合同；供下一步校准 |
-| [代码结构设计 Code Structure Design](<docs/代码结构设计 Code Structure Design 研究流水线.md>) | 依据完整架构推导的单一文档：目标目录、模块职责、接口、允许依赖及验证落点；尚未实施 |
-| [开发计划 Development Plan](<docs/开发计划 Development Plan 研究流水线.md>) | 实现差距、逐模块工作、旧接口清理及验收顺序；当前只改 Markdown，代码工作待明确恢复 |
+| [架构设计 Architecture Design](<docs/架构设计 Architecture Design 研究流水线.md>) | 单一完整正文：当前选定的实验部件、流程扩展、观测恢复及产物合同 |
+| [代码结构设计 Code Structure Design](<docs/代码结构设计 Code Structure Design 研究流水线.md>) | 依据完整架构推导的单一文档：目标目录、模块职责、接口、允许依赖及验证落点；第一批规划/发布已实施，其余差距见开发计划 |
+| [开发计划 Development Plan](<docs/开发计划 Development Plan 研究流水线.md>) | 实现差距、逐模块工作、旧接口清理及验收顺序；当前实施首批配置规划与发布，后续职责分批推进 |
 | [缺陷记录 Bug Report](<docs/缺陷记录 Bug Report 研究流水线.md>) | 活动问题与待验证事项；已关闭问题的变更和证据只从日期记录追溯 |
 | [开发记录 Development Record](<docs/开发记录 Development Record/>) | 日期记录，本轮文档调整与历史集成、分支保全的归属；不复制整份测试结果 |
 | [运行记录 Run Record](<docs/运行记录 Run Record/>) | 各次静态、CPU、安装及 CI 验证的实际身份、结果和缺口；原始证据在 Git 外 |
@@ -50,7 +50,7 @@ python -m rpipe --help
 python -m rpipe --version
 ```
 
-安装后 `rpipe` 与 `python -m rpipe` 同走 [flow/cli.py](src/rpipe/flow/cli.py) 的 main()，模块入口为 [__main__.py](src/rpipe/__main__.py)，Python 公共入口为 [rpipe.api](src/rpipe/api.py)。HF/TensorBoard 功能另需相应依赖。只读路径延迟导入科学栈，不等于安装元数据没有科学依赖。
+安装后 `rpipe` 与 `python -m rpipe` 同走 [flow/cli.py](src/rpipe/flow/cli.py) 的 main()，模块入口为 [__main__.py](src/rpipe/__main__.py)，规划与发布直接使用 [structure.make](src/rpipe/structure/make.py) 的 plan/expand/publish；执行及读端暂由 [rpipe.api](src/rpipe/api.py) 承接，后续批次继续重组。HF/TensorBoard 功能另需相应依赖。只读路径延迟导入科学栈，不等于安装元数据没有科学依赖。
 
 已有环境可显式使用本仓源码，PowerShell 示例：
 
@@ -64,7 +64,9 @@ python -m rpipe --help
 
 ## Study 使用与执行边界
 
-Study 至少有 `study.yaml` 和 `experiment_config.yaml`。因素轴展开为 Experiment，每个 seed 形成一个 Run。`api.plan(study_dir, run_root=...)` 只读声明与源码，不加载 recipe/Torch、不写盘。常规 Study 命令要求显式 `--run-root`，路径须与 Study、库源码、可定位的完整 checkout/宿主项目和受保护输入双向分离，运行输出不写回源码。
+Study 至少有 `study.yaml` 和 `experiment_config.yaml`。因素轴展开为 Experiment，每个 seed 形成一个 Run。`structure.make.plan(study_dir, run_root=...)` 只读声明与源码，不加载 recipe/Torch、不写盘。常规 Study 命令要求显式 `--run-root`，路径须与 Study、库源码、可定位的完整 checkout/宿主项目和受保护输入双向分离，运行输出不写回源码。
+
+发布先写完整配置，最后以单次原子替换提交 schema 3 的 index，来源清单与运行索引在同一记录内，所有目标 Run 在提交前持续持权。重复发布不改已有配置字节；既有配置、结果、执行事实或计划来源不匹配时拒绝，不自动给旧记录换身份。需要新实测时选择明确新 version；不提供旧格式回退。
 
 先用只读计划核对配置与输出身份。以下外部路径由调用方替换，不能将占位符作为实际路径：
 
@@ -79,7 +81,7 @@ python -m rpipe report studies/_template --run-root <external-run-root>
 | **命令** | **作用与边界** |
 | --- | --- |
 | `plan/status/logs/report/shared` | 读取，不启动、清理或补写；旧目录读取使用显式 legacy 入口 |
-| `make` | 发布配置与索引，不准备科学数据或生成旧 jobs/脚本 |
+| `make` | 经 structure.make.publish 发布配置与索引，不准备科学数据或生成旧 jobs/脚本 |
 | `run` / `study` | 先 make 再 launch，显式执行 |
 | `launch/run-one` | 执行明确规格，核来源与自身 train 依赖，默认每 Run 独立科学子进程 |
 | `process [--figures]` | 写外部派生摘要及明确请求的图，不训练或覆盖科学结果 |
@@ -117,6 +119,8 @@ python tests/run.py --core --results-root <external-test-root> --timeout-seconds
 结果包含 manifest、逐项 events 与可重建 report，未执行、跳过、取消、缺失与失败分别保留。执行器只监督本次 pytest 根进程，不提供逐项内存或全部后代硬限。制品验证另用 [tests/package_smoke.py](tests/package_smoke.py)，针对实际安装 wheel/sdist 的解释器与新的外部 workspace，不用 editable 导入替代。
 
 现有工作流在 dev/main 的 PR 和 push 上运行 CPU 矩阵（Ubuntu/Windows × Python3.10/3.13）及两平台 Python3.10 打包安装，另在 PR 检查分支方向。CPU 作业归档统一测试回执和命令日志，打包作业归档构建/安装日志及已生成的 wheel/sdist smoke 工作区。上传在成功或失败后均尝试执行，缺少文件时明确失败；artifact 名包含矩阵、Actions run/attempt 和检出 SHA，保留7天。日志管道使用 Bash pipefail，不吞测试或构建失败。平台强制终止、runner 丢失或上传服务不可用时可能无完整归档，不能将未上传当作通过。工作流声明、远端实际结果与分支保护不是同一事实，不把配置存在记为当前 HEAD 已通过。
+
+本批配置规划与发布的受影响合并回归为 623 通过、1 项既有 Windows/POSIX 静态豁免，另有五命令 CLI 旅程；科学 worker 验证使用临时 DLL 搜索路径，环境诊断、失败原件和限制见[2026-10-29 运行记录](<docs/运行记录 Run Record/2026-10-29 配置规划与发布验证.md>)。
 
 历史与当前的本地有界 CPU、有限原生/HF、安装 smoke 与远端 CI 分别按运行记录中的固定身份核对。重构先执行受影响合同回归，再按实际范围验证科学装配、Study 与制品旅程。正式 MNIST/CIFAR、GPU、长程性能、矩阵外环境与原始历史归档可恢复性仍未验收。
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from rpipe.structure.execution import Cancelled
-from rpipe.structure.contracts import AdmissionError
+from rpipe.structure.control import AdmissionError
 
 from .study import run_study_phase
 

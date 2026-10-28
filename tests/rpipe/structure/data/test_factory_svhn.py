@@ -26,7 +26,7 @@ def test_svhn_mat_train_checkpoint_eval(tmp_path, monkeypatch, request):
     from rpipe.structure.model.factory import ModelFactory as model_api
     from rpipe.structure.system.factory import SystemFactory as system_api
     from rpipe.structure.algorithm.tracker import make_tracker
-    from rpipe.structure.contracts import AlgorithmConfig, DataConfig, ModelConfig, SystemConfig
+    from rpipe.structure.control import AlgorithmConfig, DataConfig, ModelConfig, SystemConfig
 
     root = tmp_path / 'data' / 'svhn'
     root.mkdir(parents=True)

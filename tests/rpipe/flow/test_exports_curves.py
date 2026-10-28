@@ -249,7 +249,7 @@ def test_tensorboard_cli_failure_preserves_formal_results(tmp_path, monkeypatch,
     import sys
     from types import SimpleNamespace
     from rpipe.flow.cli import main
-    from rpipe.api import plan
+    from rpipe.structure.make import plan
     study = plan(source_study, run_root=run_root)[0].study_root
     _tb_source(study, 'a', [{'split': 'train', 'name': 'Loss', 'mean': 1, 'epoch': 1}])
     result = study / 'runs/a/result.json'
@@ -328,7 +328,7 @@ def test_tensorboard_rejects_tracker_link_outside_selected_output(tmp_path, tens
 
 def test_tensorboard_rejects_its_library_checkout_before_writing(tmp_path, tensorboard_writer):
     import rpipe.flow.exports as exports
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.control import AdmissionError
 
     study = tmp_path / 'study'
     _tb_source(study, 'a', [{'split': 'train', 'name': 'Loss', 'mean': 1, 'epoch': 1}])

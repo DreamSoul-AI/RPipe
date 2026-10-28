@@ -8,7 +8,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
 
 
 def test_injected_native_prepare_before_runs_once_with_system_ready(tensor_study, run_root):
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
     from rpipe.flow.native import NativeRun
 
     with (tensor_study / 'study.yaml').open('a', encoding='utf-8') as stream:
@@ -32,7 +33,8 @@ def run(ctx):
 
 def test_sequential_injected_native_studies_do_not_share_recipe_builders(
         tensor_study, run_root, monkeypatch):
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
     from rpipe.structure.data.factory import DataRegistry
     from rpipe.flow.native import NativeRun
 
@@ -58,7 +60,7 @@ def test_sequential_injected_native_studies_do_not_share_recipe_builders(
 def test_native_profile_output_is_external_and_explicit_stats_resolve_from_source(
         source_study, run_root, file_bytes, monkeypatch, explicit_stats):
     import yaml
-    from rpipe.api import plan
+    from rpipe.structure.make import plan
     from rpipe.structure.data.factory import Data, DataFactory
     from rpipe.flow.native import NativeRun
     from rpipe.structure.contracts import Cancellation
@@ -83,7 +85,7 @@ def test_native_profile_output_is_external_and_explicit_stats_resolve_from_sourc
 
     monkeypatch.setattr(DataFactory, 'build', build)
     payload = NativeRun()
-    from rpipe.structure.artifacts import ArtifactLayout
+    from rpipe.structure.artifact.io import ArtifactLayout
     ctx = RunContext(spec=spec, cancellation=Cancellation(), layout=ArtifactLayout(spec))
     try:
         payload.prepare(ctx)

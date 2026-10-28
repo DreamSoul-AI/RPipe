@@ -12,9 +12,9 @@ pytestmark = [
 ]
 
 
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.tracker import AlgorithmTracker
-from rpipe.structure.contracts import SystemConfig
+from rpipe.structure.control import SystemConfig
 from rpipe.structure.system.factory import SystemFactory
 
 @pytest.mark.parametrize('budget', [{'num_epochs': 1, 'progress_unit': 'epoch'}, {'num_steps': 1}])

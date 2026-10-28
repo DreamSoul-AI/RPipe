@@ -8,7 +8,7 @@ from rpipe.flow.native import NativeRun
 
 class HuggingFaceRun(NativeRun):
     def prepare(self, ctx: Any) -> None:
-        from rpipe.structure.contracts import AlgorithmConfig
+        from rpipe.structure.control import AlgorithmConfig
 
         source = AlgorithmConfig.from_mapping(ctx.config.get('algorithm')).source
         if source != 'transformers_trainer':

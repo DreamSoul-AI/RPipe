@@ -9,8 +9,8 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
-from rpipe.structure.artifacts import _read_text, atomic_write_text
-from rpipe.structure.artifacts import kinds
+from rpipe.structure.artifact.io import _read_text, atomic_write_text
+from rpipe.structure.artifact.io import kinds
 ASSETS_DIRNAME = "assets"
 RESULT_NAME = "result.json"
 

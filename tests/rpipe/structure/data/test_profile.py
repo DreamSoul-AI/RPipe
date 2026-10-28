@@ -226,7 +226,7 @@ def test_profile_download_flag_cannot_mutate_a_declared_input(tmp_path, monkeypa
 def test_profile_rejects_output_links_before_building_or_changing_originals(
         tmp_path, monkeypatch, target_kind, link_kind):
     from rpipe.structure.data import profile
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.control import AdmissionError
 
     source, inputs, profiles = (tmp_path / name for name in ('source', 'inputs', 'profiles'))
     for path in (source, inputs, profiles):

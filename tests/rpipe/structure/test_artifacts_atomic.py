@@ -2,7 +2,7 @@ from pathlib import Path
 import os
 import pytest
 
-from rpipe.structure.artifacts import atomic_replace, atomic_write_text
+from rpipe.structure.artifact.io import atomic_replace, atomic_write_text
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.structure_layer, pytest.mark.module_artifact,
@@ -27,7 +27,7 @@ def test_atomic_replace_transient_windows_denial_eventually_commits(tmp_path, mo
         return replace(path, destination)
 
     monkeypatch.setattr(Path, 'replace', held)
-    monkeypatch.setattr('rpipe.structure.artifacts.time.sleep', pauses.append)
+    monkeypatch.setattr('rpipe.structure.artifact.io.time.sleep', pauses.append)
     assert atomic_replace(source, target) == target
     assert target.read_text(encoding='utf-8') == 'new' and not source.exists()
     assert len(calls) == 3 and pauses == [0.05, 0.1]
@@ -45,7 +45,7 @@ def test_atomic_write_permanent_failure_preserves_target_and_cleans_stage(tmp_pa
         raise error
 
     monkeypatch.setattr(Path, 'replace', denied)
-    monkeypatch.setattr('rpipe.structure.artifacts.time.sleep', lambda _: None)
+    monkeypatch.setattr('rpipe.structure.artifact.io.time.sleep', lambda _: None)
     with pytest.raises(PermissionError) as caught:
         atomic_write_text(target, 'new')
     assert caught.value is error and len(calls) == expected_calls
@@ -110,7 +110,7 @@ def test_atomic_text_success_replaces_target_and_keeps_peer_stage(tmp_path):
 
 
 def test_index_encoding_failure_does_not_truncate_existing_plan(tmp_path):
-    from rpipe.structure.artifacts import write_json
+    from rpipe.structure.artifact.io import write_json
 
     target = tmp_path / 'index.json'
     target.write_bytes(b'old plan')
@@ -153,7 +153,7 @@ def test_atomic_text_preserves_existing_script_mode(tmp_path):
 @pytest.mark.parametrize('kind', ['peer', 'target-alias', 'stat-refusal'])
 def test_text_stage_collision_preserves_unowned_bytes(tmp_path, monkeypatch, kind):
     from types import SimpleNamespace
-    from rpipe.structure import artifacts as _atomic
+    from rpipe.structure.artifact import io as _atomic
     monkeypatch.setattr(_atomic.uuid, 'uuid4', lambda: SimpleNamespace(hex='0' * 32))
     peer = tmp_path / ('0' * 32 + '.tmp')
     target = peer if kind == 'target-alias' else tmp_path / 'target.txt'
@@ -181,7 +181,7 @@ def test_concurrent_nonce_collision_cannot_delete_an_active_writer_stage(tmp_pat
     from concurrent.futures import ThreadPoolExecutor
     from types import SimpleNamespace
     import threading
-    from rpipe.structure import artifacts as _atomic
+    from rpipe.structure.artifact import io as _atomic
 
     target = tmp_path / 'target.txt'
     target.write_text('old', encoding='utf-8')
@@ -213,7 +213,7 @@ def test_concurrent_nonce_collision_cannot_delete_an_active_writer_stage(tmp_pat
 
 
 def test_owned_text_stage_chmod_refusal_preserves_old_target_and_peer(tmp_path, monkeypatch):
-    from rpipe.structure import artifacts as _atomic
+    from rpipe.structure.artifact import io as _atomic
 
     target, peer = tmp_path / 'target.txt', tmp_path / 'peer.tmp'
     target.write_bytes(b'old target')
@@ -239,9 +239,9 @@ def test_owned_text_stage_chmod_refusal_preserves_old_target_and_peer(tmp_path, 
     os.name != 'nt', reason='Windows read-only replacement and unlink semantics'))],
     ids=['writable-control', 'native-readonly'])
 def test_atomic_text_native_permissions_cleanup_owned_stage(tmp_path, monkeypatch, writer, readonly):
-    from rpipe.structure import artifacts as _atomic
-    from rpipe.structure.artifacts import write_config
-    from rpipe.structure.artifacts import write_json as write_result
+    from rpipe.structure.artifact import io as _atomic
+    from rpipe.structure.artifact.io import write_config
+    from rpipe.structure.artifact.io import write_json as write_result
 
     target, peer = tmp_path / 'target.txt', tmp_path / 'peer.tmp'
     target.write_bytes(b'old evidence')
@@ -269,7 +269,7 @@ def test_atomic_text_native_permissions_cleanup_owned_stage(tmp_path, monkeypatc
 
 @pytest.mark.parametrize('cleanup', ['recover', 'chmod-denied', 'unlink-denied', 'io-denied'])
 def test_atomic_text_permission_cleanup_is_owned_bounded_and_best_effort(tmp_path, monkeypatch, cleanup):
-    from rpipe.structure import artifacts as _atomic
+    from rpipe.structure.artifact import io as _atomic
 
     target, peer = tmp_path / 'target.txt', tmp_path / 'peer.tmp'
     target.write_bytes(b'old target')
@@ -315,7 +315,7 @@ def test_atomic_text_permission_cleanup_is_owned_bounded_and_best_effort(tmp_pat
 @pytest.mark.parametrize('existing', [False, True])
 def test_atomic_text_readonly_collision_never_changes_unowned_stage(tmp_path, monkeypatch, existing):
     from types import SimpleNamespace
-    from rpipe.structure import artifacts as _atomic
+    from rpipe.structure.artifact import io as _atomic
 
     target, stage = tmp_path / 'target.txt', tmp_path / 'occupied.tmp'
     stage.write_bytes(b'other writer candidate')
@@ -377,7 +377,7 @@ def test_atomic_encoding_error_survives_close_io(tmp_path, stream_close_fault, e
 
 
 def test_owned_stream_enter_failure_does_not_exit_unentered_manager():
-    from rpipe.structure.artifacts import _owned_stream
+    from rpipe.structure.artifact.io import _owned_stream
     failure = RuntimeError('enter failed')
     exits = []
     class Manager:
@@ -393,7 +393,7 @@ def test_owned_stream_enter_failure_does_not_exit_unentered_manager():
 
 @pytest.mark.parametrize('suppress', [False, True])
 def test_owned_stream_retains_original_enter_value_and_exit_suppression(suppress):
-    from rpipe.structure.artifacts import _owned_stream
+    from rpipe.structure.artifact.io import _owned_stream
     value, failure, exits = object(), ValueError('body failed'), []
     class Manager:
         def __enter__(self):
@@ -419,7 +419,7 @@ def test_owned_writers_keep_raw_handle_without_entering_proxy(tmp_path, monkeypa
     """Write ownership uses close only; proxy context entry may select another object."""
     from rpipe.structure.algorithm.tracker import AlgorithmTracker
     from rpipe.structure.system.logger import Logger
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
     logger, tracker = Logger(tmp_path / 'log'), AlgorithmTracker(tmp_path / 'tracker')
     tracker.append('train', values={'Loss': 2.0})
     opened, closed = [], []

@@ -9,8 +9,9 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
 
 def test_source_drift_rejects_read_and_start_without_changing_old_success(
         source_study, run_root, payload_factory, file_bytes):
-    from rpipe.api import plan, read_run, run
-    from rpipe.structure.contracts import SourceMismatch
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
+    from rpipe.structure.control import SourceMismatch
 
     spec = plan(source_study, run_root=run_root)[0]
     assert run(spec, payload=payload_factory()).status == 'succeeded'
@@ -28,7 +29,8 @@ def test_source_drift_rejects_read_and_start_without_changing_old_success(
 
 def test_read_run_is_readonly_and_quality_is_not_inferred_from_execution(
         source_study, run_root, payload_factory, file_bytes):
-    from rpipe.api import plan, read_run, run
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
 
     spec = plan(source_study, run_root=run_root)[0]
     outcome = run(spec, payload=payload_factory())
@@ -41,8 +43,9 @@ def test_read_run_is_readonly_and_quality_is_not_inferred_from_execution(
 
 
 def test_truncated_result_is_rejected_without_repair(source_study, run_root, payload_factory):
-    from rpipe.api import plan, read_run, run
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run, run
+    from rpipe.structure.control import AdmissionError
 
     spec = plan(source_study, run_root=run_root)[0]
     assert run(spec, payload=payload_factory()).status == 'succeeded'
@@ -57,7 +60,8 @@ def test_atomic_publish_failure_does_not_report_scientific_success_or_remove_pee
         source_study, run_root, payload_factory, monkeypatch):
     from pathlib import Path
 
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
 
     spec = plan(source_study, run_root=run_root)[0]
     run_root.mkdir()
@@ -85,9 +89,9 @@ def test_atomic_publish_failure_does_not_report_scientific_success_or_remove_pee
 
 def test_partial_ownership_write_and_cleanup_failure_keep_primary_and_busy(
         source_study, run_root, monkeypatch):
-    from rpipe.api import plan
-    from rpipe.structure import artifacts
-    from rpipe.structure.contracts import BusyError
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact import io as artifacts
+    from rpipe.structure.control import BusyError
 
     spec = plan(source_study, run_root=run_root)[0]
     write_json = artifacts.write_json
@@ -110,8 +114,9 @@ def test_partial_ownership_write_and_cleanup_failure_keep_primary_and_busy(
 @pytest.mark.parametrize('component', ['assets', 'attempts'])
 def test_existing_output_link_cannot_write_outside_run_root(
         source_study, run_root, payload_factory, file_bytes, component):
-    from rpipe.api import plan, run
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.make import plan
+    from rpipe.api import run
+    from rpipe.structure.control import AdmissionError
 
     spec = plan(source_study, run_root=run_root)[0]
     peer = run_root.parent / 'external-peer'

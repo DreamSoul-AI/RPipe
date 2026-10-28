@@ -13,7 +13,7 @@ pytestmark = [
 from pathlib import Path
 
 from rpipe.structure.model.factory import ModelFactory as model_api
-from rpipe.structure.contracts import ModelConfig
+from rpipe.structure.control import ModelConfig
 from rpipe.structure.model.factory import ModelRegistry
 
 

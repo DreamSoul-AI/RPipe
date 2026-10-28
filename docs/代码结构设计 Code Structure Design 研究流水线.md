@@ -1,4 +1,4 @@
-更新日期：2026年10月28日。本文依据[完整架构设计](<架构设计 Architecture Design 研究流水线.md>)定义目标目录、模块职责、接口和允许依赖，全部内容维护在本文件。它是后续实现的设计依据，不表示源码已完成重组；实现差距、调用影响、工作顺序与验收状态见[开发计划](<开发计划 Development Plan 研究流水线.md>)。
+更新日期：2026年10月29日。本文依据[完整架构设计](<架构设计 Architecture Design 研究流水线.md>)定义目标目录、模块职责、接口和允许依赖，全部内容维护在本文件。它是后续实现的设计依据，不表示源码已完成重组；实现差距、调用影响、工作顺序与验收状态见[开发计划](<开发计划 Development Plan 研究流水线.md>)。
 
 ## 目录
 
@@ -209,10 +209,11 @@ provenance 和 checkpoint 可使用 io，io 不反向导入它们。readout 使�
 | --- | --- | --- |
 | control.resolve_control | 已解析基底、本次因素和 seed | Control：四类有效条件及来源解释；纯操作 |
 | control.validate_control | Control 与必要兼容声明 | 合法条件或明确错误；不建对象 |
+| make.plan | Study 源目录、明确外部运行根与 version | 显式只读加载声明和来源，再调用 expand；不执行配方或写盘 |
 | make.expand | 已解析 Study/基底、明确来源身份、外部运行根和 version | RunSpec 有序集合、Experiment 分组及显式依赖；不写盘 |
 | make.publish | 同一研究及输出域的合法规格和来源记录 | 配置、index 和来源清单；显式受保护写入，不执行 |
 
-RunSpec 包含配置身份、因素归属、seed、来源引用、输出位置和明确训练依赖；不携带模型或进程句柄。相同身份不能在同一清单重复，依赖必须存在且无环。control 定义的 RunRef 只是正式记录的身份与位置，不隐式取得写入许可。持久化 RunRecord/ExecutionRecord 的字段结构由 artifact.io 维护，readout 与写端共用，不从 flow.context 导入；flow.context 只定义请求、响应、内存报告和上下文，不能成为读端的反向依赖。
+RunSpec 包含配置身份、因素归属、seed、来源引用、输出位置和明确训练依赖；不携带模型或进程句柄。experiment 由有效条件、来源和 version 派生，不接受被忽略的构造值；source_dir/run_root 在纯规格中要求绝对路径且不含父目录跳转，实际路径解析和源码/输入保护由 artifact 在读取/发布准入时执行。相同身份不能在同一清单重复，依赖必须存在且无环。control 定义的 RunRef 只是正式记录的身份与位置，不隐式取得写入许可。持久化 RunRecord/ExecutionRecord 的字段结构由 artifact.io 维护，readout 与写端共用，不从 flow.context 导入；flow.context 只定义请求、响应、内存报告和上下文，不能成为读端的反向依赖。
 
 ## （二）部件交接
 
@@ -315,6 +316,8 @@ flow.study 只加载被明确选中的研究文件，临时注册和模块状态
 ## （二）输出域与发布
 
 Study 源码目录保存声明和研究实现，运行物保存在调用方显式外部根；输入、源码和输出按解析后的真实路径保护，不能互相覆盖。Study 输出域包含清单/来源、共享输入引用、各 Run 的 config/result/assets 和派生摘要。Experiment 由清单分组表达，不要求为每个比较条件建立代码或磁盘目录。
+
+make.publish 以 schema 3 index 为计划提交点：先准备完整配置，来源清单和 Experiment/Run 索引写入同一原子记录，避免两个独立可变文件产生版本错配。提交前持续持有目标 Run 排他权，旧配置重复发布不改字节，已有来源或格式不匹配明确拒绝；不承诺整树回滚。
 
 io 提供排他与原子存取原语，run 持有执行权，write 解释是否可发布。失败重试和新实测区分身份与结果新鲜度；派生物关联其实际读取的结果，不靠时间戳猜测当前性。没有记录、记录不完整和明确失败分别呈现。
 

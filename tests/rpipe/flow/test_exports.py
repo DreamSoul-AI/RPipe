@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from rpipe.flow.exports import learning_curves_path, write_learning_curves
-from rpipe.structure.artifacts import write_json as write_result
+from rpipe.structure.artifact.io import write_json as write_result
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.flow_layer, pytest.mark.module_process,

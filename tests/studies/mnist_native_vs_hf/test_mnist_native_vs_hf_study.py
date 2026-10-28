@@ -14,7 +14,8 @@ def test_real_mnist_public_cli_preserves_sources_and_completes_expected_runs(tmp
     if not prepared or not Path(prepared).is_dir():
         pytest.skip('requires explicitly pre-staged read-only RPIPE_TEST_MNIST_ROOT; no downloads')
     import yaml
-    from rpipe.api import plan, read_run
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run
     from rpipe.flow.cli import main
     pytest.importorskip('transformers')
     repo = Path(__file__).resolve().parents[3]

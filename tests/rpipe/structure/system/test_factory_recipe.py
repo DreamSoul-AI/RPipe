@@ -19,25 +19,26 @@ def _study(parent, recipe):
 def test_recipe_checkpoint_state_keeps_legacy_and_relocated_imports(tmp_path, monkeypatch, request, relocated, form):
     import importlib.util
     import sys
-    from rpipe.api import plan
+    from rpipe.structure.make import plan
     from rpipe.structure.execution import RunContext
     from rpipe.structure.contracts import Cancellation
     from rpipe.flow.run import configure
     from rpipe.flow.native import NativeRun
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.control import SystemConfig
     from rpipe.structure.system.factory import SystemFactory
     from rpipe.structure.model.factory import ModelRegistry
     monkeypatch.setattr(ModelRegistry, '_items', dict(ModelRegistry._items))
 
     recipe = (
-        'from helper import State\n'
-        'from rpipe.structure.model.factory import ModelRegistry, _build_linear\n'
-        'def register(ctx):\n'
-        '    def build(model_config, assets_dir, data_meta=None):\n'
-        '        model = _build_linear(model_config, assets_dir, data_meta)\n'
-        '        model._recipe_state_type = State\n'
-        '        return model\n'
-        '    ModelRegistry.register("linear", "recipe_src", build)\n'
+        '''from helper import State
+from rpipe.structure.model.factory import ModelRegistry, _build_linear
+def register(ctx):
+    def build(model_config, assets_dir, data_meta=None):
+        model = _build_linear(model_config, assets_dir, data_meta)
+        model._recipe_state_type = State
+        return model
+    ModelRegistry.register("linear", "recipe_src", build)
+'''
     )
 
     def create(parent, label):
@@ -80,7 +81,7 @@ def test_recipe_checkpoint_state_keeps_legacy_and_relocated_imports(tmp_path, mo
 
     def prepared(study):
         spec = plan(study, run_root=tmp_path / 'outputs')[0]
-        from rpipe.structure.artifacts import ArtifactLayout
+        from rpipe.structure.artifact.io import ArtifactLayout
         ctx = RunContext(spec=spec, cancellation=Cancellation(), layout=ArtifactLayout(spec))
         configure(ctx)
         payload = NativeRun()

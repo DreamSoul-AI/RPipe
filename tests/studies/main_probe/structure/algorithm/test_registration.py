@@ -38,10 +38,11 @@ def registration(monkeypatch):
 @pytest.mark.parametrize('cleanup_failed', [False, True], ids=['cancel', 'cancel-and-cleanup-failure'])
 def test_probe_cancellation_cleanup_reaches_execution_outcome(
         registration, monkeypatch, tmp_path, cleanup_failed):
-    from rpipe.api import plan, read_run
+    from rpipe.structure.make import plan
+    from rpipe.api import read_run
     from rpipe.flow.native import NativeRun
     from rpipe.structure.algorithm.factory import AlgorithmRegistry
-    from rpipe.structure.contracts import AlgorithmConfig
+    from rpipe.structure.control import AlgorithmConfig
     from rpipe.structure.execution import Cancelled, execute
 
     primary = Cancelled('probe cancelled')

@@ -11,7 +11,7 @@ pytestmark = [
 ]
 
 
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.factory import AlgorithmFactory, AlgorithmRegistry
 from rpipe.structure.algorithm.train import TrainAlgorithm
 

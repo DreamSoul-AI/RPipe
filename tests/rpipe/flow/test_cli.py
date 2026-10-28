@@ -1,4 +1,5 @@
 """CLI plan/read commands have observable zero execution and zero output writes."""
+from rpipe.structure import make as planning
 
 import pytest
 
@@ -10,7 +11,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
 @pytest.mark.parametrize('command', ['plan', 'status', 'logs', 'report'])
 def test_cli_read_command_preserves_source_and_runtime_bytes(
         source_study, run_root, payload_factory, file_bytes, command, capsys):
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.api import run
     from rpipe.flow.cli import main
 
     specs = plan(source_study, run_root=run_root)
@@ -69,7 +71,7 @@ def test_cli_tensorboard_passes_explicit_selected_run_ids(source_study, run_root
     from rpipe.flow import exports
     from rpipe.flow.cli import main
 
-    specs = api.plan(source_study, run_root=run_root)
+    specs = planning.plan(source_study, run_root=run_root)
     selections = []
     def export(root, out, **kwargs):
         selections.append(kwargs['run_ids'])
@@ -118,7 +120,7 @@ def test_cli_data_profiles_only_the_selected_effective_input(source_study, run_r
     (source_study / 'experiment_config.yaml').write_text(
         yaml.safe_dump({'data': {'name': 'MNIST', 'source': 'custom'}, 'algorithm': {'mode': 'train'}}),
         encoding='utf-8')
-    selected = api.plan(source_study, run_root=run_root)[1]
+    selected = planning.plan(source_study, run_root=run_root)[1]
     calls = []
 
     def build(config, shared, **kwargs):

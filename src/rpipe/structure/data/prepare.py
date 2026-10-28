@@ -7,9 +7,9 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from rpipe.structure.artifacts import cache_lock
-from rpipe.structure.artifacts import _read_text, atomic_write_text
-from rpipe.structure.contracts import DataConfig
+from rpipe.structure.artifact.io import cache_lock
+from rpipe.structure.artifact.io import _read_text, atomic_write_text
+from rpipe.structure.control import DataConfig
 from rpipe.structure.data.factory import DataFactory, vision_root
 from rpipe.structure.system.origin import endpoint_for, normalize_origin
 

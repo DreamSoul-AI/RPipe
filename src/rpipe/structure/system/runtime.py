@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rpipe.structure.contracts import SystemConfig
+from rpipe.structure.control import SystemConfig
 
 
 def check_cancelled(system: Any) -> None:

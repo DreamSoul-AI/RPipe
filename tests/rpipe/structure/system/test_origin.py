@@ -90,9 +90,9 @@ def test_discard_bad_archive_removes_partial_and_keeps_matching_md5(tmp_path: Pa
 @pytest.mark.parametrize('kind', ['model', 'data'])
 def test_domestic_origin_is_set_before_registered_builder(monkeypatch, tmp_path, kind):
     from rpipe.structure.model.factory import Model, ModelFactory, ModelRegistry
-    from rpipe.structure.contracts import ModelConfig
+    from rpipe.structure.control import ModelConfig
     from rpipe.structure.data.factory import Data, DataFactory, DataRegistry
-    from rpipe.structure.contracts import DataConfig
+    from rpipe.structure.control import DataConfig
 
     monkeypatch.setenv('HF_ENDPOINT', 'https://example.invalid')
     seen = []

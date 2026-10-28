@@ -38,7 +38,7 @@ def correct_samples(accuracy, count):
 
 
 def main(recipe, argv):
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run-root', type=Path, required=True)
@@ -65,14 +65,14 @@ def main(recipe, argv):
     recipe.bootstrap()
     os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
     import torch
-    from rpipe.structure.contracts import AlgorithmConfig
+    from rpipe.structure.control import AlgorithmConfig
     from rpipe.structure.algorithm.train import TrainAlgorithm
     from rpipe.structure.algorithm.tracker import AlgorithmTracker
-    from rpipe.structure.contracts import DataConfig
+    from rpipe.structure.control import DataConfig
     from rpipe.structure.data.factory import DataFactory
-    from rpipe.structure.contracts import ModelConfig
+    from rpipe.structure.control import ModelConfig
     from rpipe.structure.model.factory import ModelFactory
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.control import SystemConfig
     from rpipe.structure.system.factory import SystemFactory
     from rpipe.structure.system.runtime import apply_runtime
 

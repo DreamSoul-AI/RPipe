@@ -11,7 +11,7 @@ pytestmark = [
 ]
 
 
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.hf_map import hf_optim_name, hf_scheduler_name, training_arguments_kwargs
 
 

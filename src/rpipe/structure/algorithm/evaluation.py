@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from rpipe.structure.algorithm.factory import Algorithm
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.evaluation_support import eval_batch_limit, eval_test_split
 from rpipe.structure.algorithm.progress import format_hms
 from rpipe.structure.algorithm.tracker import AlgorithmTracker

@@ -11,7 +11,7 @@ pytestmark = [
 ]
 
 from rpipe.structure.algorithm.factory import Algorithm
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.factory import AlgorithmHook
 from rpipe.structure.algorithm.evaluation_support import should_early_stop
 from rpipe.structure.algorithm.tracker import AlgorithmTracker
@@ -82,7 +82,7 @@ def test_best_updates_without_patience():
 def test_eval_num_steps_caps_batches(tmp_path, limit, expected):
     import torch
 
-    from rpipe.structure.contracts import AlgorithmConfig
+    from rpipe.structure.control import AlgorithmConfig
     from rpipe.structure.algorithm.evaluation_support import eval_batch_limit, eval_test_split
     from rpipe.structure.algorithm.tracker import AlgorithmTracker
 
