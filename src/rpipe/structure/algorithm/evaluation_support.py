@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from rpipe.structure.api import CancelCheck, TrackerPort
+
 from rpipe.structure.algorithm.batch import prepare_tensors
-from rpipe.structure.algorithm.tracker import AlgorithmTracker
 
 
 def eval_batch_limit(config: Any | None) -> int | None:
@@ -25,7 +26,7 @@ def eval_batch_limit(config: Any | None) -> int | None:
 
 
 def eval_test_split(
-    tracker: AlgorithmTracker,
+    tracker: TrackerPort,
     logger: Any,
     data: Any,
     model: Any,
@@ -33,7 +34,9 @@ def eval_test_split(
     extra: dict[str, Any] | None = None,
     *,
     num_steps: int | None = None,
+    cancel_check: CancelCheck,
 ) -> dict[str, float]:
+    cancel_check()
     if num_steps is not None and num_steps <= 0:
         raise ValueError('eval_num_steps must be positive, or use -1 for the full test split')
     import torch
@@ -47,8 +50,7 @@ def eval_test_split(
     samples = 0
     with torch.no_grad():
         for index, batch in enumerate(data.iter_batches('test')):
-            from rpipe.structure.system.runtime import check_cancelled
-            check_cancelled(system)
+            cancel_check()
             images, targets = prepare_tensors(batch, module, device)
             if images.size(0) <= 0:
                 raise ValueError('empty test batch cannot produce evaluation metrics')

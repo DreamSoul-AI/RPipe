@@ -7,12 +7,29 @@ from typing import Any
 from rpipe.structure.control import SystemConfig
 
 
-def check_cancelled(system: Any) -> None:
-    """Cooperative boundary; the process owner enforces hard deadlines."""
-    cancellation = getattr(system, 'cancellation', None)
-    if cancellation is not None and cancellation.is_set():
-        from concurrent.futures import CancelledError
-        raise CancelledError('scientific payload cancellation requested')
+def capture_rng() -> dict[str, Any]:
+    import random
+    import numpy as np
+    import torch
+
+    return {'python': random.getstate(), 'numpy': np.random.get_state(),
+            'torch': torch.get_rng_state(),
+            'cuda': torch.cuda.get_rng_state_all() if torch.cuda.is_initialized() else None}
+
+
+def restore_rng(state: dict[str, Any]) -> None:
+    import random
+    import numpy as np
+    import torch
+
+    cuda = state['cuda']
+    if cuda is not None and (not torch.cuda.is_available() or len(cuda) != torch.cuda.device_count()):
+        raise ValueError('checkpoint CUDA RNG devices do not match current runtime')
+    random.setstate(state['python'])
+    np.random.set_state(state['numpy'])
+    torch.set_rng_state(state['torch'].cpu())
+    if cuda is not None:
+        torch.cuda.set_rng_state_all([value.cpu() for value in cuda])
 
 
 

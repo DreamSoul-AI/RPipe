@@ -80,7 +80,7 @@ def test_profile_consumes_batches_incrementally_and_closes_its_data(tmp_path, mo
             self.closed = True
 
     data = OwnedData()
-    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: data)
+    monkeypatch.setattr(profile, 'build_data', lambda *args, **kwargs: data)
     source = tmp_path / 'source'
     source.mkdir()
     (source / 'study.yaml').write_text('fixed: {data: {name: Tiny}}\n', encoding='utf-8')
@@ -107,7 +107,7 @@ def test_profile_keeps_primary_error_when_owned_data_close_also_fails(tmp_path, 
         def close(self):
             raise OSError('secondary close')
 
-    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: BrokenData())
+    monkeypatch.setattr(profile, 'build_data', lambda *args, **kwargs: BrokenData())
     source = tmp_path / 'source'
     source.mkdir()
     (source / 'study.yaml').write_text('fixed: {data: {name: Tiny}}\n', encoding='utf-8')
@@ -152,7 +152,7 @@ def test_profile_registers_iterator_with_its_data_owner_before_failure(tmp_path,
 
     batches = Batches()
     data = Data(name='Tiny', source='test', loaders={'train': batches}, meta={})
-    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: data)
+    monkeypatch.setattr(profile, 'build_data', lambda *args, **kwargs: data)
     source = tmp_path / 'source'
     source.mkdir()
     (source / 'study.yaml').write_text('fixed: {data: {name: Tiny}}\n', encoding='utf-8')
@@ -178,7 +178,7 @@ def test_profile_uses_resolved_declared_input_and_source_once_for_repeated_runs(
             'train': [(torch.tensor([[[[0.2, 0.4]]]]), torch.tensor([0]))],
         })
 
-    monkeypatch.setattr(profile.DataFactory, 'build', build)
+    monkeypatch.setattr(profile, 'build_data', build)
     first = {'origin': 'domestic', 'seed': 0, 'data': {'name': 'MNIST', 'source': 'custom',
              'path': '../declared', 'config': {'train_size': 1, 'augment': True, 'num_workers': 2}}}
     second = copy.deepcopy(first)
@@ -201,7 +201,7 @@ def test_profile_rejects_conflicting_inputs_before_any_build_or_write(tmp_path, 
     from rpipe.structure.data import profile
 
     calls = []
-    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: calls.append(True))
+    monkeypatch.setattr(profile, 'build_data', lambda *args, **kwargs: calls.append(True))
     configs = [{'data': {'name': 'MNIST', 'path': path}} for path in ('../left', '../right')]
     with pytest.raises(ValueError, match='conflicting profile inputs'):
         profile.profile_study(tmp_path / 'source', configs=configs, shared_data_dir=tmp_path / 'raw',
@@ -213,7 +213,7 @@ def test_profile_download_flag_cannot_mutate_a_declared_input(tmp_path, monkeypa
     from rpipe.structure.data import profile
 
     calls = []
-    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: calls.append(True))
+    monkeypatch.setattr(profile, 'build_data', lambda *args, **kwargs: calls.append(True))
     with pytest.raises(ValueError, match='read-only'):
         profile.profile_study(tmp_path / 'source', configs=[{'data': {'name': 'MNIST', 'path': '../input'}}],
                               shared_data_dir=tmp_path / 'raw', profiles_dir=tmp_path / 'profiles', download=True)
@@ -246,7 +246,7 @@ def test_profile_rejects_output_links_before_building_or_changing_originals(
         folder.mkdir()
         (folder / 'stats.yaml').symlink_to(sentinel)
     calls = []
-    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: calls.append(True))
+    monkeypatch.setattr(profile, 'build_data', lambda *args, **kwargs: calls.append(True))
     with pytest.raises(AdmissionError):
         profile.profile_study(source, configs=[{'data': {'name': 'MNIST', 'path': str(inputs)}}],
                               shared_data_dir=tmp_path / 'raw', profiles_dir=profiles)

@@ -18,7 +18,7 @@ def test_native_public_run_trains_two_updates_then_independently_evaluates_own_b
     from rpipe.api import read_run
     from rpipe.flow.process import process_study as process
     from rpipe.flow.run import run
-    from rpipe.structure.system.factory import SystemFactory
+    from rpipe.structure.system.factory import build_system
     from rpipe.structure.control import SystemConfig
 
     before = file_bytes(tensor_study)
@@ -28,7 +28,7 @@ def test_native_public_run_trains_two_updates_then_independently_evaluates_own_b
     assert run(train).status == 'succeeded'
     trained = read_run(train)
     assert trained['execute']['steps'] == 2
-    system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), train.assets_dir)
+    system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), train.assets_dir)
     best = system.load_checkpoint('best')
     latest = system.load_checkpoint('latest')
     assert best is not None and latest['step'] == 2
@@ -151,7 +151,7 @@ def test_windows_hard_timeout_admission_matches_possible_descendants(
 
 @pytest.mark.integration
 @pytest.mark.parametrize('fault', ['request', 'identity', 'attempt', 'schema', 'scalar',
-                                  'truncated', 'missing-draft', 'invalid-closure'])
+                                  'truncated', 'missing-draft', 'invalid-closure', 'stage', 'error-logged'])
 def test_foreign_or_malformed_worker_response_never_publishes_scientific_success(
         source_study, run_root, monkeypatch, fault):
     import importlib
@@ -167,13 +167,16 @@ body = json.loads(request.read_text(encoding='utf-8'))
 response = {'schema': 1, 'request': body['request'], 'identity': body['identity'],
             'attempt': body['attempt'], 'result': {'metrics': {'value': 3.0}},
             'error': None, 'cleanup_errors': [], 'unknown_resources': False,
-            'science_closed': True, 'diagnostics_complete': True, 'environment': {}}
+            'science_closed': True, 'diagnostics_complete': True, 'environment': {},
+            'stage': 'write', 'error_logged': False}
 if fault in {'request', 'attempt'}: response[fault] = 'f' * 32
 elif fault == 'identity': response['identity'] = {'foreign': True}
 elif fault == 'schema': response['schema'] = True
 elif fault == 'scalar': response = []
 elif fault == 'missing-draft': response['result'] = {}
 elif fault == 'invalid-closure': response['unknown_resources'] = True
+elif fault == 'stage': response['stage'] = 'foreign-phase'
+elif fault == 'error-logged': response['error_logged'] = 'true'
 output.write_text('{' if fault == 'truncated' else json.dumps(response), encoding='utf-8')
 '''
     class ForeignWorker(native_popen):

@@ -48,8 +48,13 @@ def register(archive, data_root, *, seed, sampler_steps):
                 worker_init_fn=np.random.seed(self._run_seed),
             )
 
-        def iter_batches(self, split: str):
-            for batch in self._loaders[split]:
+        def iter_batches(self, split: str, *, resumable: bool = True):
+            if type(resumable) is not bool:
+                raise ValueError('resumable must be a boolean')
+            # Pinned loaders have no cursor snapshot; training_state stays unsupported.
+            iterator = iter(self._loaders[split])
+            self._iterators[split] = iterator
+            for batch in iterator:
                 if split in self.observations:
                     self.observations[split].add(batch)
                 yield batch['data'], batch['target']

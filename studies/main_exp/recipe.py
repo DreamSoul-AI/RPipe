@@ -147,11 +147,11 @@ def preflight(data_root: Path | str, output_dir: Path | str, *, steps: int = 200
     from rpipe.structure.algorithm.train import TrainAlgorithm
     from rpipe.structure.algorithm.tracker import AlgorithmTracker
     from rpipe.structure.control import DataConfig
-    from rpipe.structure.data.factory import DataFactory
+    from rpipe.structure.data.factory import build_data
     from rpipe.structure.control import ModelConfig
-    from rpipe.structure.model.factory import ModelFactory
+    from rpipe.structure.model.factory import build_model
     from rpipe.structure.control import SystemConfig
-    from rpipe.structure.system.factory import SystemFactory
+    from rpipe.structure.system.factory import build_system
     from rpipe.structure.system.runtime import apply_runtime
 
     mapping = algorithm_config(steps)
@@ -234,18 +234,18 @@ def preflight(data_root: Path | str, output_dir: Path | str, *, steps: int = 200
         archive.configure(data_name, model_name, seed, device)
         apply_runtime(seed, system_config)
         assets = cell / 'current' / 'assets'
-        data = DataFactory.build(DataConfig.from_mapping({'name': data_name, 'source': SOURCE,
+        system = build_system(system_config, assets)
+        data = build_data(DataConfig.from_mapping({'name': data_name, 'source': SOURCE,
                                  'config': {'batch_size': 250, 'test_batch_ratio': 1,
                                             'pin_memory': True, 'num_workers': 0}}), assets, seed=seed)
-        model = ModelFactory.build(ModelConfig.from_mapping({'name': model_name, 'source': SOURCE}),
-                                   assets, data_meta=data.meta)
+        model = build_model(ModelConfig.from_mapping({'name': model_name, 'source': SOURCE}),
+                                   assets, data_meta=data.meta, system=system)
         initial = _compare_states(original_init, _state_cpu(model.module))
         init_rng = _rng_equal(original_init_rng, _rng_state())
         data.observations = {'train': Observation(), 'test': Observation()}
-        system = SystemFactory.build(system_config, assets)
         tracker = AlgorithmTracker(assets)
         algorithm = CapturedTrain(AlgorithmConfig.from_mapping(mapping))
-        summary = algorithm.run(data, model, system, tracker)
+        summary = algorithm.compute(data, model, system, tracker, cancel_check=lambda: None)
         final = _compare_states(original_final, _state_cpu(model.module))
         final_rng = _rng_equal(original_rng, _rng_state())
         current_scheduler = algorithm.scheduler.state_dict()

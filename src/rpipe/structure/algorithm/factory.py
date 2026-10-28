@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 from pathlib import Path
+from rpipe.structure.api import CancelCheck, ComputationObservation, DataPort, ModelPort, SystemPort, TrackerPort
 from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.optim import make_optimizer as _make_optimizer, make_scheduler as _make_scheduler
 from rpipe.structure.algorithm.resume import (apply_module_state, resolve_checkpoint_ref, resume_stem, sibling_train_checkpoint, partial_resume_warning)
@@ -14,13 +15,11 @@ from rpipe.structure.algorithm.progress import (
     resolve_budget,
 )
 
-from rpipe.structure.algorithm.tracker import AlgorithmTracker
-
 class AlgorithmHook:
     """Contract for algorithm-loop hooks. Methods live on ``Algorithm``.
 
     Base is no-op / do-not-stop. Concrete modes override the points they need.
-    Shared signature: ``(tracker, logger, data, model, system, extra=None)``.
+    Periodic evaluation receives the computation's read-only cancellation checker.
     """
 
     def eval_period(self) -> int:
@@ -51,20 +50,23 @@ class AlgorithmHook:
 
     def on_eval_period(
         self,
-        tracker: AlgorithmTracker,
+        tracker: TrackerPort,
         logger: Any,
         data: Any,
         model: Any,
         system: Any,
         extra: dict[str, Any] | None = None,
+        *,
+        cancel_check: CancelCheck,
     ) -> bool:
-        """Return True to stop ``run()``. Not a Flow phase."""
+        """Return True to stop ``compute()``. Not a Flow phase."""
+        cancel_check()
         del tracker, logger, data, model, system, extra
         return False
 
     def on_checkpoint(
         self,
-        tracker: AlgorithmTracker,
+        tracker: TrackerPort,
         logger: Any,
         data: Any,
         model: Any,
@@ -79,7 +81,7 @@ class Algorithm(AlgorithmHook):
 
     def __init__(self, config: AlgorithmConfig) -> None:
         self.config = config
-        self.mode = config.mode or 'train'
+        self.mode = 'train' if config.mode is None else config.mode
 
     def make_optimizer(self, module: Any) -> Any:
         return _make_optimizer(module, self.config)
@@ -92,7 +94,7 @@ class Algorithm(AlgorithmHook):
         data: Any,
         model: Any,
         system: Any,
-        tracker: AlgorithmTracker,
+        tracker: TrackerPort,
         extra: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         extra = extra if extra is not None else {}
@@ -136,7 +138,8 @@ class Algorithm(AlgorithmHook):
             )
         return payload
 
-    def run(self, data: Any, model: Any, system: Any, tracker: AlgorithmTracker) -> dict[str, Any]:
+    def compute(self, data: DataPort, model: ModelPort, system: SystemPort, tracker: TrackerPort,
+                cancel_check: CancelCheck) -> ComputationObservation:
         raise NotImplementedError
 
 def _table() -> dict[tuple[str, str], type[Algorithm]]:
@@ -174,12 +177,10 @@ class AlgorithmRegistry:
     def list(cls) -> list[tuple[str, str]]:
         return sorted(set(cls._store()) | {('train', 'transformers_trainer'), ('eval', 'transformers_trainer')})
 
-class AlgorithmFactory:
-    @staticmethod
-    def build(algorithm_config: AlgorithmConfig, **_: Any) -> Algorithm:
-        mode = algorithm_config.mode or 'train'
-        source = algorithm_config.source or 'custom_torch'
-        impl = AlgorithmRegistry.get(mode, source)
-        if impl is None:
-            raise ValueError(f'unknown algorithm mode/source: {mode}/{source}')
-        return impl(algorithm_config)
+def build_algorithm(algorithm_config: AlgorithmConfig) -> Algorithm:
+    mode = 'train' if algorithm_config.mode is None else algorithm_config.mode
+    source = 'custom_torch' if algorithm_config.source is None else algorithm_config.source
+    impl = AlgorithmRegistry.get(mode, source)
+    if impl is None:
+        raise ValueError(f'unknown algorithm mode/source: {mode}/{source}')
+    return impl(algorithm_config)

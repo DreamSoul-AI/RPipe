@@ -15,7 +15,7 @@ from rpipe.structure.algorithm.metrics import MetricBundle
 from rpipe.structure.algorithm.train import TrainAlgorithm
 from rpipe.structure.data.factory import Data
 from rpipe.structure.control import SystemConfig
-from rpipe.structure.system.factory import SystemFactory
+from rpipe.structure.system.factory import build_system
 from rpipe.structure.system.runtime import apply_runtime
 
 root, action, unit, device, period, stop, eval_period, interrupt_step = sys.argv[1:]
@@ -55,7 +55,8 @@ settings = {'mode': 'train', 'progress_unit': unit,
             'eval_period': int(eval_period), 'checkpoint_period': 1, 'early_stop_patience': int(stop) or None}
 if int(stop):
     settings.update(best_split='train', best_metric='Loss', best_mode='min', early_stop_min_delta=100.0)
-system = SystemFactory.build(SystemConfig.from_mapping({'device': device}), root)
+system = build_system(SystemConfig.from_mapping({'device': device}), root)
+model.module = system.place_module(model.module)
 save = system.save_checkpoint
 
 
@@ -75,7 +76,7 @@ class CustomMetrics(MetricBundle):
 
 try:
     tracker = AlgorithmTracker(root, CustomMetrics() if action.endswith('-custom-metrics') else None)
-    result = TrainAlgorithm(AlgorithmConfig.from_mapping(settings)).run(data, model, system, tracker)
+    result = TrainAlgorithm(AlgorithmConfig.from_mapping(settings)).compute(data, model, system, tracker, cancel_check=lambda: None)
 except RuntimeError as exc:
     if str(exc) != 'fixture interruption after committed checkpoint' or not action.startswith('interrupt'):
         raise

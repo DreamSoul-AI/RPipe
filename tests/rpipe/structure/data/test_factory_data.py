@@ -12,12 +12,12 @@ pytestmark = [
 
 from pathlib import Path
 
-from rpipe.structure.data.factory import DataFactory as data_api
+from rpipe.structure.data.factory import build_data as data_api
 from rpipe.structure.control import DataConfig
 
 
 def test_stub_source_does_not_download(tmp_path: Path):
-    data = data_api.build(
+    data = data_api(
         DataConfig.from_mapping({'name': 'MNIST', 'source': 'stub'}),
         tmp_path,
     )
@@ -62,7 +62,7 @@ def test_owned_vision_cache_cannot_publish_through_links_into_source(tmp_path, m
     monkeypatch.setattr(torchvision.datasets, 'MNIST', Dataset)
     try:
         with pytest.raises(AdmissionError):
-            data_api.build(DataConfig.from_mapping({'name': 'MNIST', 'source': 'torch'}), cache)
+            data_api(DataConfig.from_mapping({'name': 'MNIST', 'source': 'torch'}), cache)
     finally:
         assert file_bytes(source) == before
     assert not calls
@@ -79,7 +79,7 @@ def test_owned_vision_cache_cannot_publish_through_links_into_source(tmp_path, m
 ])
 def test_unregistered_data_is_rejected(tmp_path, mapping):
     with pytest.raises(ValueError, match='unknown data name/source'):
-        data_api.build(DataConfig.from_mapping(mapping), tmp_path)
+        data_api(DataConfig.from_mapping(mapping), tmp_path)
     assert list(tmp_path.iterdir()) == []
 
 
@@ -88,7 +88,7 @@ def test_cifar10_builder_uses_fake_dataset(tmp_path: Path, monkeypatch, record_s
     from PIL import Image
     downloads = []
 
-    from rpipe.structure.data.factory import DataFactory as data_api
+    from rpipe.structure.data.factory import build_data as data_api
     from rpipe.structure.control import DataConfig
 
     class _Fake:
@@ -114,7 +114,7 @@ def test_cifar10_builder_uses_fake_dataset(tmp_path: Path, monkeypatch, record_s
     profile = tmp_path / 'stats.yaml'
     if record_stats:
         profile.write_text('mean: [0.1, 0.2, 0.3]\nstd: [0.2, 0.3, 0.4]\n', encoding='utf-8')
-    data = data_api.build(
+    data = data_api(
         DataConfig.from_mapping(
             {
                 'name': 'CIFAR10',
@@ -140,7 +140,7 @@ def test_cifar10_builder_uses_fake_dataset(tmp_path: Path, monkeypatch, record_s
 def test_svhn_builder_uses_fake_dataset(tmp_path: Path, monkeypatch):
     from PIL import Image
 
-    from rpipe.structure.data.factory import DataFactory as data_api
+    from rpipe.structure.data.factory import build_data as data_api
     from rpipe.structure.control import DataConfig
 
     class _Fake:
@@ -161,7 +161,7 @@ def test_svhn_builder_uses_fake_dataset(tmp_path: Path, monkeypatch):
     import torchvision.datasets as tv_datasets
 
     monkeypatch.setattr(tv_datasets, 'SVHN', _Fake)
-    data = data_api.build(
+    data = data_api(
         DataConfig.from_mapping({'name': 'SVHN', 'source': 'torch', 'config': {'batch_size': 3, 'augment': False}}),
         tmp_path,
         seed=0,
@@ -174,7 +174,7 @@ def test_svhn_builder_uses_fake_dataset(tmp_path: Path, monkeypatch):
 def test_fashionmnist_and_cifar100_builders(tmp_path, monkeypatch):
     from PIL import Image
 
-    from rpipe.structure.data.factory import DataFactory as data_api
+    from rpipe.structure.data.factory import build_data as data_api
     from rpipe.structure.control import DataConfig
 
     class _Gray:
@@ -211,12 +211,12 @@ def test_fashionmnist_and_cifar100_builders(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tv_datasets, 'FashionMNIST', _Gray)
     monkeypatch.setattr(tv_datasets, 'CIFAR100', _Color)
-    fashion = data_api.build(
+    fashion = data_api(
         DataConfig.from_mapping({'name': 'FashionMNIST', 'source': 'torch', 'config': {'batch_size': 2}}),
         tmp_path,
         seed=0,
     )
-    cifar = data_api.build(
+    cifar = data_api(
         DataConfig.from_mapping(
             {'name': 'CIFAR100', 'source': 'torch', 'config': {'batch_size': 2, 'augment': False}}
         ),
@@ -232,7 +232,7 @@ def test_fashionmnist_and_cifar100_builders(tmp_path, monkeypatch):
 def test_dataloader_honors_pin_memory_and_workers(tmp_path, monkeypatch):
     from PIL import Image
 
-    from rpipe.structure.data.factory import DataFactory as data_api
+    from rpipe.structure.data.factory import build_data as data_api
     from rpipe.structure.control import DataConfig
 
     class _Fake:
@@ -253,7 +253,7 @@ def test_dataloader_honors_pin_memory_and_workers(tmp_path, monkeypatch):
     import torchvision.datasets as tv_datasets
 
     monkeypatch.setattr(tv_datasets, 'CIFAR10', _Fake)
-    data = data_api.build(
+    data = data_api(
         DataConfig.from_mapping(
             {
                 'name': 'CIFAR10',

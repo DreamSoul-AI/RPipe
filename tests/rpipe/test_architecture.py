@@ -109,3 +109,21 @@ def test_retired_runtime_adapters_and_api_execution_wrappers_are_absent():
     assert not any(hasattr(api, name) for name in ('run', 'cancel', 'launch', 'supervise', 'process'))
     assert not any((SOURCE / name).exists() for name in (
         'structure/execution.py', 'structure/contracts.py', 'flow/native.py', 'flow/huggingface.py'))
+
+
+def test_component_builders_replace_static_factory_classes():
+    for name in ('data', 'model', 'algorithm', 'system'):
+        tree = ast.parse((SOURCE / 'structure' / name / 'factory.py').read_text(encoding='utf-8'))
+        assert any(isinstance(node, ast.FunctionDef) and node.name == 'build_' + name
+                   for node in tree.body)
+        assert not any(isinstance(node, (ast.ClassDef, ast.FunctionDef))
+                       and node.name == name.title() + 'Factory' for node in tree.body)
+
+
+def test_algorithms_consume_ports_without_constructing_other_components():
+    forbidden = {'rpipe.structure.data.factory', 'rpipe.structure.model.factory',
+                 'rpipe.structure.system.factory'}
+    for path in (SOURCE / 'structure' / 'algorithm').glob('*.py'):
+        for line, names in _imports(path):
+            assert not any(name == target or name.startswith(target + '.')
+                           for name in names for target in forbidden), (path, line, names)

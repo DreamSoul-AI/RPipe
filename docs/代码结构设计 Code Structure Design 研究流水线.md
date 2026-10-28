@@ -225,7 +225,9 @@ RunSpec 包含配置身份、因素归属、seed、来源引用、输出位置�
 | system.factory.build_system | SystemConfig、明确位置与初始化条件 → SystemPort | 设备/精度、放置、Logger 和所属资源能力 |
 | AlgorithmPort.compute | DataPort、ModelPort、SystemPort、Tracker、取消检查器 → ComputationObservation | 算法拥有更新状态和时序，观测包含真实指标来源、进度与证据位置 |
 
-Port 只描述跨部件真正使用的能力，可以用轻量 Protocol 表达，具体对象不必继承。支持恢复的数据实现明确提供 snapshot/restore；不支持者返回明确能力观察，不实现空恢复来假装成功。Tracker 是算法对象，Logger 是系统对象，不要求通过通用服务容器取得。
+Port 只描述跨部件真正使用的能力，可以用轻量 Protocol 表达，具体对象不必继承。取消检查器为零参数调用：正常返回或抛出取消，不交出可变请求对象；调用须进入实际批次、周期评测及后端协作时机。来源或模式有默认值时只在未指定时选择，空名和未知选择明确拒绝。数据状态以明确保存/恢复能力交接；本项目用 training_state/restore_training_state 表达训练数据范围，不支持者返回明确能力观察，不实现空恢复来假装成功。iter_batches 的 resumable 选择是否走来源支持的游标跟踪；不启用时复用该来源原迭代及生成器，同时登记所属资源，不能凭开关值宣称完整恢复。Tracker 是算法对象，Logger 是系统对象，不要求通过通用服务容器取得。
+
+模型形状按明确声明、必要元信息及默认值的优先级解释。显式 in_features 经规定数值转换后必须与所选输入 shape 的扁平维数相容，不能吞掉矛盾声明；Linear 展平只核有效维数，不要求原始 tuple 形状处处相等。InputNorm 在计算对象的既定位置执行，构造器使用注入 System 完成唯一模型放置，算法只消费已装配模型。
 
 ## （三）阶段交接与唯一发布
 

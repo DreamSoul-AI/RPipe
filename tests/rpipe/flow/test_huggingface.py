@@ -20,7 +20,7 @@ def test_hf_two_step_training_publishes_own_best_for_independent_eval(tensor_stu
     from rpipe.structure.make import plan
     from rpipe.api import read_run
     from rpipe.flow.run import run
-    from rpipe.structure.system.factory import SystemFactory
+    from rpipe.structure.system.factory import build_system
     from rpipe.structure.control import SystemConfig
 
     path = tensor_study / 'experiment_config.yaml'
@@ -31,7 +31,7 @@ def test_hf_two_step_training_publishes_own_best_for_independent_eval(tensor_stu
     outcome = run(train)
     assert outcome.status == 'succeeded', outcome.error
     assert read_run(train)['execute']['steps'] == 2
-    system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), train.assets_dir)
+    system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), train.assets_dir)
     best = system.load_checkpoint('best')
     assert best is not None
     evaluated = run(evaluate)

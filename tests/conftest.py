@@ -503,6 +503,9 @@ def science_worker(monkeypatch):
         selected[:] = [actions]
 
     def prepare(ctx):
+        from rpipe.structure.system.logger import Logger
+        ctx.state['logger'] = Logger(ctx.layout.assets_dir, **ctx.state['logging_context'])
+        ctx.state['logger'].bind(phase='prepare')
         actions = selected[0]
         ctx.state['test_science_actions'] = actions
         class ScientificResource:
@@ -537,3 +540,13 @@ def science_worker(monkeypatch):
     monkeypatch.setattr(worker, 'subprocess', SimpleNamespace(Popen=InlineWorker,
         DEVNULL=subprocess.DEVNULL, STDOUT=subprocess.STDOUT))
     return install
+
+
+@pytest.fixture
+def model_system():
+    """A device-placement port for model-only construction tests."""
+    class Placement:
+        device = 'cpu'
+        def place_module(self, module):
+            return module.to('cpu') if module is not None else None
+    return Placement()

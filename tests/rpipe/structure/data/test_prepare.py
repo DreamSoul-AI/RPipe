@@ -26,7 +26,7 @@ def test_prepare_skips_stub(tmp_path: Path, monkeypatch):
         calls.append(str(cfg.name))
         return None
 
-    monkeypatch.setattr('rpipe.structure.data.prepare.DataFactory.build', fake_build)
+    monkeypatch.setattr('rpipe.structure.data.prepare.build_data', fake_build)
     config_path = _config(tmp_path, 'r0')
     write_config(config_path, {'id': 'r0', 'data': {'name': 'Toy', 'source': 'stub'}})
     assert prepare_shared_data(tmp_path, [config_path], shared_data_dir=tmp_path / 'shared' / 'data') == []
@@ -40,7 +40,7 @@ def test_prepare_skips_existing_cache(tmp_path: Path, monkeypatch):
         calls.append(str(cfg.name))
         return None
 
-    monkeypatch.setattr('rpipe.structure.data.prepare.DataFactory.build', fake_build)
+    monkeypatch.setattr('rpipe.structure.data.prepare.build_data', fake_build)
     config_path = _config(tmp_path, 'r0')
     write_config(
         config_path,
@@ -60,7 +60,7 @@ def test_prepare_once_per_name_source(tmp_path: Path, monkeypatch):
         calls.append((cfg.name, cfg.source, cfg.config.get('train_size'), Path(root).name))
         return None
 
-    monkeypatch.setattr('rpipe.structure.data.prepare.DataFactory.build', fake_build)
+    monkeypatch.setattr('rpipe.structure.data.prepare.build_data', fake_build)
     paths = []
     for i, size in enumerate((500, 2000, 500)):
         config_path = _config(tmp_path, f'r{i}')
@@ -90,7 +90,7 @@ def test_prepare_announces_download_before_build(tmp_path: Path, monkeypatch, ca
         seen['during'] = '\n'.join(record.getMessage() for record in caplog.records)
         return None
 
-    monkeypatch.setattr('rpipe.structure.data.prepare.DataFactory.build', fake_build)
+    monkeypatch.setattr('rpipe.structure.data.prepare.build_data', fake_build)
     config_path = _config(tmp_path, 'r0')
     write_config(
         config_path,
@@ -113,7 +113,7 @@ def test_prepare_retries_partial_archive(tmp_path: Path, monkeypatch, caplog):
         calls.append(origin or '')
         return None
 
-    monkeypatch.setattr('rpipe.structure.data.prepare.DataFactory.build', fake_build)
+    monkeypatch.setattr('rpipe.structure.data.prepare.build_data', fake_build)
     config_path = _config(tmp_path, 'r0')
     write_config(
         config_path,

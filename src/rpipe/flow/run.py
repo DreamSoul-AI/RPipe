@@ -50,11 +50,12 @@ def _configure(ctx):
 
 def _log_error(ctx, error, message):
     response = ctx.state.get('worker_response', {})
-    if isinstance(vars(error).get('record'), dict) and response.get('error') is not None:
+    if isinstance(vars(error).get('record'), dict) and response.get('error_logged') is True:
         return
     logger = ctx.state.get('logger')
     if logger is not None:
         try:
+            logger.bind(phase=ctx.state.get('phase') or 'admission')
             if isinstance(error, Cancelled):
                 logger.info('Run cancellation confirmed', event='task.cancelled')
             else:
@@ -98,7 +99,7 @@ def run(spec: RunSpec, *, budget: Budget | None = None,
         return RunReport('unknown' if cleanup else 'rejected', error=io.safe_error_record(error),
                          cleanup_errors=tuple(cleanup), attempt=attempt if cleanup else None)
     ctx = RunContext(spec, cancellation, io.ArtifactLayout(spec), owner=owner)
-    ctx.state.update(attempt=attempt, budget=budget)
+    ctx.state.update(attempt=attempt, budget=budget, phase='admission')
     record = {'schema': 1, 'identity': io.identity(spec), 'attempt': attempt,
               'owner_token': owner.token, 'phase': 'running', 'candidate_status': None,
               'quality': None, 'evidence_complete': False, 'scientific_result_published': False,

@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterator, Callable
 from rpipe.structure.control import DataConfig
+from rpipe.structure.api import DataPort
 
 from rpipe.structure.artifact.io import cache_lock, reference_tree, contained
 
@@ -28,11 +29,22 @@ class Data:
         self._resume_data = None
         self._iterators = {}
 
-    def iter_batches(self, split: str) -> Iterator[Any]:
+    def has_split(self, split: str) -> bool:
+        return self._loaders.get(split) is not None
+
+    def dataset(self, split: str) -> Any | None:
+        return getattr(self._loaders.get(split), 'dataset', None)
+
+    def batch_size(self, split: str = 'train') -> int | None:
+        return getattr(self._loaders.get(split), 'batch_size', None)
+
+    def iter_batches(self, split: str, *, resumable: bool = True) -> Iterator[Any]:
+        if type(resumable) is not bool:
+            raise ValueError('resumable must be a boolean')
         loader = self._loaders.get(split)
         if loader is None:
             return iter(())
-        if split == 'train':
+        if split == 'train' and resumable:
             from rpipe.structure.data.resume import (
                 BatchCursor, cursor_loader, generator_states, loader_spec, restore_generators,
             )
@@ -230,28 +242,26 @@ class DataRegistry:
     def list(cls) -> list[tuple[str, str]]:
         return sorted(cls._items)
 
-class DataFactory:
-    @staticmethod
-    def build(
-        data_config: DataConfig,
-        assets_dir: Path | str,
-        seed: int | None = None,
-        origin: str | None = None,
-        *,
-        profile_path: Path | str | None = None,
-    ) -> Data:
-        name = data_config.name
-        source = data_config.source if data_config.source is not None else 'torch'
-        builder = DataRegistry.get(name, source)
-        if builder is None:
-            raise ValueError(f'unknown data name/source: {name!r}/{source!r}')
-        if origin not in (None, ''):
-            apply_model_origin(origin)
-        with cache_lock(assets_dir):
-            if builder is _build_torch_vision:
-                return _build_torch_vision(data_config, Path(assets_dir), seed=seed, origin=origin,
-                                           profile_path=profile_path)
-            return builder(data_config, Path(assets_dir), seed=seed)
+def build_data(
+    data_config: DataConfig,
+    assets_dir: Path | str,
+    seed: int | None = None,
+    origin: str | None = None,
+    *,
+    profile_path: Path | str | None = None,
+) -> DataPort:
+    name = data_config.name
+    source = data_config.source if data_config.source is not None else 'torch'
+    builder = DataRegistry.get(name, source)
+    if builder is None:
+        raise ValueError(f'unknown data name/source: {name!r}/{source!r}')
+    if origin not in (None, ''):
+        apply_model_origin(origin)
+    with cache_lock(assets_dir):
+        if builder is _build_torch_vision:
+            return _build_torch_vision(data_config, Path(assets_dir), seed=seed, origin=origin,
+                                       profile_path=profile_path)
+        return builder(data_config, Path(assets_dir), seed=seed)
 
 def _build_stub(data_config: DataConfig, assets_dir: Path, seed: int | None = None) -> Data:
     name = data_config.name or 'unknown'

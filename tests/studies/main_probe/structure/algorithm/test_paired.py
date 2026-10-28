@@ -72,7 +72,8 @@ def pair_run(tmp_path, monkeypatch):
             self.original_set = self._train_set
             self.original_iter = self.iter_batches
 
-        def iter_batches(self, split):
+        def iter_batches(self, split, *, resumable=True):
+            self.batch_requests = [*getattr(self, 'batch_requests', []), (split, resumable)]
             return iter(())
 
     class Model(Resource):
@@ -102,12 +103,14 @@ def pair_run(tmp_path, monkeypatch):
         def __init__(self, config):
             pass
 
-        def run(self, data, model, system, tracker):
+        def compute(self, data, model, system, tracker, cancel_check):
+            cancel_check()
             at('native_train')
             return {'completed': True}
 
     class Eval(Train):
-        def run(self, data, model, system, tracker):
+        def compute(self, data, model, system, tracker, cancel_check):
+            cancel_check()
             at('native_eval')
             return {'completed': True}
 
@@ -146,7 +149,7 @@ def pair_run(tmp_path, monkeypatch):
         'rpipe.structure.algorithm.evaluation': SimpleNamespace(EvalAlgorithm=Eval),
         'rpipe.structure.algorithm.tracker': SimpleNamespace(AlgorithmTracker=Tracker),
         'rpipe.structure.system.factory': SimpleNamespace(
-            SystemFactory=SimpleNamespace(build=lambda *args: System('eval_system'))),
+            build_system=lambda *args: System('eval_system')),
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.setattr(paired, 'bootstrap', lambda: None)
@@ -158,14 +161,15 @@ def pair_run(tmp_path, monkeypatch):
     monkeypatch.setattr(paired, 'release_memory', lambda device: None)
     monkeypatch.setattr(paired, 'cpu_tree', lambda value: value)
     monkeypatch.setattr(paired, 'native_data', lambda *args: Data('eval_data'))
-    monkeypatch.setattr(paired, 'native_model', lambda *args: Model('eval_model'))
+    monkeypatch.setattr(paired, 'native_model', lambda *args, **kwargs: Model('eval_model'))
     monkeypatch.setattr(paired.subprocess, 'check_output', lambda *args, **kwargs: 'fixed-head')
     for filename, body in [('PREPARED.json', {'passed': True}),
                            ('SOURCE_MANIFEST.json', {'files': {}}), ('ENVIRONMENT.json', {})]:
         (tmp_path / filename).write_text(json.dumps(body), encoding='utf-8')
     native = (Data('caller_data'), Model('caller_model'), System('caller_system'),
               Tracker(), {'cpu': None})
-    state.run = lambda: paired.run_pair(tmp_path, 'cpu', ('MNIST', 'linear'), native)
+    state.run = lambda: paired.run_pair(tmp_path, 'cpu', ('MNIST', 'linear'), native,
+                                      cancel_check=lambda: None)
     state.paired = paired
     state.native = native
     return state
@@ -177,6 +181,17 @@ def assert_released(state):
         if hasattr(resource, 'original_set'):
             assert resource._train_set is resource.original_set
             assert resource.iter_batches == resource.original_iter
+
+
+@pytest.mark.parametrize('resumable', [True, False])
+def test_native_observation_forwards_resumable_choice_and_restores_owned_data(pair_run, resumable):
+    data, model = pair_run.native[:2]
+    with pair_run.paired.observe_native(data, model.module):
+        assert list(data.iter_batches('train', resumable=resumable)) == []
+    assert data.batch_requests == [('train', resumable)]
+    assert data.iter_batches == data.original_iter
+    assert data._train_set is data.original_set
+    assert_released(pair_run)
 
 
 @pytest.mark.parametrize('stage', [
@@ -239,7 +254,8 @@ def test_primary_and_every_cleanup_failure_survive(pair_run, stage, cleanup_fail
 
 def test_cleanup_failure_without_primary_still_attempts_remaining_resources(pair_run):
     pair_run.cleanup_fail = {'eval_system_logger', 'eval_model_hook', 'eval_data'}
-    with pytest.raises(OSError, match='eval_system_logger') as caught:
+    # System precedes Model construction; the model hook is released first.
+    with pytest.raises(OSError, match='eval_model_hook') as caught:
         pair_run.run()
-    assert {str(item) for item in caught.value.cleanup_errors} == {'eval_model_hook', 'eval_data'}
+    assert {str(item) for item in caught.value.cleanup_errors} == {'eval_system_logger', 'eval_data'}
     assert_released(pair_run)

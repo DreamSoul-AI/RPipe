@@ -24,7 +24,7 @@ def test_recipe_checkpoint_state_keeps_legacy_and_relocated_imports(tmp_path, mo
     from rpipe.flow.context import Cancellation
     from rpipe.flow.stages import configure_science, prepare, close_science
     from rpipe.structure.control import SystemConfig
-    from rpipe.structure.system.factory import SystemFactory
+    from rpipe.structure.system.factory import build_system
     from rpipe.structure.model.factory import ModelRegistry
     monkeypatch.setattr(ModelRegistry, '_items', dict(ModelRegistry._items))
 
@@ -58,7 +58,7 @@ def register(ctx):
     legacy_module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, 'helper', legacy_module)
     spec.loader.exec_module(legacy_module)
-    legacy = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}),
+    legacy = build_system(SystemConfig.from_mapping({'device': 'cpu'}),
                                  tmp_path / 'legacy-inputs' / 'assets')
     import torch
     bundle = legacy.save_checkpoint({'model': {'_extra_state': legacy_module.State(7),
@@ -82,6 +82,7 @@ def register(ctx):
         spec = plan(study, run_root=tmp_path / 'outputs')[0]
         from rpipe.structure.artifact.io import ArtifactLayout
         ctx = ScienceContext(spec=spec, cancellation=Cancellation(), layout=ArtifactLayout(spec))
+        ctx.state['attempt'] = 'a' * 32
         configure_science(ctx, logging_context={}, request_id=None)
         request.addfinalizer(lambda: close_science(ctx))
         prepare(ctx)

@@ -8,7 +8,6 @@ from threading import RLock
 from rpipe.structure.control import (AdmissionError, SourceMismatch, AlgorithmConfig, DataConfig,
                                     ModelConfig, SystemConfig, resolve_control, validate_control)
 from rpipe.structure.artifact import io, provenance
-from rpipe.structure.system.runtime import check_cancelled
 from .context import Cancelled, validate_draft
 from .study import RecipeContext, apply_recipe, _recipe_pickle_module, run_study_phase
 
@@ -16,13 +15,12 @@ _registry_lock = RLock()
 
 
 def configure_science(ctx, *, logging_context, request_id):
-    from rpipe.structure.system.logger import Logger
     ctx.state['study'] = io.load_config(ctx.study_dir / 'study.yaml')
     ctx.control = resolve_control(ctx.config)
-    ctx.state['logger'] = Logger(ctx.layout.assets_dir, logger='rpipe.flow.stages', stdout=False,
-                                 runtime_id=logging_context.get('runtime_id'), task_id=ctx.spec.id,
-                                 attempt_id=logging_context.get('attempt_id'), request_id=request_id,
-                                 workflow_id=ctx.spec.experiment, layer='flow')
+    ctx.state['logging_context'] = {
+        **logging_context, 'logger': 'rpipe.flow.stages', 'stdout': False,
+        'task_id': ctx.spec.id, 'attempt_id': ctx.state['attempt'], 'request_id': request_id,
+        'workflow_id': ctx.spec.experiment, 'layer': 'flow'}
 
 
 def _phase(ctx, name):
@@ -33,10 +31,14 @@ def _phase(ctx, name):
         logger.info('Run phase started', event='task.phase_changed')
 
 
+def _cancel(ctx):
+    if ctx.cancellation.is_set():
+        raise Cancelled('scientific cancellation requested')
+
+
 def _check(ctx):
     ctx.validate_config(ctx.spec)
-    if ctx.cancellation.is_set():
-        raise Cancelled('cancelled between phases')
+    _cancel(ctx)
 
 
 def _hook(ctx, name):
@@ -47,10 +49,10 @@ def prepare(ctx):
     # NumPy must precede Torch on affected Windows OpenMP installations.
     import numpy  # noqa: F401
 
-    from rpipe.structure.algorithm.factory import AlgorithmFactory
-    from rpipe.structure.system.factory import SystemFactory
-    from rpipe.structure.data.factory import DataFactory, vision_root
-    from rpipe.structure.model.factory import ModelFactory
+    from rpipe.structure.algorithm.factory import build_algorithm
+    from rpipe.structure.system.factory import build_system
+    from rpipe.structure.data.factory import build_data, vision_root
+    from rpipe.structure.model.factory import build_model
     from rpipe.structure.system.origin import apply_model_origin, normalize_origin
     from rpipe.structure.system.runtime import apply_runtime
     from rpipe.structure.algorithm.tracker import make_tracker
@@ -68,7 +70,8 @@ def prepare(ctx):
     validate_control(ctx.control)
     system_config = SystemConfig.from_mapping(ctx.control.system)
     ctx.state['runtime'] = apply_runtime(ctx.control.seed, system_config)
-    system = SystemFactory.build(system_config, ctx.layout.assets_dir, logger=ctx.state.get('logger'))
+    system = build_system(system_config, ctx.layout.assets_dir,
+                          logging_context=ctx.state['logging_context'])
     ctx.register_resource(system)
     system.meta.update(ctx.state['runtime'])
     system.study_root = Path(ctx.layout.study_root)
@@ -77,10 +80,10 @@ def prepare(ctx):
     train_id = getattr(ctx.spec, 'train_id', None)
     system.train_run_dir = system.study_root / 'runs' / train_id if train_id else None
     system.checkpoint_pickle_module = lambda: _recipe_pickle_module(ctx.study_dir)
-    system.cancellation = ctx.cancellation
     system.logger.run_id = system.run_id
     ctx.state.update(system=system, logger=system.logger, seed=ctx.control.seed)
-    check_cancelled(system)
+    _phase(ctx, 'prepare')
+    _cancel(ctx)
     run_study_phase(ctx.study_dir, 'prepare', ctx, ctx.state['study'], entry='before')
     ctx.validate_config(ctx.spec)
     ctx.state['recipe'] = apply_recipe(ctx.study_dir, ctx.state['study'], RecipeContext(
@@ -105,21 +108,19 @@ def prepare(ctx):
     name = vision_root(data_config.name)
     if name is not None:
         profile = ctx.layout.shared_dir / 'data' / name / 'stats.yaml'
-    data = DataFactory.build(data_config, ctx.layout.shared_data_dir,
+    data = build_data(data_config, ctx.layout.shared_data_dir,
                              seed=ctx.control.seed, origin=origin, profile_path=profile)
     ctx.state['data'] = ctx.register_resource(data)
-    check_cancelled(system)
+    _cancel(ctx)
     model_config = ModelConfig.from_mapping(ctx.control.model)
     if model_config.path:
         path = Path(model_config.path)
         model_config.path = str(path if path.is_absolute() else ctx.study_dir / path)
-    model = ModelFactory.build(model_config, ctx.layout.shared_model_dir,
-                               data_meta=getattr(data, 'meta', None), origin=origin)
+    model = build_model(model_config, ctx.layout.shared_model_dir,
+                               data_meta=data.meta, system=system, origin=origin)
     ctx.state['model'] = ctx.register_resource(model)
-    if model.module is not None:
-        model.module = system.place_module(model.module)
     algorithm_config = AlgorithmConfig.from_mapping(ctx.control.algorithm)
-    ctx.state['algorithm'] = ctx.register_resource(AlgorithmFactory.build(algorithm_config))
+    ctx.state['algorithm'] = ctx.register_resource(build_algorithm(algorithm_config))
     ctx.state['tracker'] = ctx.register_resource(make_tracker(ctx.layout.assets_dir, algorithm_config))
     ctx.state.setdefault('observations', [])
     system.logger.info(f'prepared control={ctx.control.id}')
@@ -129,9 +130,10 @@ def execute(ctx):
     algorithm, tracker = ctx.state.get('algorithm'), ctx.state.get('tracker')
     if algorithm is None or tracker is None:
         raise RuntimeError('prepare must land algorithm and tracker')
-    check_cancelled(ctx.state['system'])
+    _cancel(ctx)
     try:
-        result = algorithm.run(ctx.state['data'], ctx.state['model'], ctx.state['system'], tracker)
+        result = algorithm.compute(ctx.state['data'], ctx.state['model'], ctx.state['system'], tracker,
+                                   cancel_check=lambda: _cancel(ctx))
         ctx.state['execute'] = result
         ctx.state.setdefault('observations', []).append({'phase': 'execute', 'mode': algorithm.mode})
     except BaseException:

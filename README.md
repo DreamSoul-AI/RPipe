@@ -4,7 +4,7 @@ RPipe（Research Pipeline，研究流水线）是用于搭建研究实验的参�
 
 RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他项目长期安装调用的通用 package 为产品目标，也不要求衍生项目持续跟随本仓接口。模板自身仍需讲清职责、保持可运行并验证示例，帮助研究者把有效配置、执行事实、科学结果和比较分析连接起来。Python 包名 `rpipe`、安装命令和打包配置是当前源码的组织与运行方式，不构成跨项目稳定 API 的承诺。仓库为 [DreamSoul-AI/RPipe](https://github.com/DreamSoul-AI/RPipe)，采用 [MIT 许可](LICENSE.md)。
 
-当前包元数据为 **0.4.1**。实际实现和支持限制见下文；版本号不代表所有兼容变化已发布。架构设计以单一 Markdown 完整维护整体组成、结构与部件、流程与扩展、观测恢复及产物合同，作为实施依据；代码结构设计已据此重新推导为单一完整文档，写明目标目录、部件接口、生命周期和依赖；control/make 与 artifact 配置/清单链路、flow 生命周期/持权/唯一 write 已落地，四类部件正式合同及其余 artifact 职责继续按批次落实。实际差距、清理工作与校准事项见[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)。正式数值、GPU 和长程性能仍待验收。
+当前包元数据为 **0.4.1**。实际实现和支持限制见下文；版本号不代表所有兼容变化已发布。架构设计以单一 Markdown 完整维护整体组成、结构与部件、流程与扩展、观测恢复及产物合同，作为实施依据；代码结构设计已据此重新推导为单一完整文档，写明目标目录、部件接口、生命周期和依赖；control/make 与 artifact 配置/清单链路、flow 生命周期/持权/唯一 write、轻量部件合同及科学装配已落地；checkpoint、读端及其余清理继续按批次落实。实际差距、清理工作与校准事项见[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)。正式数值、GPU 和长程性能仍待验收。
 
 ## 文档与阅读顺序
 
@@ -16,7 +16,7 @@ RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他�
 | --- | --- |
 | [通用调研 General Research](<docs/通用调研 General Research 研究流水线.md>) | 机制、工程路线、直接来源、取舍与限制；项目历史执行只进入日期记录 |
 | [架构设计 Architecture Design](<docs/架构设计 Architecture Design 研究流水线.md>) | 单一完整正文：当前选定的实验部件、流程扩展、观测恢复及产物合同 |
-| [代码结构设计 Code Structure Design](<docs/代码结构设计 Code Structure Design 研究流水线.md>) | 依据完整架构推导的单一文档：目标目录、模块职责、接口、允许依赖及验证落点；规划/发布及生命周期已实施，其余差距见开发计划 |
+| [代码结构设计 Code Structure Design](<docs/代码结构设计 Code Structure Design 研究流水线.md>) | 依据完整架构推导的单一文档：目标目录、模块职责、接口、允许依赖及验证落点；规划/发布、生命周期及部件装配已实施，其余差距见开发计划 |
 | [开发计划 Development Plan](<docs/开发计划 Development Plan 研究流水线.md>) | 实现差距、逐模块工作、旧接口清理及验收顺序；按明确目标队列连续推进，每批验证、记录并本地提交 |
 | [缺陷记录 Bug Report](<docs/缺陷记录 Bug Report 研究流水线.md>) | 活动问题与待验证事项；已关闭问题的变更和证据只从日期记录追溯 |
 | [开发记录 Development Record](<docs/开发记录 Development Record/>) | 日期记录，本轮文档调整与历史集成、分支保全的归属；不复制整份测试结果 |
@@ -95,6 +95,8 @@ python -m rpipe run <study-dir> --run-root <external-run-root>
 python -m rpipe process <study-dir> --run-root <external-run-root>
 ```
 
+四类部件的程序化构造分别使用各职责模块的 build_data/build_model/build_algorithm/build_system，轻量能力合同在 [structure.api](src/rpipe/structure/api.py)。模型接 data_meta 和 System，算法 compute 接注入部件及只读取消检查器；runtime/System/Logger 和研究准备有明确顺序。不同来源的数据游标与恢复支持分别解释，不因接口相同就保证跨后端等价。
+
 持权前 busy、来源失配或无效请求只返回 status=rejected 的 RunReport，不给目标 Run 写失败记录。成功定稿须先核源码与有效配置、科学响应和资源关闭；未确认释放时保留 owner 和 unknown 事实，禁止成功发布或新派发。正式结果后的 process 仅使用已保存记录，派生失败单独报告。
 
 已有正式 result 拒绝原地重跑，须使用显式新 version。无 result 的已确认 failed/cancelled 仅允许显式 --retry（flow.run.run 的 retry=True），unknown/busy 不重放。execution.json 明确索引当前 attempt，执行、科学结果、派生分析、证据完整度分列，不由 mtime、UUID、退出码或日志推断整体成功。
@@ -125,6 +127,8 @@ python tests/run.py --core --results-root <external-test-root> --timeout-seconds
 首批配置规划与发布的受影响合并回归为 623 通过、1 项既有 Windows/POSIX 静态豁免，另有五命令 CLI 旅程；科学 worker 验证使用临时 DLL 搜索路径，环境诊断、失败原件和限制见[2026-10-29 运行记录](<docs/运行记录 Run Record/2026-10-29 配置规划与发布验证.md>)。
 
 生命周期批次的最终合同回归 741 通过、1 项既有静态豁免，原 fixture 反例定向 381 通过，另有真实六命令旅程；扩大运行的预算结束、缺项和依赖跳过仍保留，见[生命周期验证记录](<docs/运行记录 Run Record/2026-10-29 生命周期与唯一发布验证.md>)。
+
+部件批次另以分组合同、原数值、10 个 CPU 独立进程恢复、315 项 Flow 集成及最后形状补验核对，当前版本六命令旅程通过；分组重叠、失败/中断及未执行范围见[科学部件验证记录](<docs/运行记录 Run Record/2026-10-29 科学部件合同与装配验证.md>)，不将部分证据合成全仓或正式研究通过。
 
 历史与当前的本地有界 CPU、有限原生/HF、安装 smoke 与远端 CI 分别按运行记录中的固定身份核对。重构先执行受影响合同回归，再按实际范围验证科学装配、Study 与制品旅程。正式 MNIST/CIFAR、GPU、长程性能、矩阵外环境与原始历史归档可恢复性仍未验收。
 

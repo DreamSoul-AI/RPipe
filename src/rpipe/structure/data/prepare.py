@@ -10,7 +10,7 @@ from typing import Any
 from rpipe.structure.artifact.io import cache_lock
 from rpipe.structure.artifact.io import _read_text, atomic_write_text
 from rpipe.structure.control import DataConfig
-from rpipe.structure.data.factory import DataFactory, vision_root
+from rpipe.structure.data.factory import build_data, vision_root
 from rpipe.structure.system.origin import endpoint_for, normalize_origin
 
 def announce(study: Path, phase: str, message: str) -> None:
@@ -69,7 +69,7 @@ def _prepare(study, shared, config_paths, seen, names):
         endpoint = endpoint_for(key[0], origin)
         detail = f'shared {key[0]} download {origin} {endpoint.location}'
         announce(study, 'make', detail)
-        DataFactory.build(DataConfig.from_mapping(mapping), shared, origin=origin)
+        build_data(DataConfig.from_mapping(mapping), shared, origin=origin)
         atomic_write_text(marker, f'{origin}\n')
         announce(study, 'make', f'shared {key[0]} ready')
         names.append(key[0])

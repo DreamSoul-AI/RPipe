@@ -130,7 +130,7 @@ def test_cli_data_profiles_only_the_selected_effective_input(source_study, run_r
             'train': [(torch.tensor([[[[0.7, 0.8]]]]), torch.tensor([0]))],
         })
 
-    monkeypatch.setattr(profile.DataFactory, 'build', build)
+    monkeypatch.setattr(profile, 'build_data', build)
     assert main(['data', str(source_study), '--run-root', str(run_root), '--id', selected.id]) == 0
     captured = capsys.readouterr()
     assert captured.err == '' and len(calls) == 1

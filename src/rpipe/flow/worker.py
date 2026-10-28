@@ -59,7 +59,8 @@ def _response(body, ctx, request):
             or not isinstance(body.get('cleanup_errors'), list)
             or any(not isinstance(item, dict) for item in body['cleanup_errors'])
             or any(type(body.get(name)) is not bool for name in
-                   ('unknown_resources', 'science_closed', 'diagnostics_complete'))
+                   ('unknown_resources', 'science_closed', 'diagnostics_complete', 'error_logged'))
+            or body.get('stage') not in {None, 'prepare', 'execute', 'collect', 'summarize', 'write', 'closing'}
             or not isinstance(body.get('environment'), dict)):
         raise AdmissionError('worker response has invalid observations')
     if body['science_closed'] == body['unknown_resources']:
@@ -76,7 +77,8 @@ def compute(ctx: RunContext, budget: Budget) -> dict:
     request_id = _identifier(ctx.state.setdefault('worker_request', uuid.uuid4().hex), 'request')
     folder = contained(ctx.spec.run_dir / 'attempts' / attempt, ctx.spec.run_root)
     request, output = folder / 'worker-request.json', folder / 'worker-output.json'
-    ctx.state.update(worker_request=request_id, worker_response_verified=False, science_closed=False)
+    ctx.state.update(worker_request=request_id, worker_response_verified=False, science_closed=False,
+                     phase='worker_admission')
     spec_body = {name: str(getattr(ctx.spec, name)) if name in {'source_dir', 'run_root'}
                  else ctx.spec.to_config() if name == 'config' else getattr(ctx.spec, name)
                  for name, descriptor in RunSpec.__dataclass_fields__.items() if descriptor.init}
@@ -116,6 +118,7 @@ def compute(ctx: RunContext, budget: Budget) -> dict:
                      cleanup_error_records=[safe_error_record(item) for item in response['cleanup_errors']],
                      worker_cleanup_count=len(response['cleanup_errors']),
                      unknown_resources=response['unknown_resources'])
+    ctx.state['phase'] = response.get('stage') or 'worker_admission'
     if logger is not None and not response['diagnostics_complete']:
         logger.diagnostics_complete = False
     if response['error'] is not None:
@@ -189,6 +192,7 @@ def worker(request: Path, output: Path) -> int:
     ctx = ScienceContext(spec=spec, cancellation=Cancellation(), layout=ArtifactLayout(spec))
     ctx.state['attempt'] = attempt
     result, primary, diagnostics = {}, None, []
+    error_logged = False
     started = time.monotonic()
     multiprocessing.current_process().name = 'scientific-worker'
     try:
@@ -212,6 +216,7 @@ def worker(request: Path, output: Path) -> int:
                     logger.info('Scientific worker cancellation confirmed', event='task.cancelled')
                 else:
                     logger.exception('Scientific worker failed', error, event='task.failed')
+                error_logged = bool(logger.diagnostics_complete)
             except BaseException as diagnostic:
                 diagnostics.append(safe_error_record(diagnostic))
     finally:
@@ -274,6 +279,7 @@ def worker(request: Path, output: Path) -> int:
     unknown = bool(ctx.state.get('unknown_resources'))
     write_json(output, {'schema': 1, 'request': request_id, 'identity': identity(spec), 'attempt': attempt,
                         'result': result, 'error': primary, 'cleanup_errors': cleanup,
+                        'stage': ctx.state.get('phase'), 'error_logged': error_logged,
                         'unknown_resources': unknown, 'science_closed': not unknown,
                         'environment': environment,
                         'diagnostics_complete': bool(logger is not None and not diagnostics

@@ -15,6 +15,7 @@ name = Configuration contracts have no implementation dependency
 type = forbidden
 source_modules =
     rpipe.structure.control
+    rpipe.structure.api
 forbidden_modules =
     rpipe.structure.make
     rpipe.structure.artifact
@@ -77,3 +78,28 @@ forbidden_modules =
     rpipe.structure.model
     rpipe.structure.algorithm
     rpipe.structure.system
+
+[importlinter:contract:algorithm-consumes-components]
+name = Algorithms consume injected components without constructing other component families
+type = forbidden
+source_modules =
+    rpipe.structure.algorithm
+forbidden_modules =
+    rpipe.structure.data.factory
+    rpipe.structure.model.factory
+    rpipe.structure.system.factory
+
+[importlinter:contract:system-primitives-do-not-construct-science]
+name = System primitives do not import scientific construction
+type = forbidden
+source_modules =
+    rpipe.structure.system.runtime
+    rpipe.structure.system.logger
+    rpipe.structure.system.origin
+    rpipe.structure.system.resources
+    rpipe.structure.system.transfers
+    rpipe.structure.system.torchvision_load
+forbidden_modules =
+    rpipe.structure.data.factory
+    rpipe.structure.model.factory
+    rpipe.structure.algorithm.factory

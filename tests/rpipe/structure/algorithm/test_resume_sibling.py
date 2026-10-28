@@ -19,7 +19,7 @@ from rpipe.structure.algorithm.resume import sibling_train_checkpoint
 from rpipe.structure.algorithm.tracker import AlgorithmTracker
 from rpipe.structure.artifact.io import write_json
 from rpipe.structure.control import SystemConfig
-from rpipe.structure.system.factory import SystemFactory
+from rpipe.structure.system.factory import build_system
 
 
 def test_eval_run_loads_sibling_train_best(tmp_path: Path):
@@ -32,7 +32,7 @@ def test_eval_run_loads_sibling_train_best(tmp_path: Path):
     eval_assets = study / 'runs' / eval_id / 'assets'
     train_assets.mkdir(parents=True)
     eval_assets.mkdir(parents=True)
-    train_system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), train_assets)
+    train_system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), train_assets)
     module = torch.nn.Linear(784, 10)
     with torch.no_grad():
         module.weight.fill_(0.02)
@@ -45,7 +45,7 @@ def test_eval_run_loads_sibling_train_best(tmp_path: Path):
         study / 'index.json',
         {'study': 'demo', 'description': '', 'experiments': [{'factors': {'data.config.train_size': 8, 'algorithm.mode': 'train'}, 'runs': [{'id': train_id, 'seed': 0, 'run_dir': train_id}]}, {'factors': {'data.config.train_size': 8, 'algorithm.mode': 'eval'}, 'runs': [{'id': eval_id, 'seed': 0, 'run_dir': eval_id}]}]},
     )
-    eval_system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), eval_assets)
+    eval_system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), eval_assets)
     eval_system.train_run_dir = study / 'runs' / train_id
     found = sibling_train_checkpoint(eval_system, stem='best')
     assert found is not None
@@ -64,8 +64,8 @@ def test_eval_run_loads_sibling_train_best(tmp_path: Path):
             self.module = torch.nn.Linear(784, 10)
 
     tracker = AlgorithmTracker(eval_assets)
-    out = EvalAlgorithm(AlgorithmConfig.from_mapping({'mode': 'eval'})).run(
-        _Data(), _Model(), eval_system, tracker
+    out = EvalAlgorithm(AlgorithmConfig.from_mapping({'mode': 'eval'})).compute(
+        _Data(), _Model(), eval_system, tracker, cancel_check=lambda: None
     )
     assert out['mode'] == 'eval'
     assert 'accuracy' in out

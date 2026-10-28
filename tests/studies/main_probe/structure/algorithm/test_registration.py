@@ -50,7 +50,7 @@ def test_probe_cancellation_cleanup_reaches_execution_outcome(
     if cleanup_failed:
         primary.cleanup_errors = (secondary,)
 
-    def fail(*args):
+    def fail(*args, **kwargs):
         raise primary
 
     monkeypatch.setattr(registration.paired, 'run_pair', fail)
@@ -67,7 +67,7 @@ def test_probe_cancellation_cleanup_reaches_execution_outcome(
             ctx.state['algorithm'] = factory(AlgorithmConfig.from_mapping({'mode': 'train'}))
 
         def execute(self, ctx):
-            ctx.state['algorithm'].run(None, None, None, None)
+            ctx.state['algorithm'].compute(None, None, None, None, cancel_check=lambda: None)
 
     source = tmp_path / 'source'
     source.mkdir()

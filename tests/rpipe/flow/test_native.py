@@ -61,7 +61,7 @@ def test_native_profile_output_is_external_and_explicit_stats_resolve_from_sourc
         source_study, run_root, file_bytes, monkeypatch, explicit_stats):
     import yaml
     from rpipe.structure.make import plan
-    from rpipe.structure.data.factory import Data, DataFactory
+    from rpipe.structure.data.factory import Data
     from rpipe.flow import stages
     from rpipe.flow.context import Cancellation
     from rpipe.flow.context import ScienceContext
@@ -83,9 +83,10 @@ def test_native_profile_output_is_external_and_explicit_stats_resolve_from_sourc
         return Data(name='MNIST', source='fixture', loaders={},
                     meta={'data_size': [1, 28, 28], 'target_size': 10})
 
-    monkeypatch.setattr(DataFactory, 'build', build)
+    monkeypatch.setattr('rpipe.structure.data.factory.build_data', build)
     from rpipe.structure.artifact.io import ArtifactLayout
     ctx = ScienceContext(spec=spec, cancellation=Cancellation(), layout=ArtifactLayout(spec))
+    ctx.state['attempt'] = 'a' * 32
     stages.configure_science(ctx, logging_context={}, request_id=None)
     try:
         stages.prepare(ctx)

@@ -229,7 +229,7 @@ def test_explicit_factory_logger_injection_does_not_create_another_sink(tmp_path
     def unexpected(*args, **kwargs):
         raise AssertionError('must reuse the execution logger')
     monkeypatch.setattr(factory, 'Logger', unexpected)
-    assert factory.SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path,
+    assert factory.build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path,
                                        logger=logger).logger is logger
 
 

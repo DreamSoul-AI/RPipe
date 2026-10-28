@@ -66,6 +66,7 @@ def test_worker_logger_close_failure_preserves_first_error_and_reports_unknown(
     spec = plan(source_study, run_root=run_root)[0]
     request, response = _request(spec)
     def compute(ctx):
+        ctx.state['logger'] = Logger(ctx.layout.assets_dir, **ctx.state['logging_context'])
         if science_fails:
             raise ValueError('secret=PRIVATE_PRIMARY_SCIENCE')
         return {'metrics': {'value': 3.0}}

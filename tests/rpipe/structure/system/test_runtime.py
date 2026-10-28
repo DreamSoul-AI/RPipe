@@ -14,6 +14,24 @@ from rpipe.structure.control import SystemConfig
 from rpipe.structure.system.runtime import apply_runtime, make_generator
 
 
+def test_rng_capture_restore_preserves_python_numpy_and_torch_sequences():
+    import random
+    import numpy as np
+    import torch
+    from rpipe.structure.system.runtime import capture_rng, restore_rng
+
+    before = capture_rng()
+    try:
+        expected = (random.random(), np.random.random(4), torch.rand(4))
+        restore_rng(before)
+        actual = (random.random(), np.random.random(4), torch.rand(4))
+        assert actual[0] == expected[0]
+        assert np.array_equal(actual[1], expected[1])
+        assert torch.equal(actual[2], expected[2])
+    finally:
+        restore_rng(before)
+
+
 @pytest.fixture
 def preserve_tf32_flags():
     import torch

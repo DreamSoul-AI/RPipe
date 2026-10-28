@@ -30,10 +30,10 @@ def register(ctx, pair):
             self.cleanup_errors = ()
             self.initial_rng = engine.rng(device)
 
-        def run(self, data, model, system, tracker):
+        def compute(self, data, model, system, tracker, cancel_check):
             try:
                 self.report = engine.run_pair(workspace, device, pair,
-                    (data, model, system, tracker, self.initial_rng))
+                    (data, model, system, tracker, self.initial_rng), cancel_check=cancel_check)
             except BaseException as error:
                 self.cleanup_errors = getattr(error, 'cleanup_errors', ())
                 raise

@@ -29,10 +29,14 @@ import sys
 from pathlib import Path
 from rpipe.flow.worker import worker
 import rpipe.flow.stages as stages
+from rpipe.structure.system.logger import Logger
 class Tiny:
     def close(self):
         # CLOSE_FAILURE
-def prepare(ctx): ctx.register_resource(Tiny())
+def prepare(ctx):
+    ctx.state['logger'] = Logger(ctx.layout.assets_dir, **ctx.state['logging_context'])
+    ctx.state['logger'].bind(phase='prepare')
+    ctx.register_resource(Tiny())
 def execute(ctx):
     print('token=NEVER_PERSIST_RAW_WORKER_SECRET' * 100000, flush=True)
     # FAILURE
@@ -187,3 +191,38 @@ def test_cleanup_logs_complete_context_without_replacing_primary_or_secondary_er
     assert 'PRIVATE_CLEANUP_EXCEPTION' not in text and 'PRIVATE_LOGGER_EXCEPTION' not in text
     assert (spec.run_dir / '.execution').exists()
     assert not spec.result_path.exists()
+
+
+def test_owner_logs_early_science_failure_once_when_no_scientific_logger_was_created(
+        source_study, run_root, monkeypatch):
+    import os
+    from rpipe.flow.run import run
+    from rpipe.structure.make import plan
+
+    module = importlib.import_module('rpipe.flow.worker')
+    native_popen = subprocess.Popen
+    script = '''from pathlib import Path
+import sys
+from rpipe.flow import stages
+from rpipe.flow.worker import worker
+def fail_before_system(ctx):
+    assert 'logger' not in ctx.state
+    raise ValueError('secret=PRIVATE_EARLY_FAILURE')
+stages.prepare = fail_before_system
+raise SystemExit(worker(Path(sys.argv[1]), Path(sys.argv[2])))
+'''
+    class EarlyFailure(native_popen):
+        def __init__(self, args, **kwargs):
+            super().__init__([sys.executable, '-B', '-c', script, *args[-2:]], **kwargs)
+    monkeypatch.setattr(module.subprocess, 'Popen', EarlyFailure)
+    spec = plan(source_study, run_root=run_root)[0]
+    outcome = run(spec)
+    assert outcome.status == 'failed' and outcome.error['type'] == 'ValueError'
+    rows = [json.loads(line) for line in (spec.assets_dir / 'logs/events.jsonl').read_text(encoding='utf-8').splitlines()]
+    failures = [row for row in rows if row['event'] == 'task.failed']
+    assert len(failures) == 1
+    assert failures[0]['pid'] == os.getpid()
+    assert failures[0]['phase'] == 'prepare'
+    assert failures[0]['exception_type'] == 'ValueError'
+    assert 'PRIVATE_EARLY_FAILURE' not in json.dumps(rows)
+    assert not spec.result_path.exists() and not (spec.run_dir / '.execution').exists()

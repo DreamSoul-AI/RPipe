@@ -16,7 +16,7 @@ import yaml
 from rpipe.structure.artifact.io import _read_text, atomic_write_text, contained
 from rpipe.structure.control import AdmissionError, DataConfig
 from rpipe.structure.artifact.io import validate_run_root
-from rpipe.structure.data.factory import DataFactory, vision_root
+from rpipe.structure.data.factory import build_data, vision_root
 from rpipe.structure.system.origin import normalize_origin
 
 STATS_NAME = 'stats.yaml'
@@ -142,7 +142,7 @@ def profile_study(study_dir: Path | str, *, configs: Iterable[dict[str, Any]], s
     written: list[Path] = []
     for root, (data_config, origin) in requests.items():
         name = data_config.name
-        data = DataFactory.build(data_config, shared, origin=origin)
+        data = build_data(data_config, shared, origin=origin)
         primary = None
         try:
             splits = {}

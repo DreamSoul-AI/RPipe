@@ -13,11 +13,46 @@ pytestmark = [
 from pathlib import Path
 
 from rpipe.structure.control import SystemConfig
-from rpipe.structure.system.factory import SystemFactory
+from rpipe.structure.system.factory import build_system
+
+
+@pytest.mark.parametrize('source', ['', 'unsupported', 'custom_torch'])
+def test_unknown_system_source_rejects_before_construction_or_output(tmp_path, monkeypatch, source):
+    import importlib
+    module = importlib.import_module('rpipe.structure.system.factory')
+    def unexpected(*args, **kwargs):
+        pytest.fail('rejected system source constructed resources')
+    monkeypatch.setattr(module, 'System', unexpected)
+    monkeypatch.setattr(module, 'Logger', unexpected)
+    with pytest.raises(ValueError, match='unknown system source'):
+        build_system(SystemConfig.from_mapping({'source': source}), tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_system_object_precedes_its_logger_and_receives_explicit_context(tmp_path, monkeypatch):
+    import importlib
+    module = importlib.import_module('rpipe.structure.system.factory')
+    events, log = [], object()
+    class System:
+        def __init__(self, *, logger, **kwargs):
+            assert logger is None
+            self.__dict__.update(kwargs)
+            events.append('system')
+    def logger(root, **context):
+        assert root == tmp_path
+        assert context == {'request_id': 'fixture'}
+        events.append('logger')
+        return log
+    monkeypatch.setattr(module, 'System', System)
+    monkeypatch.setattr(module, 'Logger', logger)
+    system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path,
+                          logging_context={'request_id': 'fixture'})
+    assert events == ['system', 'logger']
+    assert system.logger is log
 
 
 def test_system_save_checkpoint_writes_pt(tmp_path: Path):
-    system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
+    system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
     path = system.save_checkpoint({'step': 3, 'model': {'w': 1}}, 'latest')
     assert path == tmp_path / 'checkpoints' / 'latest.pt'
     assert path.is_file()
@@ -37,7 +72,7 @@ def test_system_save_checkpoint_writes_pt(tmp_path: Path):
 def test_checkpoint_publication_failure_preserves_committed_bundle(tmp_path, monkeypatch, failure, previous):
     import torch
 
-    system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
+    system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
     old = {'step': 3, 'model': {'w': 1}, 'optimizer': {'lr': 0.1}}
     new = {'step': 4, 'model': {'w': 2}}
     root = system.checkpoint_dir()
@@ -116,7 +151,7 @@ def test_checkpoint_publication_failure_preserves_committed_bundle(tmp_path, mon
 
 
 def test_committed_checkpoint_survives_marker_cleanup_failure(tmp_path, monkeypatch):
-    system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
+    system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
     unlink = Path.unlink
 
     def fail_marker_cleanup(path, *args, **kwargs):
@@ -133,7 +168,7 @@ def test_committed_checkpoint_survives_marker_cleanup_failure(tmp_path, monkeypa
 
 
 def test_checkpoint_mirror_removes_stale_meta_format(tmp_path):
-    system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
+    system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
     bundle = system.save_checkpoint({'step': 1, 'extra': {1, 2}}, 'latest')
     folder = bundle.with_suffix('')
     assert (folder / 'meta.pt').is_file()
@@ -146,7 +181,7 @@ def test_checkpoint_mirror_removes_stale_meta_format(tmp_path):
 
 @pytest.mark.parametrize('name', ['', '.', '..'])
 def test_checkpoint_rejects_unsafe_stem(tmp_path, name):
-    system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
+    system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
     with pytest.raises(ValueError, match='checkpoint name'):
         system.save_checkpoint({'step': 1}, name)
     assert system.logger.path.is_file()
@@ -155,7 +190,7 @@ def test_checkpoint_rejects_unsafe_stem(tmp_path, name):
 @pytest.mark.parametrize('stage', ['mirror', 'bundle'])
 @pytest.mark.parametrize('clears', [True, False])
 def test_checkpoint_windows_denial_commits_or_preserves_old_bundle(tmp_path, monkeypatch, stage, clears):
-    system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
+    system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
     old, new = {'step': 3, 'model': {'w': 1}}, {'step': 4, 'model': {'w': 2}}
     bundle = system.save_checkpoint(old, 'latest')
     old_bytes = bundle.read_bytes()
@@ -194,7 +229,7 @@ def test_checkpoint_json_pieces_keep_bytes_presence_and_order(tmp_path, monkeypa
     from rpipe.structure.artifact import io as artifact_api
     from rpipe.structure.system import factory as factory
 
-    system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
+    system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
     write, read = artifact_api.atomic_write_text, factory._read_text
     writes, reads = [], []
 
@@ -232,7 +267,7 @@ def test_checkpoint_json_pieces_keep_bytes_presence_and_order(tmp_path, monkeypa
 def test_checkpoint_json_write_failure_keeps_original_error_and_bundle(tmp_path, monkeypatch, failure_key):
     from rpipe.structure.artifact import io as artifact_api
 
-    system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
+    system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
     old = {'step': 1, 'tracker': {'step': 1}, 'logger': {'path': 'run.log'}}
     bundle = system.save_checkpoint(old, 'latest')
     previous = bundle.read_bytes()
@@ -259,7 +294,7 @@ def test_checkpoint_json_write_failure_keeps_original_error_and_bundle(tmp_path,
 def test_checkpoint_json_read_failure_keeps_original_error_order_and_bytes(tmp_path, monkeypatch, failure_key):
     from rpipe.structure.system import factory as factory
 
-    system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
+    system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
     folder = system.checkpoint_dir() / 'legacy'
     folder.mkdir()
     for key in ('tracker', 'logger'):
@@ -287,7 +322,7 @@ def test_checkpoint_stem_selection_keeps_bundle_precedence(tmp_path, available):
     import json
     import torch
 
-    system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
+    system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
     root = system.checkpoint_dir()
     if available in ('bundle', 'both'):
         torch.save({'marker': 'bundle'}, root / 'selected.pt')

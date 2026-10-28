@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from rpipe.structure.api import CancelCheck, ComputationObservation, DataPort, ModelPort, SystemPort, TrackerPort
+
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -19,7 +21,6 @@ from rpipe.structure.algorithm.progress import (
     infer_steps_per_epoch,
     resolve_budget,
 )
-from rpipe.structure.algorithm.tracker import AlgorithmTracker
 from rpipe.structure.algorithm.train import (
     TrainAlgorithm,
     bind_step_train_loader,
@@ -86,16 +87,19 @@ class _EpochScheduler:
 class _NativeBatchLoader:
     """Reuse Data's torch DataLoader (same shuffle Generator); yield dict batches for Trainer."""
 
-    def __init__(self, loader: Any) -> None:
-        self.loader = loader
-        self.dataset = getattr(loader, 'dataset', None)
-        self.batch_size = getattr(loader, 'batch_size', None)
+    def __init__(self, data: DataPort) -> None:
+        self.data = data
+        self.dataset = data.dataset('train')
+        self.batch_size = data.batch_size('train')
 
     def __len__(self) -> int:
-        return len(self.loader)
+        steps = self.data.steps_per_epoch('train')
+        if steps is None:
+            raise TypeError('training data has no finite epoch length')
+        return int(steps)
 
     def __iter__(self):
-        for images, labels in self.loader:
+        for images, labels in self.data.iter_batches('train', resumable=False):
             yield {'pixel_values': images, 'labels': labels}
 
 
@@ -129,31 +133,30 @@ class _ClassificationWrap(nn.Module):
 
 
 class HfTrainAlgorithm(TrainAlgorithm):
-    def run(self, data: Any, model: Any, system: Any, tracker: AlgorithmTracker) -> dict[str, Any]:
+    def compute(self, data: DataPort, model: ModelPort, system: SystemPort, tracker: TrackerPort,
+                cancel_check: CancelCheck) -> ComputationObservation:
+        cancel_check()
         if (
             getattr(data, 'source', None) == 'stub'
             or getattr(model, 'module', None) is None
             or not callable(getattr(data, 'iter_batches', None))
         ):
-            return super().run(data, model, system, tracker)
-        return _run_hf_trainer(self, data, model, system, tracker)
+            return super().compute(data, model, system, tracker, cancel_check)
+        return _run_hf_trainer(self, data, model, system, tracker, cancel_check)
 
 
 class HfEvalAlgorithm(TrainAlgorithm):
-    def run(self, data: Any, model: Any, system: Any, tracker: AlgorithmTracker) -> dict[str, Any]:
+    def compute(self, data: DataPort, model: ModelPort, system: SystemPort, tracker: TrackerPort,
+                cancel_check: CancelCheck) -> ComputationObservation:
         from rpipe.structure.algorithm.evaluation import EvalAlgorithm
 
-        out = EvalAlgorithm(self.config).run(data, model, system, tracker)
+        out = EvalAlgorithm(self.config).compute(data, model, system, tracker, cancel_check)
         out['source'] = 'transformers_trainer'
         return out
 
 
-def _dataset_from_loader(data: Any, split: str) -> Any | None:
-    loaders = getattr(data, '_loaders', None) or {}
-    loader = loaders.get(split)
-    if loader is None:
-        return None
-    dataset = getattr(loader, 'dataset', None)
+def _vision_dataset(data: Any, split: str) -> Any | None:
+    dataset = data.dataset(split)
     if dataset is None:
         return None
     return _DictVisionDataset(dataset)
@@ -174,13 +177,13 @@ def _run_hf_trainer(
     data: Any,
     model: Any,
     system: Any,
-    tracker: AlgorithmTracker,
+    tracker: TrackerPort,
+    cancel_check: CancelCheck,
 ) -> dict[str, Any]:
     transformers = _require_transformers()
     config = algo.config
     logger = getattr(system, 'logger', None)
-    module = system.place_module(model.module) if getattr(system, 'place_module', None) else model.module
-    model.module = module
+    module = model.module
     budget = resolve_budget(config, steps_per_epoch=infer_steps_per_epoch(data))
     lr = float(config.setting('lr', 0.1))
     eval_period = algo.eval_period()
@@ -223,10 +226,12 @@ def _run_hf_trainer(
     def fire_eval(extra: dict[str, Any]) -> bool:
         if tracker.progress is not None:
             extra['progress'] = tracker.progress
-        return bool(algo.on_eval_period(tracker, logger, data, model, system, extra))
+        return bool(algo.on_eval_period(tracker, logger, data, model, system, extra,
+                                        cancel_check=cancel_check))
 
     def fire_ckpt(*, extra: dict[str, Any], improved: bool, is_last: bool) -> None:
         nonlocal already_percent
+        cancel_check()
         current = budget.progress(epoch=epoch, step=steps)
         names = checkpoint_names(
             mode=ckpt_mode,
@@ -261,10 +266,10 @@ def _run_hf_trainer(
         fire_eval(extra)
         return _summary(algo, data, tracker, budget, steps, epoch)
 
-    native_loader = (getattr(data, '_loaders', None) or {}).get('train')
-    train_ds = _dataset_from_loader(data, 'train')
-    if train_ds is None and native_loader is None:
-        return TrainAlgorithm.run(algo, data, model, system, tracker)
+    has_train_split = data.has_split('train')
+    train_ds = _vision_dataset(data, 'train')
+    if train_ds is None and not has_train_split:
+        return TrainAlgorithm.compute(algo, data, model, system, tracker, cancel_check)
 
     tracker.begin_run((restored or {}).get('tracker'))
     recorded = tracker.progress or {}
@@ -289,24 +294,22 @@ def _run_hf_trainer(
 
     class _Trainer(transformers.Trainer):
         def compute_loss(self, model, inputs, return_outputs=False, **kwargs):  # noqa: ANN001
-            from rpipe.structure.system.runtime import check_cancelled
-            check_cancelled(system)
+            cancel_check()
             outputs = model(**inputs)
             loss = outputs['loss'] if isinstance(outputs, dict) else outputs.loss
             observe(inputs, outputs)
             return (loss, outputs) if return_outputs else loss
 
         def get_train_dataloader(self):
-            if native_loader is not None:
-                return _NativeBatchLoader(native_loader)
+            if has_train_split:
+                return _NativeBatchLoader(data)
             return super().get_train_dataloader()
 
     class _EpochHook(transformers.TrainerCallback):
         def on_step_end(self, args, state, control, **kwargs):  # noqa: ANN001
             del args, kwargs
             nonlocal epoch, steps, wrote_last_ckpt
-            from rpipe.structure.system.runtime import check_cancelled
-            check_cancelled(system)
+            cancel_check()
             update_progress(state)
             if budget.unit == UNIT_EPOCH:
                 return control
@@ -329,6 +332,7 @@ def _run_hf_trainer(
         def on_epoch_end(self, args, state, control, **kwargs):  # noqa: ANN001
             del args, kwargs
             nonlocal epoch, steps, wrote_last_ckpt
+            cancel_check()
             update_progress(state)
             extra = _hook_extra(epoch=epoch, lr=_current_lr(optimizer, lr), step=steps)
             if tracker.has_samples('train'):
@@ -355,6 +359,7 @@ def _run_hf_trainer(
         def on_train_end(self, args, state, control, **kwargs):  # noqa: ANN001
             del args, kwargs
             nonlocal epoch, steps
+            cancel_check()
             update_progress(state)
             extra = _hook_extra(epoch=epoch, lr=_current_lr(optimizer, lr), step=steps)
             extra['best_accuracy'] = algo._best_test
@@ -374,7 +379,7 @@ def _run_hf_trainer(
     trainer = _Trainer(
         model=_ClassificationWrap(module),
         args=args,
-        train_dataset=train_ds if train_ds is not None else getattr(native_loader, 'dataset', []),
+        train_dataset=train_ds if train_ds is not None else data.dataset('train'),
         data_collator=transformers.default_data_collator,
         optimizers=(optimizer, scheduler),
         callbacks=[_EpochHook()],
@@ -386,7 +391,7 @@ def _run_hf_trainer(
 def _summary(
     algo: HfTrainAlgorithm,
     data: Any,
-    tracker: AlgorithmTracker,
+    tracker: TrackerPort,
     budget: Any,
     steps: int,
     epoch: int,

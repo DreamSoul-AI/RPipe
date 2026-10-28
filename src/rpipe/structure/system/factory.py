@@ -7,6 +7,7 @@ from typing import Any
 
 from rpipe.structure.artifact.io import _read_text
 from rpipe.structure.control import SystemConfig
+from rpipe.structure.api import SystemPort
 from rpipe.structure.system.logger import Logger
 
 
@@ -15,7 +16,7 @@ class System:
         self,
         *,
         device: str,
-        logger: Logger,
+        logger: Logger | None,
         assets_dir: Path,
         meta: dict[str, Any],
         study_root: Path | str | None = None,
@@ -33,7 +34,6 @@ class System:
         self.run_id = run_id
         self.train_run_dir = Path(train_run_dir) if train_run_dir is not None else None
         self.checkpoint_pickle_module = checkpoint_pickle_module
-        self.cancellation = None
 
     def place_module(self, module: Any) -> Any:
         if module is None:
@@ -163,19 +163,20 @@ class System:
         return {'device': self.device, **self.meta}
 
 
-class SystemFactory:
-    @staticmethod
-    def build(system_config: SystemConfig, assets_dir: Path | str, *, logger: Logger | None = None) -> System:
-        return _build_native(system_config, Path(assets_dir), logger=logger)
-
-
-def _build_native(system_config: SystemConfig, assets_dir: Path, *, logger: Logger | None = None) -> System:
+def build_system(system_config: SystemConfig, assets_dir: Path | str, *,
+                 logger: Logger | None = None,
+                 logging_context: dict[str, Any] | None = None) -> SystemPort:
+    source = system_config.source if system_config.source is not None else 'native'
+    if source != 'native':
+        raise ValueError(f'unknown system source: {source!r}')
+    if logger is not None and logging_context is not None:
+        raise ValueError('provide a logger instance or its construction context, not both')
+    assets_dir = Path(assets_dir)
     device = str(system_config.setting('device', 'cpu'))
-    logger = logger if logger is not None else Logger(assets_dir)
     deterministic = bool(system_config.setting('deterministic', False))
-    return System(
+    system = System(
         device=device,
-        logger=logger,
+        logger=None,
         assets_dir=assets_dir,
         study_root=system_config.setting('study_root'),
         source_dir=system_config.setting('source_dir'),
@@ -183,9 +184,12 @@ def _build_native(system_config: SystemConfig, assets_dir: Path, *, logger: Logg
         train_run_dir=system_config.setting('train_run_dir'),
         meta={
             'ready': True,
-            'source': system_config.source or 'native',
+            'source': source,
             'deterministic': deterministic,
             'cudnn_benchmark': system_config.setting('cudnn_benchmark'),
             'cudnn_deterministic': system_config.setting('cudnn_deterministic'),
         },
     )
+    system.logger = logger if logger is not None else Logger(assets_dir, **(
+        logging_context if logging_context is not None else {}))
+    return system

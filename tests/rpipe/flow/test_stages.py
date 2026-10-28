@@ -161,3 +161,91 @@ def test_owned_failure_cancel_and_unknown_use_the_same_formal_writer(
     assert io.read_json(spec.run_dir / 'execution.json')['candidate_status'] == expected
     assert not spec.result_path.exists()
     assert (spec.run_dir / '.execution').exists() is (failure == 'close')
+
+
+def test_prepare_builds_runtime_system_logger_and_research_hook_before_scientific_parts(
+        source_study, run_root, monkeypatch):
+    from types import SimpleNamespace
+    import importlib
+    from rpipe.flow import stages
+    from rpipe.flow.context import Cancellation, ScienceContext
+    from rpipe.structure.artifact.io import ArtifactLayout
+    from rpipe.structure.make import plan
+
+    events = []
+    system_module = importlib.import_module('rpipe.structure.system.factory')
+    class System:
+        def __init__(self, *, logger, **kwargs):
+            assert logger is None
+            self.__dict__.update(kwargs)
+            events.append('system')
+    def logger(*args, **kwargs):
+        events.append('logger')
+        return SimpleNamespace(bind=lambda **kwargs: None, info=lambda *args, **kwargs: None,
+                               close=lambda: None, diagnostics_complete=True)
+    def runtime(seed, config):
+        events.append('runtime')
+        return {'seed': seed}
+    data = SimpleNamespace(meta={'data_size': [2], 'target_size': 2}, close=lambda: None)
+    def build_data(*args, **kwargs):
+        events.append('data')
+        return data
+    def build_model(config, path, *, data_meta, system, origin=None):
+        assert data_meta == data.meta
+        assert isinstance(system, System)
+        events.append('model')
+        return SimpleNamespace(module=None, close=lambda: None)
+    def build_algorithm(config):
+        events.append('algorithm')
+        return SimpleNamespace(mode=config.mode, close=lambda: None)
+    def before(source, phase, ctx, study, *, entry='run'):
+        assert phase == 'prepare' and entry == 'before'
+        assert isinstance(ctx.state['system'], System) and ctx.state['logger'] is not None
+        assert 'data' not in ctx.state and 'model' not in ctx.state
+        events.append('before')
+    monkeypatch.setattr(system_module, 'System', System)
+    monkeypatch.setattr(system_module, 'Logger', logger)
+    monkeypatch.setattr('rpipe.structure.system.runtime.apply_runtime', runtime)
+    monkeypatch.setattr('rpipe.structure.data.factory.build_data', build_data)
+    monkeypatch.setattr('rpipe.structure.model.factory.build_model', build_model)
+    monkeypatch.setattr('rpipe.structure.algorithm.factory.build_algorithm', build_algorithm)
+    monkeypatch.setattr('rpipe.structure.algorithm.tracker.make_tracker', lambda *args: SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(stages, 'run_study_phase', before)
+    spec = plan(source_study, run_root=run_root)[0]
+    ctx = ScienceContext(spec, Cancellation(), ArtifactLayout(spec))
+    ctx.state['attempt'] = 'a' * 32
+    stages.configure_science(ctx, logging_context={}, request_id='b' * 32)
+    assert 'logger' not in ctx.state
+    assert not spec.run_dir.exists()
+    try:
+        stages.prepare(ctx)
+        assert events == ['runtime', 'system', 'logger', 'before', 'data', 'model', 'algorithm']
+    finally:
+        stages.close_science(ctx)
+
+
+def test_execute_injects_a_read_only_cancel_check_without_configuration_validation(
+        source_study, run_root, monkeypatch):
+    from types import SimpleNamespace
+    from rpipe.flow import stages
+    from rpipe.flow.context import Cancellation, Cancelled, ScienceContext
+    from rpipe.structure.artifact.io import ArtifactLayout
+    from rpipe.structure.make import plan
+
+    spec = plan(source_study, run_root=run_root)[0]
+    ctx = ScienceContext(spec, Cancellation(), ArtifactLayout(spec))
+    checked = []
+    def compute(data, model, system, tracker, cancel_check):
+        assert data is ctx.state['data'] and model is ctx.state['model']
+        cancel_check()
+        checked.append(True)
+        ctx.cancellation.request()
+        cancel_check()
+        pytest.fail('requested cancellation was ignored')
+    ctx.state.update(data=object(), model=object(), system=object(),
+                     algorithm=SimpleNamespace(compute=compute),
+                     tracker=SimpleNamespace(flush_state=lambda: None))
+    monkeypatch.setattr(ctx, 'validate_config', lambda *args, **kwargs: pytest.fail('batch cancellation revalidated configuration'))
+    with pytest.raises(Cancelled):
+        stages.execute(ctx)
+    assert checked == [True]

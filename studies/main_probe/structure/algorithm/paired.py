@@ -319,25 +319,25 @@ class Observations:
 
 def native_data(workspace: Path, name: str, assets: Path) -> Any:
     from rpipe.structure.control import DataConfig
-    from rpipe.structure.data.factory import DataFactory
-    return DataFactory.build(DataConfig.from_mapping({'name': name, 'source': 'torch', 'config': {
+    from rpipe.structure.data.factory import build_data
+    return build_data(DataConfig.from_mapping({'name': name, 'source': 'torch', 'config': {
         'batch_size': 250, 'test_batch_ratio': 4, 'pin_memory': True, 'num_workers': 0, 'augment': True}}),
         workspace / 'native-data', seed=SEED, origin='foreign')
 
 
-def native_model(data: Any, name: str, assets: Path) -> Any:
+def native_model(data: Any, name: str, assets: Path, *, system: Any) -> Any:
     from rpipe.structure.control import ModelConfig
-    from rpipe.structure.model.factory import ModelFactory
-    return ModelFactory.build(ModelConfig.from_mapping({'name': name, 'source': 'custom_torch'}),
-                              assets, data_meta=data.meta)
+    from rpipe.structure.model.factory import build_model
+    return build_model(ModelConfig.from_mapping({'name': name, 'source': 'custom_torch'}),
+                              assets, data_meta=data.meta, system=system)
 
 
 @contextlib.contextmanager
 def observe_native(data: Any, module: Any):
     observations = {'train': Observations(), 'test': Observations()}
     original_iter = data.iter_batches
-    def batches(split: str):
-        for images, targets in original_iter(split):
+    def batches(split: str, *, resumable: bool = True):
+        for images, targets in original_iter(split, resumable=resumable):
             observations[split].batch(images, targets)
             yield images, targets
     base = data._train_set
@@ -382,14 +382,15 @@ def mapping() -> dict[str, Any]:
             'scheduler': 'cosine', 'T_max': 60, 'eta_min': 0., 'resume': False}
 
 
-def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[Any, Any, Any, Any, Any]) -> dict[str, Any]:
+def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[Any, Any, Any, Any, Any], *, cancel_check) -> dict[str, Any]:
+    cancel_check()
     bootstrap()
     import torch
     from rpipe.structure.control import AlgorithmConfig
     from rpipe.structure.algorithm.train import TrainAlgorithm
     from rpipe.structure.algorithm.evaluation import EvalAlgorithm
     from rpipe.structure.algorithm.tracker import AlgorithmTracker
-    from rpipe.structure.system.factory import SystemFactory
+    from rpipe.structure.system.factory import build_system
     prepared = json.loads((workspace / 'PREPARED.json').read_text(encoding='utf-8'))
     if prepared.get('passed') is not True:
         raise ValueError('CPU preparation must pass before training')
@@ -497,7 +498,7 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
             with observe_native(data, model.module) as obs_new:
                 algorithm = CapturedTrain(AlgorithmConfig.from_mapping(mapping()))
                 algorithm.observations = obs_new
-                summary = algorithm.run(data, model, system, tracker)
+                summary = algorithm.compute(data, model, system, tracker, cancel_check=cancel_check)
             new_best = cpu_tree(system.load_checkpoint('best'))
             current_best_path = str(system.checkpoint_dir() / 'best.pt')
             del model, data, system, tracker
@@ -521,14 +522,14 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
             eval_assets = cell / 'current_eval' / 'assets'
             with contextlib.ExitStack() as resources:
                 eval_data = resources.enter_context(owned(native_data(workspace, name, eval_assets)))
-                eval_model = resources.enter_context(owned(native_model(eval_data, model_name, eval_assets)))
-                eval_observations = resources.enter_context(observe_native(eval_data, eval_model.module))
-                eval_system = SystemFactory.build(config, eval_assets)
+                eval_system = build_system(config, eval_assets)
                 resources.enter_context(owned(eval_system.logger))
+                eval_model = resources.enter_context(owned(native_model(eval_data, model_name, eval_assets, system=eval_system)))
+                eval_observations = resources.enter_context(observe_native(eval_data, eval_model.module))
                 eval_tracker = AlgorithmTracker(eval_assets)
                 eval_mapping = mapping()
                 eval_mapping.update(mode='eval', resume_from=current_best_path)
-                eval_summary = EvalAlgorithm(AlgorithmConfig.from_mapping(eval_mapping)).run(eval_data, eval_model, eval_system, eval_tracker)
+                eval_summary = EvalAlgorithm(AlgorithmConfig.from_mapping(eval_mapping)).compute(eval_data, eval_model, eval_system, eval_tracker, cancel_check=cancel_check)
                 new_eval = eval_tracker.segment_mean('test')
                 raw = {'old_init': old_init, 'old_init_rng': old_init_rng,
                     'current_init': current_init, 'current_init_rng': current_init_rng,

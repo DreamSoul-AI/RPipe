@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from rpipe.structure.api import CancelCheck, ComputationObservation, DataPort, ModelPort, SystemPort, TrackerPort
+
 from rpipe.structure.algorithm.factory import Algorithm
 from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.batch import prepare_tensors
@@ -14,7 +16,7 @@ from rpipe.structure.algorithm.evaluation_support import (
     eval_test_split,
     should_early_stop,
 )
-from rpipe.structure.algorithm.optim import clip_gradients, make_scheduler
+from rpipe.structure.algorithm.optim import clip_gradients
 from rpipe.structure.algorithm.progress import (
     UNIT_EPOCH,
     UNIT_STEP,
@@ -27,12 +29,9 @@ from rpipe.structure.algorithm.progress import (
     infer_steps_per_epoch,
     resolve_budget,
 )
-from rpipe.structure.algorithm.tracker import AlgorithmTracker
-from rpipe.structure.algorithm.resume import capture_rng, restore_rng, partial_resume_warning
+from rpipe.structure.algorithm.resume import partial_resume_warning
+from rpipe.structure.system.runtime import capture_rng, restore_rng
 from rpipe.structure.algorithm.metrics import BATCH_NAMES, MetricBundle
-
-due_eval_period = due_period
-
 
 class TrainAlgorithm(Algorithm):
     def __init__(self, config: AlgorithmConfig) -> None:
@@ -44,19 +43,23 @@ class TrainAlgorithm(Algorithm):
 
     def on_eval_period(
         self,
-        tracker: AlgorithmTracker,
+        tracker: TrackerPort,
         logger: Any,
         data: Any,
         model: Any,
         system: Any,
         extra: dict[str, Any] | None = None,
+        *,
+        cancel_check: CancelCheck,
     ) -> bool:
+        cancel_check()
         extra = extra if extra is not None else {}
         self.last_improved = False
         if getattr(model, 'module', None) is None:
             return False
         metrics = eval_test_split(
-            tracker, logger, data, model, system, extra, num_steps=eval_batch_limit(self.config)
+            tracker, logger, data, model, system, extra, num_steps=eval_batch_limit(self.config),
+            cancel_check=cancel_check,
         )
         split, metric, mode = best_spec(self.config)
         self._best_metric = metric
@@ -95,7 +98,7 @@ class TrainAlgorithm(Algorithm):
 
     def on_checkpoint(
         self,
-        tracker: AlgorithmTracker,
+        tracker: TrackerPort,
         logger: Any,
         data: Any,
         model: Any,
@@ -121,23 +124,14 @@ class TrainAlgorithm(Algorithm):
             if logger is not None:
                 logger.info(f'name={name} path={path}', event='ckpt')
 
-    def run(self, data: Any, model: Any, system: Any, tracker: AlgorithmTracker) -> dict[str, Any]:
+    def compute(self, data: DataPort, model: ModelPort, system: SystemPort, tracker: TrackerPort,
+                cancel_check: CancelCheck) -> ComputationObservation:
+        cancel_check()
         if getattr(data, 'source', None) == 'stub' and (getattr(data, 'meta', None) or {}).get('stub') is True:
             return _run_stub(self.config, tracker)
         if getattr(model, 'module', None) is None or not callable(getattr(data, 'iter_batches', None)):
             raise ValueError('train requires a model module and data.iter_batches; use explicit stub data for flow checks')
-        return _run_supervised(self, data, model, system, tracker)
-
-
-def run(control_algorithm: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
-    """Legacy dict entry; prefer TrainAlgorithm.run."""
-    algo = TrainAlgorithm(AlgorithmConfig.from_mapping(control_algorithm))
-    return algo.run(
-        state.get('data'),
-        state.get('model'),
-        state.get('system'),
-        state['tracker'],
-    )
+        return _run_supervised(self, data, model, system, tracker, cancel_check)
 
 
 def _current_lr(optimizer: Any, fallback: float) -> float:
@@ -159,7 +153,7 @@ def _build_payload(
     optimizer: Any,
     scheduler: Any,
     extra: dict[str, Any],
-    tracker: AlgorithmTracker | None = None,
+    tracker: TrackerPort | None = None,
     logger: Any | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -187,7 +181,7 @@ def _build_payload(
     return payload
 
 
-def _run_stub(config: AlgorithmConfig, tracker: AlgorithmTracker) -> dict[str, Any]:
+def _run_stub(config: AlgorithmConfig, tracker: TrackerPort) -> dict[str, Any]:
     budget = resolve_budget(config, steps_per_epoch=1)
     tracker.append('train', n=1, values={'Loss': 0.0})
     tracker.save('train')
@@ -224,15 +218,15 @@ def _run_supervised(
     data: Any,
     model: Any,
     system: Any,
-    tracker: AlgorithmTracker,
+    tracker: TrackerPort,
+    cancel_check: CancelCheck,
 ) -> dict[str, Any]:
     import torch
     import torch.nn.functional as F
 
     config = algo.config
     device = torch.device(getattr(system, 'device', 'cpu'))
-    module = system.place_module(model.module)
-    model.module = module
+    module = model.module
     logger = getattr(system, 'logger', None)
     budget = resolve_budget(config, steps_per_epoch=infer_steps_per_epoch(data))
     lr = float(config.setting('lr', 0.1))
@@ -320,10 +314,12 @@ def _run_supervised(
     def fire_eval(extra: dict[str, Any]) -> bool:
         if budget.unit == UNIT_STEP:
             finish_train_segment(extra, reported=bool(log_period and steps % log_period == 0))
-        return bool(algo.on_eval_period(tracker, logger, data, model, system, extra))
+        return bool(algo.on_eval_period(tracker, logger, data, model, system, extra,
+                                        cancel_check=cancel_check))
 
     def fire_ckpt(*, extra: dict[str, Any], improved: bool, is_last: bool) -> None:
         nonlocal already_percent
+        cancel_check()
         current = budget.progress(epoch=epoch, step=steps)
         names = checkpoint_names(
             mode=ckpt_mode,
@@ -363,6 +359,7 @@ def _run_supervised(
             fire_eval(extra)
         else:
             while True:
+                cancel_check()
                 if stop:
                     break
                 finishing_restored_epoch = resume_inside_epoch
@@ -375,8 +372,7 @@ def _run_supervised(
                 step_period = max(int(config.setting('step_period', 1) or 1), 1)
                 optimizer.zero_grad()
                 for batch in data.iter_batches('train'):
-                    from rpipe.structure.system.runtime import check_cancelled
-                    check_cancelled(system)
+                    cancel_check()
                     batches_this_epoch += 1
                     images, targets = prepare_tensors(batch, module, device)
                     logits = module(images)
@@ -482,7 +478,3 @@ def _run_supervised(
     summary['elapsed'] = format_hms(clock.elapsed_seconds())
     summary['elapsed_seconds'] = float(clock.elapsed_seconds())
     return summary
-
-
-def budget_for(config: AlgorithmConfig) -> ProgressBudget:
-    return resolve_budget(config)
