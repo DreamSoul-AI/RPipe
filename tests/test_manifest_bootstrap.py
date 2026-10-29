@@ -183,6 +183,7 @@ def test_native_test_entry_keeps_optional_corrupt_metadata(tmp_path, head, ci_sh
         "def test_executes():\n    Path('EXECUTED').write_text('ok')\n", encoding='utf-8')
     env = os.environ.copy()
     results = tmp_path.with_name(tmp_path.name + '-evidence')
+    env['PYTHONIOENCODING'] = 'utf-8:backslashreplace'
     env['RPIPE_TEST_RESULTS_ROOT'] = str(results)
     env.pop('GITHUB_SHA', None)
     if ci_sha is not None:
@@ -190,13 +191,14 @@ def test_native_test_entry_keeps_optional_corrupt_metadata(tmp_path, head, ci_sh
     child = subprocess.run(
         [sys.executable, 'tests/run.py', '--core', '--', 'tests/test_minimal.py',
          '--basetemp', str(tmp_path / 'p')], cwd=tmp_path, env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=30)
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        encoding='utf-8', errors='backslashreplace', timeout=30)
     assert child.returncode == 0, child.stdout
     assert (tmp_path / 'EXECUTED').read_text() == 'ok'
     manifests = list(results.glob('*/manifest.json'))
     assert len(manifests) == 1
-    assert json.loads(manifests[0].read_text())['git_sha'] == ci_sha
-    events = [json.loads(line) for line in (manifests[0].parent / 'events.jsonl').read_text().splitlines()]
+    assert json.loads(manifests[0].read_text(encoding='utf-8'))['git_sha'] == ci_sha
+    events = [json.loads(line) for line in (manifests[0].parent / 'events.jsonl').read_text(encoding='utf-8').splitlines()]
     assert len(events) == 1 and events[0]['status'] == 'passed'
 
 
