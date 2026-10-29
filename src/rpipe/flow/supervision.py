@@ -245,8 +245,12 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
                 body = _progress(progress_path, nonce, specs)
                 if body is not None:
                     pid = body['coordinator_pid']
+                    finished = body['current'] is None and (
+                        body['done'] or len(body['completed']) == len(specs)
+                        or body['completed'] and not _successful(body['completed'][-1]))
+                    # The coordinator can finish before its venv redirector exits.
                     if (latest is not None and pid != latest['coordinator_pid']
-                            or child.poll() is None and pid not in job.pids()):
+                            or not finished and child.poll() is None and pid not in job.pids()):
                         raise AdmissionError('supervision coordinator identity changed or escaped its Job')
                 return body
             except OSError as error:

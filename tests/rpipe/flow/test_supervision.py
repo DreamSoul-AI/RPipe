@@ -453,6 +453,7 @@ def test_coordinator_pid_outside_owned_job_cannot_hide_a_descendant(
     def scenario(request, state):
         body = progress(request, specs)
         body['coordinator_pid'] = 99998
+        body['done'] = False
         write_json(Path(request['progress']), body)
     state = fake_parent(monkeypatch, module, specs, scenario=scenario)
     report = module.supervise(specs, limits=limits, evidence_dir=tmp_path / 'evidence')
@@ -460,6 +461,30 @@ def test_coordinator_pid_outside_owned_job_cannot_hide_a_descendant(
     assert report['trigger']['error']['type'] == 'AdmissionError'
     assert not any(body.get('action') == 'continue' for body in state.sent)
     assert report['tree_empty']
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('done', [False, True])
+def test_finished_coordinator_may_exit_before_its_venv_launcher(
+        module, specs, limits, tmp_path, monkeypatch, done):
+    specs = specs[:1]
+    def scenario(request, state):
+        body = progress(request, specs)
+        body.update(coordinator_pid=99998, done=done)
+        write_json(Path(request['progress']), body)
+        calls = []
+        def poll():
+            calls.append(True)
+            if len(calls) > 1:
+                body['done'] = True
+                write_json(Path(request['progress']), body)
+                state.child.returncode = 0
+            return state.child.returncode
+        state.child.poll = poll
+    fake_parent(monkeypatch, module, specs, scenario=scenario)
+    report = module.supervise(specs, limits=limits, evidence_dir=tmp_path / 'evidence')
+    assert report['status'] == 'succeeded' and report['tree_empty']
+    assert len(report['completed']) == 1 and not report['cleanup_errors']
 
 
 @pytest.mark.unit
