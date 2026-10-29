@@ -113,6 +113,8 @@ provenance.inputs 可固定外部文件或目录清单，未固定 path/stats_pa
 
 默认 Budget 拒绝硬内存限制和同进程硬超时。Windows 有启用的 Study hook、recipe、DataLoader worker 或 HF 后端时，普通 run 的硬超时仍拒绝。执行命令作用域中的 Ctrl+C 请求同一 Cancellation，父进程通过绑定本 attempt 的标记通知科学进程；算法在只读检查点合作退出。协作和所属资源强停均受清理时限约束，硬超时不延长为合作宽限；不能确认关闭时保留 unknown 和 owner，不承诺任意阻塞代码都可立即合作退出。
 
+main_probe参考侧训练、周期评测和自身best独立评测也使用同一只读取消检查器，在请求批次及交回观测前检查；已经进入的一次阻塞读取不能被合作检查器抢占，实际边界与关闭证据见[参考侧取消记录](<docs/运行记录 Run Record/2026-10-29 参考侧合作取消验证.md>)。
+
 Windows 可另选 flow.supervision.supervise / rpipe supervise。CLI 必须显式提供 --run-root、--evidence-dir、--run-seconds、--batch-seconds、--rss-bytes、--output-bytes，另可设置 --poll-seconds 与 --cleanup-seconds。匿名 Job 监管本批协调者、worker 和后代，入组后才放行，首败、质量 False、证据不全、观察失败或超限即停后续派发。
 
 RSS 与输出是采样停止线，可能漏峰或超调，**不是硬内存或磁盘配额**。须使用专用外部运行根与新建独立证据根，保留原 Run owner/unknown 协议，其他平台拒绝此入口。正式资源校准和研究矩阵仍待完成，不能把研究计划提案当已批准预算。详细计量与清理合同见架构第四章。

@@ -23,7 +23,7 @@ def pair_run(tmp_path, monkeypatch):
     paired = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(paired)
     state = SimpleNamespace(fail=None, error=RuntimeError('operation failed'),
-                            cleanup_fail=set(), silent_logger_failure=False, resources={})
+                            cleanup_fail=set(), silent_logger_failure=False, resources={}, cancel_check=lambda: None)
 
     def at(stage):
         if state.fail == stage:
@@ -165,8 +165,9 @@ def pair_run(tmp_path, monkeypatch):
     native = (Data('caller_data'), Model('caller_model'), System('caller_system'),
               Tracker(), {'cpu': None})
     state.run = lambda: paired.run_pair(tmp_path, 'cpu', ('MNIST', 'linear'), native,
-                                      cancel_check=lambda: None, checkpoint_dir=tmp_path / 'checkpoints')
+                                      cancel_check=state.cancel_check, checkpoint_dir=tmp_path / 'checkpoints')
     state.paired = paired
+    state.archive = archive
     state.native = native
     return state
 
@@ -218,6 +219,50 @@ def test_success_releases_resources_without_closing_the_callers(pair_run):
     report = pair_run.run()
     assert len(report['runs']) == 1
     assert 'eval_system_logger' in pair_run.resources
+    assert_released(pair_run)
+
+
+def test_all_reference_loader_callers_receive_the_same_read_only_checker(pair_run, monkeypatch):
+    calls = []
+    original = pair_run.paired.observed_original
+    def observe(loader, observation, *, cancel_check):
+        calls.append(cancel_check)
+        return original(loader, observation, cancel_check=cancel_check)
+    monkeypatch.setattr(pair_run.paired, 'observed_original', observe)
+    pair_run.run()
+    # Train once, test at30/60 and independent evaluation of original best.
+    assert len(calls) == 4 and all(check is pair_run.cancel_check for check in calls)
+    assert_released(pair_run)
+
+
+@pytest.mark.parametrize('stage', ['old_train', 'old_test', 'old_eval'])
+@pytest.mark.parametrize('cleanup_failure', [False, True])
+def test_reference_caller_cancellation_preserves_first_error_and_owned_cleanup(
+        pair_run, stage, cleanup_failure):
+    from rpipe.flow.context import Cancellation
+
+    token = Cancellation()
+    primary = Cancelled('reference caller cancelled')
+    def check():
+        if token.is_set():
+            raise primary
+    pair_run.cancel_check = check
+    def cancel(iterator, *args):
+        token.request()
+        next(iter(iterator))
+        pytest.fail('a cancelled reference loader returned another batch')
+    if stage == 'old_train':
+        pair_run.archive.train_model.train = cancel
+    elif stage == 'old_test':
+        pair_run.archive.train_model.test = cancel
+    else:
+        pair_run.archive.test_model.test = cancel
+    if cleanup_failure:
+        pair_run.cleanup_fail = {'old_eval_writer' if stage == 'old_eval' else 'old_train_writer'}
+    with pytest.raises(Cancelled) as caught:
+        pair_run.run()
+    assert caught.value is primary
+    assert {str(error) for error in getattr(primary, 'cleanup_errors', ())} == pair_run.cleanup_fail
     assert_released(pair_run)
 
 

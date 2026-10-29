@@ -360,13 +360,21 @@ def observe_native(data: Any, module: Any):
             yield observations
 
 
-def observed_original(loader: Any, observation: Observations):
+def observed_original(loader: Any, observation: Observations, *, cancel_check):
     class ObservedLoader:
         def __len__(self):
             return len(loader)
 
         def __iter__(self):
-            for batch in loader:
+            cancel_check()
+            iterator = iter(loader)
+            while True:
+                cancel_check()
+                try:
+                    batch = next(iterator)
+                except StopIteration:
+                    return
+                cancel_check()
                 observation.batch(batch['data'], batch['target'], batch['id'])
                 yield batch
 
@@ -459,7 +467,7 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
                 obs_old['train' if old.training else 'test'].core(args[0])
             old_hook = old.model.register_forward_pre_hook(old_core_hook)
             with owned(old_hook, old_hook.remove):
-                iterator = enumerate(observed_original(loaders['train'], obs_old['train']))
+                iterator = enumerate(observed_original(loaders['train'], obs_old['train'], cancel_check=cancel_check))
                 logger = archive.metric.make_logger(str(cell / 'original_tensorboard'), **archive.config.cfg['log'],
                                                    tag=archive.config.cfg['tag'], metric=archive.config.cfg['metric'])
                 with owned(logger.writer):
@@ -469,7 +477,7 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
                         archive.train_model.train(iterator, old, optimizer, scheduler, logger)
                         if archive.config.cfg['step'] != step:
                             raise ValueError(f'original train stopped at {archive.config.cfg["step"]}, expected {step}')
-                        archive.train_model.test(observed_original(loaders['test'], obs_old['test']), old, logger)
+                        archive.train_model.test(observed_original(loaders['test'], obs_old['test'], cancel_check=cancel_check), old, logger)
                         snapshot = {'step': step, 'model': model_state(old), 'optimizer': cpu_tree(optimizer.state_dict()),
                                     'scheduler': copy.deepcopy(scheduler.state_dict()), 'rng': rng(device),
                                     'observations': {split: item.result() for split, item in obs_old.items()},
@@ -517,7 +525,7 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
                                                      tag=archive.config.cfg['tag'], metric=archive.config.cfg['metric'])
             with owned(eval_logger.writer):
                 old_eval_observation = Observations()
-                archive.test_model.test(observed_original(eval_loaders['test'], old_eval_observation), eval_old, eval_logger)
+                archive.test_model.test(observed_original(eval_loaders['test'], old_eval_observation, cancel_check=cancel_check), eval_old, eval_logger)
                 old_eval = {key.split('/')[1]: value for key, value in eval_logger.mean.items() if key.startswith('test/')}
             config = seed_runtime(device)
             eval_assets = cell / 'current_eval' / 'assets'
