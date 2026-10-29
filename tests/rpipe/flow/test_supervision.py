@@ -42,7 +42,8 @@ def progress(request, specs, *, status='succeeded', quality=True, complete=True,
     rows = [] if current else [{'index': 0, 'id': specs[0].id, 'identity': identity(specs[0]),
                                'status': status, 'quality': quality, 'evidence_complete': complete,
                                'cleanup_errors': [], 'elapsed_seconds': 0.01}]
-    return {'schema': 1, 'request': request['request'], 'identities': [identity(s) for s in specs],
+    return {'schema': 1, 'request': request['request'], 'coordinator_pid': 99999,
+            'identities': [identity(s) for s in specs],
             'completed': rows, 'current': {'index': 0, 'id': specs[0].id,
                                            'started': time.monotonic()} if current else None,
             'done': not current, 'error': None}
@@ -444,6 +445,21 @@ def test_foreign_progress_fails_closed(module, specs, tmp_path):
     write_json(path, progress({'request': 'other'}, specs))
     with pytest.raises(AdmissionError, match='foreign'):
         module._progress(path, 'own', specs)
+
+
+@pytest.mark.unit
+def test_coordinator_pid_outside_owned_job_cannot_hide_a_descendant(
+        module, specs, limits, tmp_path, monkeypatch):
+    def scenario(request, state):
+        body = progress(request, specs)
+        body['coordinator_pid'] = 99998
+        write_json(Path(request['progress']), body)
+    state = fake_parent(monkeypatch, module, specs, scenario=scenario)
+    report = module.supervise(specs, limits=limits, evidence_dir=tmp_path / 'evidence')
+    assert report['trigger']['kind'] == 'observation_failure'
+    assert report['trigger']['error']['type'] == 'AdmissionError'
+    assert not any(body.get('action') == 'continue' for body in state.sent)
+    assert report['tree_empty']
 
 
 @pytest.mark.unit

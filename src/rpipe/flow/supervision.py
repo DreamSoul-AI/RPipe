@@ -70,7 +70,8 @@ def coordinator():
             grant.set()
 
     threading.Thread(target=controls, daemon=True).start()
-    state = {'schema': 1, 'request': nonce, 'identities': [identity(spec) for spec in specs],
+    state = {'schema': 1, 'request': nonce, 'coordinator_pid': os.getpid(),
+             'identities': [identity(spec) for spec in specs],
              'completed': [], 'current': None, 'done': False, 'error': None}
 
     def publish():
@@ -116,6 +117,7 @@ def _progress(path, nonce, specs):
         raise AdmissionError('supervision progress exceeds the bounded summary size')
     body = read_json(path)
     if (body.get('schema') != 1 or body.get('request') != nonce
+            or type(body.get('coordinator_pid')) is not int or body['coordinator_pid'] <= 0
             or body.get('identities') != [identity(spec) for spec in specs]
             or not isinstance(body.get('completed'), list) or type(body.get('done')) is not bool):
         raise AdmissionError('invalid or foreign supervision progress')
@@ -240,7 +242,13 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
             deadlines(time.monotonic())
             cleared = file_errors.clear()
             try:
-                return _progress(progress_path, nonce, specs)
+                body = _progress(progress_path, nonce, specs)
+                if body is not None:
+                    pid = body['coordinator_pid']
+                    if (latest is not None and pid != latest['coordinator_pid']
+                            or child.poll() is None and pid not in job.pids()):
+                        raise AdmissionError('supervision coordinator identity changed or escaped its Job')
+                return body
             except OSError as error:
                 dos_code = file_errors.code()
                 code = getattr(error, 'winerror', None)
@@ -320,13 +328,13 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
                 deadlines(time.monotonic())
                 if not latest or not latest['done'] or len(latest['completed']) != len(specs) or child.returncode:
                     stop('coordinator_exit', exit_code=child.returncode)
-                elif set(job.pids()) - {child.pid}:
+                elif set(job.pids()) - {child.pid, latest['coordinator_pid']}:
                     stop('descendants_remain')
                 break
             if latest and latest['current'] is None and not latest['done']:
                 next_index = len(latest['completed'])
                 if next_index > granted and next_index < len(specs):
-                    if set(job.pids()) - {child.pid}:
+                    if set(job.pids()) - {child.pid, latest['coordinator_pid']}:
                         stop('descendants_remain', index=next_index - 1)
                         break
                     send('continue', index=next_index)

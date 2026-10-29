@@ -232,6 +232,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.module:
         parts.append(args.module if args.module.startswith('module_') else f'module_{args.module}')
     cmd = [sys.executable, '-m', 'pytest']
+    windows_venv = os.name == 'nt' and sys.prefix != sys.base_prefix
+    if windows_venv:
+        # Avoid a venv redirector process between the supervisor and pytest.
+        cmd[0] = sys._base_executable
     expr = _expr(parts)
     if expr:
         cmd.extend(['-m', expr])
@@ -267,6 +271,8 @@ def main(argv: list[str] | None = None) -> int:
     (out_dir / 'events.jsonl').touch()
     env = dict(os.environ, RPIPE_TEST_RESULTS_ROOT=str(root), RPIPE_TEST_RUN_DIR=str(out_dir),
                RPIPE_TEST_PLAN=json.dumps(plan), RPIPE_TEST_OWNER_PID=str(os.getpid()))
+    if windows_venv:
+        env['__PYVENV_LAUNCHER__'] = sys.executable
     print(subprocess.list2cmdline(cmd), flush=True)
     started, code = time.monotonic(), 1
     for attempt in range(1, args.retries + 2):

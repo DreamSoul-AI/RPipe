@@ -2,6 +2,7 @@
 
 import ctypes
 import os
+from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -132,6 +133,27 @@ def test_output_broken_file_link_is_observer_failure(tmp_path):
     (tmp_path / 'broken').symlink_to(tmp_path / 'absent')
     with pytest.raises(FileNotFoundError):
         resources.output_snapshot([tmp_path])
+
+
+@pytest.mark.unit
+def test_output_file_reference_moved_between_lstat_and_stat_is_observed_next_sample(tmp_path, monkeypatch):
+    output, staging = tmp_path / 'output', tmp_path / 'output/.building'
+    staging.mkdir(parents=True)
+    raw = tmp_path / 'raw-input'
+    raw.write_bytes(b'immutable raw input')
+    link = staging / 'reference'
+    link.symlink_to(raw)
+    original_stat = Path.stat
+    moved = []
+    def publish(path, *args, **kwargs):
+        if path == link and kwargs.get('follow_symlinks', True) and not moved:
+            staging.rename(output / 'published')
+            moved.append(True)
+        return original_stat(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'stat', publish)
+    assert resources.output_snapshot([output]) == {}
+    assert moved and resources.output_growth([output], {}) == len(raw.read_bytes())
+    assert (output / 'published/reference').read_bytes() == raw.read_bytes()
 
 
 @pytest.mark.unit

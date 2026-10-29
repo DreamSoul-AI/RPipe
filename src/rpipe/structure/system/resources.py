@@ -191,7 +191,15 @@ def _output_info(path):
         return None
     if stat.S_ISLNK(info.st_mode):
         # Input references may be file symlinks; only inspect their target metadata.
-        target = path.stat()
+        try:
+            target = path.stat()
+        except FileNotFoundError:
+            # Atomic publication may move the reference between the two reads.
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return None
+            raise
         if not stat.S_ISREG(target.st_mode):
             raise OSError(f'directory or unsupported output link: {path}')
         return target
