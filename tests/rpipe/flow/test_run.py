@@ -91,10 +91,12 @@ def test_abrupt_worker_exit_keeps_unknown_owner_when_descendants_cannot_be_verif
 
     class AbruptWorker(native_popen):
         def __init__(self, args, **kwargs):
+            kwargs.pop('creationflags', None)
             super().__init__([sys.executable, '-B', '-c', 'raise SystemExit(17)'], **kwargs)
 
     # Simulate the portable Windows tree-verification limit, without leaving a real child.
     monkeypatch.setattr(module, 'os', SimpleNamespace(name='nt', environ=os.environ, pathsep=os.pathsep))
+    monkeypatch.setattr(module.subprocess, 'CREATE_NEW_PROCESS_GROUP', 0x200, raising=False)
     monkeypatch.setattr(module.subprocess, 'Popen', AbruptWorker)
     spec = plan(source_study, run_root=run_root)[0]
     outcome = run(spec)
