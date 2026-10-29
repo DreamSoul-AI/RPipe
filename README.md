@@ -161,3 +161,5 @@ python tests/run.py --core --results-root <external-test-root> --timeout-seconds
 当前开发任务、建议顺序与执行边界见开发计划。代码、实验、合并、发布与下游同步按各自明确范围推进。
 
 当前用户已要求持续完成开发计划。研究资源由Agent按[研究计划的硬件自适应规则](<docs/研究计划 Research Plan 研究流水线.md>)自主测量与分配，不再逐次询问常规预算；科学参数和门限保持，首败停止。main_exp八格CPU准入及[600步CUDA配对](<docs/运行记录 Run Record/2026-10-30 main_exp 600步配对验证.md>)已通过，完整曲线仍待实际验收。pytest使用importlib导入，允许镜像目录中的同名测试完整收集；本机原生DLL启动条件与候选制品验证范围从[本批记录](<docs/运行记录 Run Record/2026-10-30 硬件自适应与交付准入验证.md>)读取，不推定所有机器环境相同。
+
+main_exp完整32train/32eval矩阵已按固定候选与新version启动，当前进度及最终验收从[执行记录](<docs/运行记录 Run Record/2026-10-30 main_exp完整矩阵执行.md>)追溯；运行中不记为研究完成。采用本轮结构的新课题应以当前两份设计和示例直接组织研究代码，使用新version保留来源。旧接口和旧checkpoint不作新版兼容承诺；需要复查的历史Run保留其原源码与环境，不给旧成果换身份，也不要求下游迁移。
