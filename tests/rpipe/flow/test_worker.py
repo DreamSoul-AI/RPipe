@@ -85,3 +85,80 @@ def test_worker_logger_close_failure_preserves_first_error_and_reports_unknown(
     assert 'PRIVATE_PRIMARY_SCIENCE' not in response.read_text(encoding='utf-8')
     assert 'PRIVATE_SECONDARY_LOGGER' not in response.read_text(encoding='utf-8')
     assert not spec.result_path.exists()
+
+
+@pytest.mark.parametrize('control', ['foreign-request', 'foreign-identity', 'foreign-attempt',
+                                  'cancel', 'bad-schema', 'bad-action', 'extra-field'])
+def test_worker_cancel_control_is_bound_to_exact_request_and_attempt(
+        source_study, run_root, monkeypatch, control):
+    import multiprocessing
+    from rpipe.flow import stages, worker
+    from rpipe.structure.artifact.io import identity, read_json, write_json
+    from rpipe.structure.make import plan
+    spec = plan(source_study, run_root=run_root)[0]
+    request, response = _request(spec)
+    marker = request.parent / 'worker-cancel.json'
+    body = {'schema': 1, 'action': 'cancel', 'request': 'b' * 32,
+            'identity': identity(spec), 'attempt': 'a' * 32}
+    if control == 'foreign-request':
+        body['request'] = 'c' * 32
+    elif control == 'foreign-identity':
+        body['identity'] = {**body['identity'], 'source_digest': 'c' * 64}
+    elif control == 'foreign-attempt':
+        body['attempt'] = 'c' * 32
+    elif control == 'bad-schema':
+        body['schema'] = True
+    elif control == 'bad-action':
+        body['action'] = 'stop'
+    elif control == 'extra-field':
+        body['extra'] = True
+    write_json(marker, body)
+    before, calls = marker.read_bytes(), []
+    def compute(ctx):
+        assert not hasattr(ctx, 'cancellation')
+        ctx.cancel_check()
+        calls.append(True)
+        return {'metrics': {'value': 1}}
+    monkeypatch.setattr(stages, 'compute', compute)
+    process = multiprocessing.current_process()
+    monkeypatch.setattr(process, 'name', process.name)
+    assert worker.worker(request, response) == (0 if control.startswith('foreign-') else 1)
+    observed = read_json(response)
+    if control.startswith('foreign-'):
+        assert observed['error'] is None and observed['result']['metrics']['value'] == 1
+        assert calls == [True]
+    else:
+        assert observed['error']['type'] == ('Cancelled' if control == 'cancel' else 'AdmissionError')
+        assert calls == []
+    assert observed['science_closed'] and not observed['unknown_resources']
+    assert marker.read_bytes() == before
+    assert not spec.result_path.exists() and not (spec.run_dir / 'execution.json').exists()
+
+
+@pytest.mark.parametrize('science_fails', [False, True])
+def test_worker_restores_process_signal_handler_on_success_and_scientific_failure(
+        source_study, run_root, monkeypatch, science_fails):
+    import multiprocessing
+    import os
+    import signal
+    from rpipe.flow import stages, worker
+    from rpipe.structure.make import plan
+    spec = plan(source_study, run_root=run_root)[0]
+    request, response = _request(spec)
+    previous = signal.getsignal(signal.SIGINT)
+    def old_handler(signum, frame):
+        pytest.fail('worker forwarded an unrequested signal to the previous owner')
+    def compute(ctx):
+        assert signal.getsignal(signal.SIGINT) == (signal.SIG_IGN if os.name == 'nt' else old_handler)
+        if science_fails:
+            raise ValueError('scientific failure')
+        return {'metrics': {'value': 1}}
+    monkeypatch.setattr(stages, 'compute', compute)
+    process = multiprocessing.current_process()
+    monkeypatch.setattr(process, 'name', process.name)
+    signal.signal(signal.SIGINT, old_handler)
+    try:
+        assert worker.worker(request, response) == int(science_fails)
+        assert signal.getsignal(signal.SIGINT) is old_handler
+    finally:
+        signal.signal(signal.SIGINT, previous)

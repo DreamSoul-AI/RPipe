@@ -8,7 +8,7 @@ from threading import RLock
 from rpipe.structure.control import (AdmissionError, SourceMismatch, AlgorithmConfig, DataConfig,
                                     ModelConfig, SystemConfig, resolve_control, validate_control)
 from rpipe.structure.artifact import io, provenance
-from .context import Cancelled, validate_draft
+from .context import validate_draft
 from .study import RecipeContext, apply_recipe, run_study_phase
 
 _registry_lock = RLock()
@@ -32,8 +32,7 @@ def _phase(ctx, name):
 
 
 def _cancel(ctx):
-    if ctx.cancellation.is_set():
-        raise Cancelled('scientific cancellation requested')
+    ctx.cancel_check()
 
 
 def _check(ctx):

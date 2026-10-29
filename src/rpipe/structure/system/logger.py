@@ -239,8 +239,7 @@ class Logger:
         self._emit('DEBUG', event, message, **fields)
 
     def info(self, message: str, *, event: str = 'operation.observed', **fields: Any) -> None:
-        aliases = {'ckpt': 'checkpoint.saved', 'resume': 'checkpoint.restored'}
-        self._emit('INFO', aliases.get(event, event), message, **fields)
+        self._emit('INFO', event, message, **fields)
 
     def warning(self, message: str, *, event: str = 'operation.degraded', **fields: Any) -> None:
         self._emit('WARNING', event, message, **fields)

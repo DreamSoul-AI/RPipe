@@ -162,12 +162,12 @@ AlgorithmHook 是算法循环中明确的评测、checkpoint、停止等协作�
 | factory.py | 创建 System、设备放置与实际精度上下文 | 不建优化器、不选择 best，也不负责完整快照文件协议 |
 | runtime.py | 先应用 seed、确定性和精度设置，捕获/恢复受支持 RNG | 在数据和模型建构前执行；完整数值确定性仍需实测 |
 | logger.py | 有身份、阶段和时机的文本输出与文件刷新 | 不代替 Tracker、终态或研究判断；输出失败可观察 |
-| resources.py | 本次 OS 句柄、进程、资源测量与释放原语 | flow 决定何时启动/停止，原语不私自派发实验 |
+| resources.py | 本次 OS 句柄、进程、资源测量、受控读取错误码与释放原语 | flow 决定何时启动/停止，原语不私自派发实验 |
 | origin.py | 显式来源、端点与获取条件 | 计算来源可读元信息，不隐藏下载或改变全局环境 |
 | transfers.py | 实际 SDK/HTTP 流的内部协作 | 关闭所属流，不成为全局网络框架 |
 | torchvision_load.py | 科学库的按需装载与可定位导入错误 | 只在明确科学用例中调用，不吞任意异常 |
 
-取消请求由 flow 拥有，算法通过注入的只读检查器协作停止，不从 structure 反向导入流程。System 和 Data 等有实际资源的对象提供关闭能力；没有资源的计算对象不为对称性增加无操作 close。
+取消请求由 flow 拥有，算法通过注入的只读检查器协作停止，不从 structure 反向导入流程。 CLI 仅在执行命令的作用域临时处理 SIGINT，请求同一 Cancellation，并在结束时恢复原 handler。父进程通过本 attempt 中绑定 request nonce、身份和 attempt 的取消标记通知科学进程；ScienceContext 只持只读 cancel_check，不接父进程的可变 Event。worker 统一核验最终响应，取消先在明确清理时限内协作收尾，不能确认关闭时只停止所属资源并保留 unknown。硬超时不延长为合作宽限，supervise 的 worker 清理时限受既有外层 cleanup_seconds 约束。System 和 Data 等有实际资源的对象提供关闭能力；没有资源的计算对象不为对称性增加无操作 close。
 
 ## （五）artifact
 
@@ -185,13 +185,13 @@ provenance 和 checkpoint 可使用 io，io 不反向导入它们。readout 使�
 
 | **模块** | **职责** | **拥有的状态与边界** |
 | --- | --- | --- |
-| cli.py | 参数解析、显式用例路由、状态呈现与退出 | 不复制展开、科学计算或结果发布代码 |
+| cli.py | 参数解析、显式用例路由、状态呈现、执行域信号处理与退出 | 不复制展开、科学计算或结果发布代码 |
 | context.py | RunContext、ScienceContext、StudyProcessContext、请求/响应和内存 RunReport 描述 | 仅交接数据与状态；不拥有持久化记录格式，不导入 Torch、构造器或启动进程 |
 | run.py | 单 Run 准入、执行权、取消、配置不变性、首错、收尾与正式终态 | 持有本次执行权，决定何时允许 write；不实现训练 |
 | worker.py | 所属科学子进程、请求响应核验、等待和回收 | 不自行发布正式 result，不另判科学成功 |
 | stages.py | 六阶段函数与实际组件装配、阶段交接和检查时点 | prepare 直接调用四类构造入口；write 只有一份正式发布实现 |
 | study.py | 明确选择的研究准备、计算和阶段协作，隔离加载作用域 | 无研究差异时不加载扩展，不依目录存在自动执行工具 |
-| supervision.py | 明确 Run 集合、依赖、批次派发、重试及可选资源监管 | 调同一 run；不绕过 Run 生命周期，采样不冒充硬配额 |
+| supervision.py | 明确 Run 集合、依赖、批次派发、重试及可选资源监管 | 调同一 run；不绕过 Run 生命周期，采样不冒充硬配额；仅本次活 progress 的已识别共享/锁冲突作有限重试，每次核取消与期限，不凭旧状态发新项 |
 | process.py | 单 Run 派生与按清单的 Experiment/Study 统计 | 只消费正式结果和证据，不覆盖科学 result |
 | exports.py | 学习曲线、数字表与明确选择的 TensorBoard 等导出 | 管理自己的目标文件与图句柄，不写人工研究结论；图发布不跟随输出路径别名进入原件域 |
 
@@ -201,7 +201,7 @@ provenance 和 checkpoint 可使用 io，io 不反向导入它们。readout 使�
 
 # 五、接口与数据合同
 
-以下名字与调用关系是目标接口，参数类型表达必要内容，不是保证现有调用可以直接使用的声明。接口失败保留可定位原因；配置无效、未知来源、忙碌、缺失输入、来源不匹配、科学失败和收尾失败分别表达。
+以下名字与调用关系是目标接口，参数类型表达必要内容，不是保证现有调用可以直接使用的声明。接口失败保留可定位原因；配置无效、未知来源、忙碌、缺失输入、来源不匹配、科学失败和收尾失败分别表达。 CLI 的批次退出还核非空请求、完整覆盖所选项、执行成功、质量非 False 及证据完整，不能因成功前缀或空结果退出成功；各 Run 的原始状态和质量观察分列保留。
 
 ## （一）声明与计划
 
@@ -250,10 +250,10 @@ RunReport 的 rejected 表示尚未取得执行权的请求拒绝，无 attempt 
 
 | **负责模块与操作** | **输入 → 输出** | **边界** |
 | --- | --- | --- |
-| run.run | RunSpec、显式 Budget、Cancellation → RunReport | 启动前经 provenance 核来源；唯一单次执行旅程，分别报告执行、科学判据和证据完整度 |
-| supervision.launch | 有序规格及依赖、批次条件、取消 → BatchReport | 复用 run；普通派发不要求启用资源监管 |
+| run.run | RunSpec、显式 Budget、Cancellation 与资源清理时限 → RunReport | 启动前经 provenance 核来源；唯一单次执行旅程，分别报告执行、科学判据和证据完整度 |
+| supervision.launch | 有序规格及依赖、批次条件、取消 → RunReport 序列 | 复用 run；普通派发不要求启用资源监管；序列不足不视为整批成功 |
 | supervision.supervise | 规格、明确资源停止线和独立证据根 → 监管报告 | 只监管所属进程；未知释放状态停止后续派发 |
-| artifact.readout.read_run/read_study | RunRef 或明确清单 → 正式状态与记录 | 只读，不运行、不修写 |
+| artifact.readout.read_run/read_study | RunRef 或明确 Study 根/清单 → 正式状态与记录 | 只读，不运行、不修写 |
 | artifact.comparison.compare | 明确对象、比较条件和容差 → DifferenceReport | 缺项不算通过，不猜测历史格式 |
 | process.process_run/process_study | 正式结果、证据和明确范围 → 派生摘要 | 单次与整轮作用域分开；独立 Study 汇总在写派生物前经 provenance 核来源 |
 | exports.export | 明确派生材料、格式和外部目标 → 文件路径及导出观察 | 导出不改变科学状态或原始输入 |

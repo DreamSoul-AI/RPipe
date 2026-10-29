@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event
-from typing import Any, TypeAlias
+from typing import Any, Callable, TypeAlias
 
 from rpipe.structure.control import AdmissionError, RunSpec, SourceMismatch
 
@@ -57,11 +57,6 @@ class Cancellation:
     def is_set(self) -> bool:
         return self._event.is_set()
 
-    @property
-    def requested(self) -> bool:
-        return self.is_set()
-
-
 class Cancelled(Exception):
     pass
 
@@ -93,17 +88,25 @@ def _validate_config(ctx, spec: RunSpec | None, when: str) -> None:
         raise SourceMismatch(f'effective configuration changed {when}')
 
 
+def validate_cleanup_seconds(value: float) -> None:
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value) or value <= 0):
+        raise AdmissionError('cleanup_seconds must be finite and positive')
+
+
 @dataclass
 class RunContext:
     spec: RunSpec
     cancellation: Cancellation
     layout: Any
     owner: Any = None
+    cleanup_seconds: float = 2.0
     state: dict[str, Any] = field(default_factory=dict)
     control: Any = None
     config: dict[str, Any] = field(init=False)
 
     def __post_init__(self) -> None:
+        validate_cleanup_seconds(self.cleanup_seconds)
         self.config = self.spec.to_config()
 
     @property
@@ -121,7 +124,7 @@ class RunContext:
 @dataclass
 class ScienceContext:
     spec: RunSpec
-    cancellation: Cancellation
+    cancel_check: Callable[[], None]
     layout: Any
     state: dict[str, Any] = field(default_factory=dict)
     control: Any = None
@@ -130,6 +133,8 @@ class ScienceContext:
     config: dict[str, Any] = field(init=False)
 
     def __post_init__(self) -> None:
+        if not callable(self.cancel_check):
+            raise AdmissionError('ScienceContext requires a read-only cancellation checker')
         self.config = self.spec.to_config()
 
     @property

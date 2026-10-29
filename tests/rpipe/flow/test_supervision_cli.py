@@ -30,7 +30,7 @@ def test_cli_supervision_does_not_make_or_launch_outside_supervisor(monkeypatch,
     monkeypatch.setattr(supervision, 'launch', lambda *a, **k: pytest.fail('dispatch must be supervised'))
     def invoke(specs, **kwargs):
         observed.update(specs=specs, **kwargs)
-        return {'status': 'succeeded'}
+        return {'status': 'succeeded', 'evidence_complete': True}
     monkeypatch.setattr(supervision, 'supervise', invoke)
     args = ['supervise', str(tmp_path), '--run-root', str(tmp_path / 'output'),
             '--evidence-dir', str(tmp_path / 'evidence'), '--run-seconds', '3', '--batch-seconds', '7',

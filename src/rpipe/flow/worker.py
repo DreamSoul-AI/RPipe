@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import multiprocessing
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import re
@@ -17,7 +18,7 @@ from rpipe.structure.artifact.io import (
 from rpipe.structure.artifact.provenance import environment_snapshot, validate_source
 from rpipe.structure.control import AdmissionError, RunSpec
 
-from .context import Budget, Cancellation, Cancelled, RunContext, ScienceContext, validate_draft
+from .context import Budget, Cancelled, RunContext, ScienceContext, validate_draft
 from .study import study_phase_files
 
 
@@ -70,6 +71,84 @@ def _response(body, ctx, request):
     return body
 
 
+def _cancel_body(spec, attempt, request):
+    return {'schema': 1, 'action': 'cancel', 'request': request,
+            'identity': identity(spec), 'attempt': attempt}
+
+
+def _cancel_check(folder, spec, attempt, request):
+    expected = _cancel_body(spec, attempt, request)
+    marker = folder / 'worker-cancel.json'
+
+    def check():
+        try:
+            body = read_json(contained(marker, folder))
+        except FileNotFoundError:
+            return
+        if any(body.get(name) != expected[name] for name in ('request', 'identity', 'attempt')):
+            return
+        if type(body.get('schema')) is not int or body != expected:
+            raise AdmissionError('invalid cancellation control for this worker')
+        raise Cancelled('scientific cancellation requested')
+
+    return check
+
+
+def _request_cancel(ctx):
+    if ctx.owner is None:
+        raise AdmissionError('worker cancellation requires this attempt owner')
+    ctx.owner.verify()
+    folder = contained(ctx.spec.run_dir / 'attempts' / ctx.state['attempt'], ctx.spec.run_root)
+    marker = folder / 'worker-cancel.json'
+    contained(marker, folder)
+    body = _cancel_body(ctx.spec, ctx.state['attempt'], ctx.state['worker_request'])
+    try:
+        saved = read_json(marker)
+    except FileNotFoundError:
+        write_json(marker, body)
+    else:
+        if type(saved.get('schema')) is not int or saved != body:
+            raise AdmissionError('cancellation path contains a different request')
+    ctx.state['worker_cancel_sent'] = True
+
+
+def _receive_response(ctx):
+    """Accept one final response after the owned root has actually exited."""
+    child = ctx.state['child']
+    if child.poll() is None:
+        raise AdmissionError('a worker response is not final before its process exits')
+    ctx.state['worker_response_attempted'] = True
+    folder = contained(ctx.spec.run_dir / 'attempts' / ctx.state['attempt'], ctx.spec.run_root)
+    output = folder / 'worker-output.json'
+    if not output.is_file():
+        raise WorkerFailure({'type': 'ChildExit', 'exit_code': child.returncode})
+    response = _response(read_json(output), ctx, ctx.state['worker_request'])
+    existing = ctx.state.get('cleanup_error_records', [])
+    if not isinstance(existing, (list, tuple)):
+        existing = [AdmissionError('cleanup error records must be a sequence')]
+    reported = [safe_error_record(item) for item in response['cleanup_errors']]
+    ctx.state.update(worker_response_verified=True, worker_response=response,
+                     worker_environment=response['environment'],
+                     cleanup_error_records=reported + [safe_error_record(item) for item in existing],
+                     worker_cleanup_count=len(reported),
+                     unknown_resources=bool(ctx.state.get('unknown_resources')) or response['unknown_resources'])
+    ctx.state['phase'] = response.get('stage') or 'worker_admission'
+    logger = ctx.state.get('logger')
+    if logger is not None and not response['diagnostics_complete']:
+        logger.diagnostics_complete = False
+    return response
+
+
+@contextmanager
+def _worker_signals():
+    previous = signal.signal(signal.SIGINT, signal.SIG_IGN) if os.name == 'nt' else None
+    try:
+        yield
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGINT, previous)
+
+
 def compute(ctx: RunContext, budget: Budget) -> dict:
     """Dispatch one owned child and return only its validated scientific draft."""
     ctx.state['worker_may_have_descendants'] = validate_budget(ctx.spec, budget)
@@ -78,6 +157,7 @@ def compute(ctx: RunContext, budget: Budget) -> dict:
     folder = contained(ctx.spec.run_dir / 'attempts' / attempt, ctx.spec.run_root)
     request, output = folder / 'worker-request.json', folder / 'worker-output.json'
     ctx.state.update(worker_request=request_id, worker_response_verified=False, science_closed=False,
+                     worker_response_attempted=False, worker_hard_timeout=False,
                      phase='worker_admission')
     spec_body = {name: str(getattr(ctx.spec, name)) if name in {'source_dir', 'run_root'}
                  else ctx.spec.to_config() if name == 'config' else getattr(ctx.spec, name)
@@ -91,7 +171,8 @@ def compute(ctx: RunContext, budget: Budget) -> dict:
     env = os.environ.copy()
     source = str(Path(__file__).resolve().parents[2])
     env['PYTHONPATH'] = source + os.pathsep + env.get('PYTHONPATH', '')
-    options = {'start_new_session': True} if os.name != 'nt' else {}
+    options = ({'start_new_session': True} if os.name != 'nt'
+               else {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP})
     if logger is not None:
         logger.info('Unstructured scientific worker output collection is disabled',
                     event='logging.unstructured_record', operation='worker_stdout',
@@ -99,28 +180,22 @@ def compute(ctx: RunContext, budget: Budget) -> dict:
     if ctx.cancellation.is_set():
         raise Cancelled('cancelled before scientific child dispatch')
     validate_source(ctx.spec)
+    if ctx.cancellation.is_set():
+        raise Cancelled('cancelled during scientific child admission')
     child = subprocess.Popen([sys.executable, '-m', 'rpipe', '_worker', str(request), str(output)],
                              cwd=ctx.study_dir, env=env, stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, **options)
     ctx.state['child'] = child
     deadline = time.monotonic() + budget.timeout_seconds if budget.timeout_seconds else None
+    ctx.state['worker_deadline'] = deadline
     while child.poll() is None:
+        if deadline is not None and time.monotonic() >= deadline:
+            ctx.state['worker_hard_timeout'] = True
+            raise TimeoutError('scientific child exceeded hard timeout')
         if ctx.cancellation.is_set():
             raise Cancelled('scientific child cancellation requested')
-        if deadline is not None and time.monotonic() >= deadline:
-            raise TimeoutError('scientific child exceeded hard timeout')
         time.sleep(0.02)
-    if not output.is_file():
-        raise WorkerFailure({'type': 'ChildExit', 'exit_code': child.returncode})
-    response = _response(read_json(output), ctx, request_id)
-    ctx.state.update(worker_response_verified=True, worker_response=response,
-                     worker_environment=response['environment'],
-                     cleanup_error_records=[safe_error_record(item) for item in response['cleanup_errors']],
-                     worker_cleanup_count=len(response['cleanup_errors']),
-                     unknown_resources=response['unknown_resources'])
-    ctx.state['phase'] = response.get('stage') or 'worker_admission'
-    if logger is not None and not response['diagnostics_complete']:
-        logger.diagnostics_complete = False
+    response = _receive_response(ctx)
     if response['error'] is not None:
         raise WorkerFailure({**response['error'], 'exit_code': child.returncode})
     if child.returncode != 0 and not response['cleanup_errors'] and not response['unknown_resources']:
@@ -134,18 +209,45 @@ def close(ctx: RunContext) -> None:
     if child is None:
         ctx.state['science_closed'] = False
         return
-    cleanup = ctx.state.setdefault('cleanup_error_records', [])
+    supplied = ctx.state.get('cleanup_error_records', [])
+    cleanup = [safe_error_record(item) for item in supplied] if isinstance(supplied, (list, tuple)) else [
+        safe_error_record(AdmissionError('cleanup error records must be a sequence'))]
+    ctx.state['cleanup_error_records'] = cleanup
+    started = time.monotonic()
+    deadline = started + ctx.cleanup_seconds
+    hard_deadline = ctx.state.get('worker_deadline')
+    hard_timeout = bool(ctx.state.get('worker_hard_timeout')) or (
+        hard_deadline is not None and started >= hard_deadline)
+    if child.poll() is None and ctx.cancellation.is_set() and not hard_timeout:
+        try:
+            _request_cancel(ctx)
+            cooperative_until = started + ctx.cleanup_seconds / 2
+            if hard_deadline is not None:
+                cooperative_until = min(cooperative_until, hard_deadline)
+            while child.poll() is None and time.monotonic() < cooperative_until:
+                time.sleep(min(0.02, max(0.0, cooperative_until - time.monotonic())))
+        except BaseException as error:
+            cleanup.append(safe_error_record(error))
     if child.poll() is None:
         try:
             if os.name != 'nt':
                 os.killpg(child.pid, signal.SIGTERM)
             else:
                 child.terminate()
-            child.wait(timeout=2)
+            child.wait(timeout=max(0.0, deadline - time.monotonic()))
         except ProcessLookupError:
             child.poll()
         except BaseException as error:
             cleanup.append(safe_error_record(error))
+    folder = contained(ctx.spec.run_dir / 'attempts' / ctx.state['attempt'], ctx.spec.run_root)
+    output = folder / 'worker-output.json'
+    if (child.poll() is not None and output.is_file()
+            and not ctx.state.get('worker_response_attempted')):
+        try:
+            _receive_response(ctx)
+        except BaseException as error:
+            cleanup.append(safe_error_record(error))
+        cleanup = ctx.state['cleanup_error_records']
     unknown = bool(ctx.state.get('unknown_resources')) or child.poll() is None
     if os.name != 'nt':
         try:
@@ -168,6 +270,7 @@ def close(ctx: RunContext) -> None:
                                       and ctx.state['worker_response']['science_closed'] and not unknown)
 
 
+@_worker_signals()
 def worker(request: Path, output: Path) -> int:
     """Compute without ownership or formal publication, then reply after cleanup."""
     from . import stages
@@ -189,14 +292,17 @@ def worker(request: Path, output: Path) -> int:
     if (Path(request).resolve() != folder / 'worker-request.json'
             or Path(output).resolve() != folder / 'worker-output.json'):
         raise AdmissionError('worker request and response must belong to the selected attempt')
-    ctx = ScienceContext(spec=spec, cancellation=Cancellation(), layout=ArtifactLayout(spec))
+    ctx = ScienceContext(spec=spec, cancel_check=_cancel_check(folder, spec, attempt, request_id),
+                         layout=ArtifactLayout(spec))
     ctx.state['attempt'] = attempt
     result, primary, diagnostics = {}, None, []
     error_logged = False
     started = time.monotonic()
     multiprocessing.current_process().name = 'scientific-worker'
     try:
+        ctx.cancel_check()
         validate_source(spec)
+        ctx.cancel_check()
         stages.configure_science(ctx, logging_context=body['logging'], request_id=request_id)
         result = validate_draft(stages.compute(ctx))
         ctx.validate_config(when='before scientific response')

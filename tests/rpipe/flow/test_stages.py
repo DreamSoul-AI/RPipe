@@ -131,7 +131,7 @@ def test_formal_result_is_written_once_after_worker_close_under_current_ownershi
 def test_owned_failure_cancel_and_unknown_use_the_same_formal_writer(
         source_study, run_root, science_factory, science_worker, monkeypatch, failure):
     from rpipe.flow import stages
-    from rpipe.flow.context import Cancellation
+    from rpipe.flow.context import Cancellation, Cancelled
     from rpipe.flow.run import run
     from rpipe.structure.artifact import io
     from rpipe.structure.make import plan
@@ -142,7 +142,7 @@ def test_owned_failure_cancel_and_unknown_use_the_same_formal_writer(
     if failure == 'cancel':
         def cancel(ctx):
             token.request()
-            ctx.cancellation.request()
+            raise Cancelled('scientific boundary observed cancellation')
         actions.execute = cancel
     science_worker(actions)
     phases, write = [], stages.write
@@ -214,7 +214,7 @@ def test_prepare_builds_runtime_system_logger_and_research_hook_before_scientifi
     monkeypatch.setattr('rpipe.structure.algorithm.tracker.make_tracker', lambda *args: SimpleNamespace(close=lambda: None))
     monkeypatch.setattr(stages, 'run_study_phase', before)
     spec = plan(source_study, run_root=run_root)[0]
-    ctx = ScienceContext(spec, Cancellation(), ArtifactLayout(spec))
+    ctx = ScienceContext(spec, lambda: None, ArtifactLayout(spec))
     ctx.state['attempt'] = 'a' * 32
     stages.configure_science(ctx, logging_context={}, request_id='b' * 32)
     assert 'logger' not in ctx.state
@@ -235,13 +235,17 @@ def test_execute_injects_a_read_only_cancel_check_without_configuration_validati
     from rpipe.structure.make import plan
 
     spec = plan(source_study, run_root=run_root)[0]
-    ctx = ScienceContext(spec, Cancellation(), ArtifactLayout(spec))
+    cancellation = Cancellation()
+    def check_cancelled():
+        if cancellation.is_set():
+            raise Cancelled('requested by caller')
+    ctx = ScienceContext(spec, check_cancelled, ArtifactLayout(spec))
     checked = []
     def compute(data, model, system, tracker, cancel_check):
         assert data is ctx.state['data'] and model is ctx.state['model']
         cancel_check()
         checked.append(True)
-        ctx.cancellation.request()
+        cancellation.request()
         cancel_check()
         pytest.fail('requested cancellation was ignored')
     ctx.state.update(data=object(), model=object(), system=object(),

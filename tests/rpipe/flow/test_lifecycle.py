@@ -81,12 +81,13 @@ def test_cancel_before_start_does_not_call_payload(source_study, run_root, scien
     assert outcome.status == 'cancelled'
     assert outcome.cancelled is True
     assert payload.calls == []
+    assert not run_root.exists()
 
 
 def test_cancel_during_execute_prevents_collect(source_study, run_root, science_factory, science_worker):
     from rpipe.structure.make import plan
     from rpipe.flow.run import run
-    from rpipe.flow.context import Cancellation
+    from rpipe.flow.context import Cancellation, Cancelled
 
     token = Cancellation()
 
@@ -94,7 +95,7 @@ def test_cancel_during_execute_prevents_collect(source_study, run_root, science_
         def execute(self, ctx):
             self._phase('execute')
             token.request()
-            ctx.cancellation.request()
+            raise Cancelled('scientific boundary observed cancellation')
 
     payload = Cancelling()
     science_worker(payload)

@@ -56,6 +56,10 @@ def test_epoch_train_writes_latest_only_by_default(tmp_path: Path):
     assert not (ckpt / 'latest').exists()
     assert not (ckpt / 'best.pt').is_file()
     assert list(ckpt.glob('epoch_*.pt')) == []
+    import json
+    saved = [json.loads(row) for row in (tmp_path / 'logs/events.jsonl').read_text(encoding='utf-8').splitlines()]
+    checkpoints = [row for row in saved if row['event'] == 'checkpoint.saved']
+    assert checkpoints and not any(row['event'] == 'ckpt' for row in saved)
 
 
 def test_save_best_writes_best_pt(tmp_path: Path):

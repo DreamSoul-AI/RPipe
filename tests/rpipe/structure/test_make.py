@@ -77,6 +77,7 @@ def test_expand_is_pure_and_preserves_effective_conditions(tmp_path, monkeypatch
     {'study': 'toy', 'axes': {'algorithm.config.lr': [.1, .1]}},
     {'study': 'toy', 'axes': {'algorithm.config.lr': []}},
     {'study': 'toy', 'unknown': True},
+    {'study': 'toy', 'freeze': False},
     {'study': 'toy', 'flow': False},
     {'study': 'toy', 'flow': []},
     {'study': 'toy', 'fixed': []},
@@ -87,7 +88,7 @@ def test_expand_is_pure_and_preserves_effective_conditions(tmp_path, monkeypatch
     {'study': 'toy', 'flow': {'prepare_shared': False}},
     {'study': 'toy', 'flow': {'prepare_shared': True}},
 ], ids=['duplicate-seed', 'boolean-seed', 'negative-seed', 'duplicate-factor',
-        'empty-axis', 'unknown-field', 'false-flow', 'list-flow', 'list-fixed',
+        'empty-axis', 'unknown-field', 'unknown-freeze', 'false-flow', 'list-flow', 'list-fixed',
         'string-fixed-tags', 'string-axis-tags', 'mapping-axis-tags',
         'string-rule-tags', 'ignored-false-key', 'unsupported-true-key'])
 def test_invalid_declaration_rejects_before_output(tmp_path, declaration):
@@ -95,6 +96,18 @@ def test_invalid_declaration_rejects_before_output(tmp_path, declaration):
     with pytest.raises((TypeError, ValueError)):
         _expand(declaration, _base(), source, output)
     assert not source.exists() and not output.exists()
+
+
+@pytest.mark.parametrize('declaration,location', [
+    ({'freeze': False}, 'Study'), ({'freeze': True}, 'Study'),
+    ({'flow': {'prepare_shared': False}}, 'flow'),
+    ({'flow': {'prepare_shared': True}}, 'flow'),
+    ({'flow': {'unrecognized': False}}, 'flow'),
+])
+def test_retired_fields_use_the_same_unknown_field_admission(tmp_path, declaration, location):
+    with pytest.raises(ValueError, match='unknown ' + location + ' fields'):
+        _expand({'study': 'toy', **declaration}, _base(), tmp_path / 'source', tmp_path / 'output')
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_explicit_train_dependencies_match_their_effective_conditions(tmp_path):

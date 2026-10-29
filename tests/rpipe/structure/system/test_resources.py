@@ -17,6 +17,36 @@ windows = pytest.mark.skipif(os.name != 'nt', reason='Windows Job contract')
 
 
 @pytest.mark.unit
+def test_file_errors_reject_unsupported_platform(monkeypatch):
+    monkeypatch.setattr(resources, 'os', SimpleNamespace(name='posix'))
+    with pytest.raises(OSError, match='require Windows'):
+        resources.WindowsFileErrors()
+
+
+@windows
+@pytest.mark.unit
+def test_file_errors_use_crt_prototypes_and_do_not_return_stale_failed_reads(monkeypatch):
+    state = SimpleNamespace(clear_status=0, read_status=0)
+    def clear(value):
+        assert value == 0
+        return state.clear_status
+    def read(target):
+        target._obj.value = 32
+        return state.read_status
+    crt = SimpleNamespace(_set_doserrno=clear, _get_doserrno=read)
+    def load(name):
+        assert name == 'ucrtbase'
+        return crt
+    monkeypatch.setattr(resources.ctypes, 'CDLL', load)
+    observer = resources.WindowsFileErrors()
+    assert clear.argtypes == [ctypes.c_ulong] and clear.restype is ctypes.c_int
+    assert read.argtypes == [ctypes.POINTER(ctypes.c_ulong)] and read.restype is ctypes.c_int
+    assert observer.clear() and observer.code() == 32
+    state.clear_status = state.read_status = 1
+    assert observer.clear() is False and observer.code() is None
+
+
+@pytest.mark.unit
 def test_output_growth_counts_new_and_positive_bytes_without_double_counting(tmp_path):
     shared, output = tmp_path / 'shared', tmp_path / 'output'
     shared.mkdir()

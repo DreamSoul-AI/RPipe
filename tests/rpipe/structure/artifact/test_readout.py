@@ -123,7 +123,7 @@ def test_invalid_result_flags_keep_valid_peer_and_unknown_fact(source_study, run
 def test_read_run_exposes_explicit_failed_or_cancelled_attempt_without_writing(source_study, run_root, science_factory, file_bytes, kind, science_worker):
     from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.run import run
-    from rpipe.flow.context import Cancellation
+    from rpipe.flow.context import Cancellation, Cancelled
     from rpipe.structure.make import plan
     cancellation = Cancellation()
 
@@ -132,7 +132,7 @@ def test_read_run_exposes_explicit_failed_or_cancelled_attempt_without_writing(s
         def execute(self, ctx):
             if kind == 'cancel':
                 cancellation.request()
-                ctx.cancellation.request()
+                raise Cancelled('scientific boundary observed cancellation')
             else:
                 raise ValueError('attempt failure')
     spec = plan(source_study, run_root=run_root)[0]

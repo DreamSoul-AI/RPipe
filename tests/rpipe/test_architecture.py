@@ -111,6 +111,17 @@ def test_retired_runtime_adapters_and_api_execution_wrappers_are_absent():
         'structure/execution.py', 'structure/contracts.py', 'flow/native.py', 'flow/huggingface.py'))
 
 
+def test_retired_prepare_and_empty_alias_surfaces_are_absent():
+    from rpipe.structure.artifact import io
+    from rpipe.flow.context import Cancellation
+    assert not (SOURCE / 'structure/data/prepare.py').exists()
+    assert not hasattr(io, 'kinds')
+    token = Cancellation()
+    assert not hasattr(token, 'requested') and not token.is_set()
+    token.request()
+    assert token.is_set()
+
+
 def test_component_builders_replace_static_factory_classes():
     for name in ('data', 'model', 'algorithm', 'system'):
         tree = ast.parse((SOURCE / 'structure' / name / 'factory.py').read_text(encoding='utf-8'))

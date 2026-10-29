@@ -78,15 +78,15 @@ def expand(study: dict, base: dict, *, source_dir: Path | str, run_root: Path | 
     if version is not None and (not isinstance(version, str) or not version):
         raise AdmissionError('version override must be a nonempty string')
     source = Path(source_dir)
-    if 'freeze' in study:
-        raise AdmissionError('freeze is unsupported; remove it: source identity is checked, no archive is created')
     allowed = {'study', 'description', 'origin', 'experiment', 'fixed', 'axes', 'seeds', 'tags',
                'run_description', 'recipe', 'flow', 'provenance'}
     if set(study) - allowed:
         raise AdmissionError(f'unknown Study fields: {sorted(set(study) - allowed)}')
     flow = study.get('flow', {})
-    if not isinstance(flow, dict) or set(flow) - {'study_phases'}:
-        raise AdmissionError('flow must contain only study_phases; prepare_shared is not a supported field')
+    if not isinstance(flow, dict):
+        raise AdmissionError('flow must be a mapping')
+    if set(flow) - {'study_phases'}:
+        raise AdmissionError(f'unknown flow fields: {sorted(set(flow) - {"study_phases"})}')
     for key, value in flow.items():
         if type(value) is not bool:
             raise AdmissionError(f'flow.{key} must be a boolean')

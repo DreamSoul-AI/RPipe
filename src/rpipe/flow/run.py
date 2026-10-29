@@ -6,7 +6,7 @@ import uuid
 
 from rpipe.structure.control import AdmissionError, RunSpec, SourceMismatch
 from rpipe.structure.artifact import io, provenance
-from .context import Budget, Cancellation, Cancelled, RunContext, RunReport, validate_draft
+from .context import Budget, Cancellation, Cancelled, RunContext, RunReport, validate_draft, validate_cleanup_seconds
 from . import stages, worker
 
 _runtime_logged = False
@@ -57,15 +57,25 @@ def _log_error(ctx, error, message):
         try:
             logger.bind(phase=ctx.state.get('phase') or 'admission')
             if isinstance(error, Cancelled):
-                logger.info('Run cancellation confirmed', event='task.cancelled')
+                logger.info('Run cancellation requested; resource cleanup pending', event='task.cancel_requested')
             else:
                 logger.exception(message, error, event='task.failed')
         except BaseException:
             logger.diagnostics_complete = False
 
 
+def _interruption(error, cancellation):
+    if isinstance(error, KeyboardInterrupt):
+        cancellation.request()
+        cancelled = Cancelled('execution interrupted; resource cleanup pending')
+        cancelled.__cause__ = error
+        return cancelled
+    return error
+
+
 def run(spec: RunSpec, *, budget: Budget | None = None,
-        cancellation: Cancellation | None = None, retry: bool = False) -> RunReport:
+        cancellation: Cancellation | None = None, retry: bool = False,
+        cleanup_seconds: float = 2.0) -> RunReport:
     """A rejected request never becomes a failed scientific Run on disk."""
     budget = budget or Budget()
     cancellation = cancellation or Cancellation()
@@ -75,6 +85,7 @@ def run(spec: RunSpec, *, budget: Budget | None = None,
         if not isinstance(retry, bool):
             raise AdmissionError('retry must be a boolean')
         budget.validate()
+        validate_cleanup_seconds(cleanup_seconds)
         provenance.validate_source(spec)
         worker.validate_budget(spec, budget)
         if cancellation.is_set():
@@ -82,6 +93,9 @@ def run(spec: RunSpec, *, budget: Budget | None = None,
         if not (spec.run_dir / '.execution').exists():
             _admit(spec, retry)
         io.validate_train(spec)
+    except KeyboardInterrupt:
+        cancellation.request()
+        return RunReport('cancelled', cancelled=True)
     except (ValueError, TypeError, OSError, RuntimeError) as error:
         return RunReport('rejected', error=io.safe_error_record(error))
     attempt = uuid.uuid4().hex
@@ -89,16 +103,21 @@ def run(spec: RunSpec, *, budget: Budget | None = None,
     try:
         owner.acquire()
         _admit(spec, retry)
-    except (ValueError, TypeError, OSError, RuntimeError) as error:
+    except (ValueError, TypeError, OSError, RuntimeError, KeyboardInterrupt) as error:
+        interrupted = isinstance(error, KeyboardInterrupt)
+        if interrupted:
+            cancellation.request()
         cleanup = []
         if owner.acquired:
             try:
                 owner.release()
             except BaseException as closing_error:
                 cleanup.append(io.safe_error_record(closing_error))
-        return RunReport('unknown' if cleanup else 'rejected', error=io.safe_error_record(error),
+        return RunReport('unknown' if cleanup else 'cancelled' if interrupted else 'rejected',
+                         error=io.safe_error_record(error), cancelled=interrupted,
                          cleanup_errors=tuple(cleanup), attempt=attempt if cleanup else None)
-    ctx = RunContext(spec, cancellation, io.ArtifactLayout(spec), owner=owner)
+    ctx = RunContext(spec, cancellation, io.ArtifactLayout(spec), owner=owner,
+                     cleanup_seconds=cleanup_seconds)
     ctx.state.update(attempt=attempt, budget=budget, phase='admission')
     record = {'schema': 1, 'identity': io.identity(spec), 'attempt': attempt,
               'owner_token': owner.token, 'phase': 'running', 'candidate_status': None,
@@ -120,6 +139,7 @@ def run(spec: RunSpec, *, budget: Budget | None = None,
         ctx.validate_config(spec, 'after science response')
         validate_draft(draft)
     except BaseException as error:
+        error = _interruption(error, cancellation)
         primary = io.safe_error_record(error)
         attached = getattr(error, 'cleanup_errors', ())
         if not isinstance(attached, (list, tuple)):
@@ -141,12 +161,18 @@ def run(spec: RunSpec, *, budget: Budget | None = None,
             ctx.state['unknown_resources'] = True
         cleanup.extend(io.safe_error_record(error) for error in supplied)
         unknown = bool(ctx.state.get('unknown_resources'))
+        remote = ctx.state.get('worker_response', {}).get('error')
+        if (primary and primary.get('type') in {'Cancelled', 'CancelledError'}
+                and remote is not None and remote.get('type') not in {'Cancelled', 'CancelledError', 'KeyboardInterrupt'}):
+            primary = io.safe_error_record(remote)
+            _log_error(ctx, worker.WorkerFailure(remote), 'Scientific failure reported during cancellation')
     status = ('unknown' if unknown else 'failed' if primary or cleanup
               else 'cancelled' if cancellation.is_set() else 'succeeded')
     if primary and primary.get('type') in {'Cancelled', 'CancelledError'} and not unknown and not cleanup:
         status = 'cancelled'
     record.update(phase='closing', candidate_status=status, error=primary, cleanup_errors=cleanup,
                   cancelled=cancellation.is_set(), budget=vars(budget), stage=ctx.state.get('phase'),
+                  cleanup_seconds=cleanup_seconds,
                   environment=ctx.state.get('worker_environment', record.get('environment')))
     if status == 'succeeded':
         try:
@@ -156,9 +182,13 @@ def run(spec: RunSpec, *, budget: Budget | None = None,
             stages.write(ctx, record, draft)
             complete = bool(record['evidence_complete'])
         except BaseException as error:
+            error = _interruption(error, cancellation)
             primary = io.safe_error_record(error)
             _log_error(ctx, error, 'Run publication failed')
-            status, complete = 'failed', False
+            status = 'cancelled' if isinstance(error, Cancelled) else 'failed'
+            complete = False
+    if status == 'succeeded' and cancellation.is_set():
+        status, complete = 'cancelled', False
     if ctx.state.get('published_result') is not None and status == 'succeeded':
         try:
             derived = 'running'
@@ -169,12 +199,11 @@ def run(spec: RunSpec, *, budget: Budget | None = None,
             stages.process(ctx)
             derived = 'succeeded'
         except BaseException as error:
+            error = _interruption(error, cancellation)
             primary = io.safe_error_record(error)
             _log_error(ctx, error, 'Run derived processing failed')
             status = 'cancelled' if primary.get('type') in {'Cancelled', 'CancelledError'} else 'failed'
             derived, complete = status, False
-    if status == 'succeeded' and cancellation.is_set():
-        status, complete = 'cancelled', False
     logger = ctx.state.get('logger')
     diagnostic_errors = []
     if logger is not None:
@@ -198,6 +227,8 @@ def run(spec: RunSpec, *, budget: Budget | None = None,
         except BaseException as error:
             diagnostic_errors.append(io.safe_error_record(error))
         complete = bool(complete and getattr(logger, 'diagnostics_complete', True) and not diagnostic_errors)
+    if status == 'succeeded' and cancellation.is_set():
+        status, complete = 'cancelled', False
     record.update(candidate_status=status, error=primary, cleanup_errors=cleanup, derived_status=derived,
                   evidence_complete=bool(complete), cancelled=cancellation.is_set(),
                   diagnostic_errors=diagnostic_errors, stage=ctx.state.get('phase'))

@@ -16,7 +16,6 @@ import threading
 import yaml
 from dataclasses import dataclass
 from typing import Any, TypedDict
-from types import SimpleNamespace
 from ..control import RunSpec, RunRef, AdmissionError, SourceMismatch, BusyError
 
 
@@ -567,9 +566,6 @@ def validate_input_paths(spec: RunSpec, *, output_root: Path | str | None = None
 
 
 
-
-
-kinds = SimpleNamespace(TRACKER=TRACKER, TRACKER_STATE=TRACKER_STATE, TRACKER_JSONL=TRACKER_JSONL, LOGS=LOGS, RUN_LOG=RUN_LOG, CHECKPOINTS=CHECKPOINTS, SAMPLES=SAMPLES, CACHE=CACHE, WEIGHTS=WEIGHTS)
 
 
 def read_execution(spec: RunSpec | RunRef) -> tuple[dict, bool]:

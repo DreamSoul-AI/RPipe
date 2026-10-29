@@ -24,6 +24,21 @@ def test_budget_invalid_limit_is_rejected(field, value):
         Budget(**{field: value}).validate()
 
 
+def test_science_context_only_accepts_an_injected_read_only_cancel_check(source_study, run_root):
+    from rpipe.flow.context import Cancellation, ScienceContext
+    from rpipe.structure.artifact.io import ArtifactLayout
+    from rpipe.structure.control import AdmissionError
+    from rpipe.structure.make import plan
+    spec = plan(source_study, run_root=run_root)[0]
+    with pytest.raises(AdmissionError):
+        ScienceContext(spec, Cancellation(), ArtifactLayout(spec))
+    calls = []
+    ctx = ScienceContext(spec, lambda: calls.append(True), ArtifactLayout(spec))
+    assert not hasattr(ctx, 'cancellation')
+    ctx.cancel_check()
+    assert calls == [True] and not run_root.exists()
+
+
 
 def test_context_and_readout_imports_do_not_load_science_or_execution(tmp_path):
     code = """import importlib.abc, sys

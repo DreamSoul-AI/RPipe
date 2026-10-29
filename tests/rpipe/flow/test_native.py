@@ -85,7 +85,7 @@ def test_native_profile_output_is_external_and_explicit_stats_resolve_from_sourc
 
     monkeypatch.setattr('rpipe.structure.data.factory.build_data', build)
     from rpipe.structure.artifact.io import ArtifactLayout
-    ctx = ScienceContext(spec=spec, cancellation=Cancellation(), layout=ArtifactLayout(spec))
+    ctx = ScienceContext(spec=spec, cancel_check=lambda: None, layout=ArtifactLayout(spec))
     ctx.state['attempt'] = 'a' * 32
     stages.configure_science(ctx, logging_context={}, request_id=None)
     try:

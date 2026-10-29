@@ -53,6 +53,15 @@ def test_default_debug_and_unknown_context_are_omitted(tmp_path):
     assert 'request_id' not in row and 'task_id' not in row and row['level'] == 'INFO'
 
 
+def test_explicit_checkpoint_event_names_are_preserved_without_alias_translation(tmp_path):
+    logger = Logger(tmp_path, stdout=False)
+    for event in ('checkpoint.saved', 'checkpoint.restored', 'ckpt', 'resume'):
+        logger.info('checkpoint observation', event=event)
+    assert [row['event'] for row in records(logger.path)] == [
+        'checkpoint.saved', 'checkpoint.restored',
+        'logging.unstructured_record', 'logging.unstructured_record']
+
+
 def test_privacy_and_controls_are_handled_before_either_sink(tmp_path, capsys):
     logger = Logger(tmp_path)
     logger.info('token=TEST_SECRET path=C:\\private\\person.txt email=person@example.test\n'

@@ -4,7 +4,7 @@ RPipe（Research Pipeline，研究流水线）是用于搭建研究实验的参�
 
 RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他项目长期安装调用的通用 package 为产品目标，也不要求衍生项目持续跟随本仓接口。模板自身仍需讲清职责、保持可运行并验证示例，帮助研究者把有效配置、执行事实、科学结果和比较分析连接起来。Python 包名 `rpipe`、安装命令和打包配置是当前源码的组织与运行方式，不构成跨项目稳定 API 的承诺。仓库为 [DreamSoul-AI/RPipe](https://github.com/DreamSoul-AI/RPipe)，采用 [MIT 许可](LICENSE.md)。
 
-当前包元数据为 **0.4.1**。实际实现和支持限制见下文；版本号不代表所有兼容变化已发布。架构设计以单一 Markdown 完整维护整体组成、结构与部件、流程与扩展、观测恢复及产物合同，作为实施依据；代码结构设计已据此重新推导为单一完整文档，写明目标目录、部件接口、生命周期和依赖；control/make 与 artifact 配置/清单链路、flow 生命周期/持权/唯一 write、轻量部件合同及科学装配已落地；checkpoint、正式读端与派生已落实；其余入口和交付核验接续实施。实际差距、清理工作与校准事项见[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)。正式数值、GPU 和长程性能仍待验收。
+当前包元数据为 **0.4.1**。实际实现和支持限制见下文；版本号不代表所有兼容变化已发布。架构设计以单一 Markdown 完整维护整体组成、结构与部件、流程与扩展、观测恢复及产物合同，作为实施依据；代码结构设计已据此重新推导为单一完整文档，写明目标目录、部件接口、生命周期和依赖；control/make 与 artifact 配置/清单链路、flow 生命周期/持权/唯一 write、轻量部件合同及科学装配已落地；checkpoint、正式读端与派生已落实；剩余入口、批次退出及合作取消已收尾，并完成受影响回归与 wheel/sdist 的本地实际安装旅程。实际差距、清理工作与校准事项见[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)。正式数值、GPU 和长程性能仍待验收。
 
 ## 文档与阅读顺序
 
@@ -16,7 +16,7 @@ RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他�
 | --- | --- |
 | [通用调研 General Research](<docs/通用调研 General Research 研究流水线.md>) | 机制、工程路线、直接来源、取舍与限制；项目历史执行只进入日期记录 |
 | [架构设计 Architecture Design](<docs/架构设计 Architecture Design 研究流水线.md>) | 单一完整正文：当前选定的实验部件、流程扩展、观测恢复及产物合同 |
-| [代码结构设计 Code Structure Design](<docs/代码结构设计 Code Structure Design 研究流水线.md>) | 依据完整架构推导的单一文档：目标目录、模块职责、接口、允许依赖及验证落点；规划/发布、生命周期及部件装配已实施，其余差距见开发计划 |
+| [代码结构设计 Code Structure Design](<docs/代码结构设计 Code Structure Design 研究流水线.md>) | 依据完整架构推导的单一文档：目标目录、模块职责、接口、允许依赖及验证落点；规划/发布、生命周期、部件装配、快照读端及入口交付已实施，后续研究接入见开发计划 |
 | [开发计划 Development Plan](<docs/开发计划 Development Plan 研究流水线.md>) | 实现差距、逐模块工作、旧接口清理及验收顺序；按明确目标队列连续推进，每批验证、记录并本地提交 |
 | [缺陷记录 Bug Report](<docs/缺陷记录 Bug Report 研究流水线.md>) | 活动问题与待验证事项；已关闭问题的变更和证据只从日期记录追溯 |
 | [开发记录 Development Record](<docs/开发记录 Development Record/>) | 日期记录，本轮文档调整与历史集成、分支保全的归属；不复制整份测试结果 |
@@ -84,8 +84,8 @@ python -m rpipe report studies/_template --run-root <external-run-root>
 | `status/logs/report` | 按已发布清单和保存身份读取，不核当前源码；显式 --version 可在源码不在场时定位历史版本 |
 | `compare <left-run-dir> <right-run-dir>` | 两端须在各自正式 index 中；容差和 checkpoint 选择明确，--out 必须在输入 Study 域外 |
 | `make` | 经 structure.make.publish 发布配置与索引，不准备科学数据或生成旧 jobs/脚本 |
-| `run` / `study` | 先 make 再 launch，显式执行 |
-| `launch/run-one` | 执行明确规格，核来源与自身 train 依赖，默认每 Run 独立科学子进程 |
+| `run` | 先 make 再 launch，显式执行 |
+| `launch [--id]` | 执行明确规格，核来源与自身 train 依赖，默认每 Run 独立科学子进程 |
 | `process [--figures]` | 核当前源码、正式清单、配置与结果，写派生摘要及明确请求的图；输入漂移拒绝发布，不覆盖科学结果 |
 | `data [--download]` / `tensorboard --out` | 显式 profile/下载或导出，遵守输入、输出与来源约束 |
 | `supervise` | 显式 Windows 批次监管，不自动 make、预留 GPU 或恢复旧队列 |
@@ -101,7 +101,7 @@ python -m rpipe process <study-dir> --run-root <external-run-root>
 
 持权前 busy、来源失配或无效请求只返回 status=rejected 的 RunReport，不给目标 Run 写失败记录。成功定稿须先核源码与有效配置、科学响应和资源关闭；未确认释放时保留 owner 和 unknown 事实，禁止成功发布或新派发。正式结果后的 process 仅使用已保存记录，派生失败单独报告。Study 摘要记录 index/config/result/execution、明确 outcome 及 busy 状态的输入指纹，汇总期间变化时保全旧文件。
 
-已有正式 result 拒绝原地重跑，须使用显式新 version。无 result 的已确认 failed/cancelled 仅允许显式 --retry（flow.run.run 的 retry=True），unknown/busy 不重放。execution.json 明确索引当前 attempt，执行、科学结果、派生分析、证据完整度分列，不由 mtime、UUID、退出码或日志推断整体成功。
+已有正式 result 拒绝原地重跑，须使用显式新 version。无 result 的已确认 failed/cancelled 仅允许显式 --retry（flow.run.run 的 retry=True），unknown/busy 不重放。批次退出 0 还要求非空、完整覆盖所选项、各项执行成功、质量非 False 且证据完整；提前停止、取消或成功前缀不算整批成功。execution.json 明确索引当前 attempt，执行、科学结果、派生分析、证据完整度分列，不由 mtime、UUID、退出码或日志推断整体成功。
 
 只读命令省略 --version 时，仅读取当前声明的版本字段定位输出；需要查看另一版本或源码已移走时显式提供 --version，不按目录时间猜选。正式轨迹和导出只使用清单列出的 Run 及 JSONL 有效观测，不扫描旧目录或用 state-history 回退补齐。
 
@@ -111,7 +111,7 @@ provenance.inputs 可固定外部文件或目录清单，未固定 path/stats_pa
 
 ### 资源监管与当前限制
 
-默认 Budget 拒绝硬内存限制和同进程硬超时。Windows 有启用的 Study hook、recipe、DataLoader worker 或 HF 后端时，普通 run 的硬超时仍拒绝。CLI 没有完整 Ctrl+C 合作取消桥接，不承诺任意键盘中断均完成所属资源清理。
+默认 Budget 拒绝硬内存限制和同进程硬超时。Windows 有启用的 Study hook、recipe、DataLoader worker 或 HF 后端时，普通 run 的硬超时仍拒绝。执行命令作用域中的 Ctrl+C 请求同一 Cancellation，父进程通过绑定本 attempt 的标记通知科学进程；算法在只读检查点合作退出。协作和所属资源强停均受清理时限约束，硬超时不延长为合作宽限；不能确认关闭时保留 unknown 和 owner，不承诺任意阻塞代码都可立即合作退出。
 
 Windows 可另选 flow.supervision.supervise / rpipe supervise。CLI 必须显式提供 --run-root、--evidence-dir、--run-seconds、--batch-seconds、--rss-bytes、--output-bytes，另可设置 --poll-seconds 与 --cleanup-seconds。匿名 Job 监管本批协调者、worker 和后代，入组后才放行，首败、质量 False、证据不全、观察失败或超限即停后续派发。
 
@@ -126,7 +126,7 @@ python tests/run.py --help
 python tests/run.py --core --results-root <external-test-root> --timeout-seconds 600 --budget-seconds 660 -- --basetemp <unique-external-temp>
 ```
 
-结果包含 manifest、逐项 events 与可重建 report，未执行、跳过、取消、缺失与失败分别保留。执行器只监督本次 pytest 根进程，不提供逐项内存或全部后代硬限。制品验证另用 [tests/package_smoke.py](tests/package_smoke.py)，针对实际安装 wheel/sdist 的解释器与新的外部 workspace，不用 editable 导入替代。
+结果包含 manifest、逐项 events 与可重建 report，未执行、跳过、取消、缺失与失败分别保留。执行器只监督本次 pytest 根进程，不提供逐项内存或全部后代硬限。制品验证另用 [tests/package_smoke.py](tests/package_smoke.py)，须用本次实际 wheel/sdist 安装到新 venv 的解释器，显式 --artifact 指明制品和 --workspace 指明新外部位置；核 venv/导入/console/RECORD 与制品来源哈希，不用 editable、外来 PYTHONPATH 或旧同版本包替代。
 
 现有工作流在 dev/main 的 PR 和 push 上运行 CPU 矩阵（Ubuntu/Windows × Python3.10/3.13）及两平台 Python3.10 打包安装，另在 PR 检查分支方向。CPU 作业归档统一测试回执和命令日志，打包作业归档构建/安装日志及已生成的 wheel/sdist smoke 工作区。上传在成功或失败后均尝试执行，缺少文件时明确失败；artifact 名包含矩阵、Actions run/attempt 和检出 SHA，保留7天。日志管道使用 Bash pipefail，不吞测试或构建失败。平台强制终止、runner 丢失或上传服务不可用时可能无完整归档，不能将未上传当作通过。工作流声明、远端实际结果与分支保护不是同一事实，不把配置存在记为当前 HEAD 已通过。
 
@@ -137,6 +137,8 @@ python tests/run.py --core --results-root <external-test-root> --timeout-seconds
 部件批次另以分组合同、原数值、10 个 CPU 独立进程恢复、315 项 Flow 集成及最后形状补验核对，当前版本六命令旅程通过；分组重叠、失败/中断及未执行范围见[科学部件验证记录](<docs/运行记录 Run Record/2026-10-29 科学部件合同与装配验证.md>)，不将部分证据合成全仓或正式研究通过。
 
 快照与读端批次保留真实 CPU 恢复失败及修复、402 项读端/比较、原失败文件174与研究reader69的分组证据，最终六命令和比较 CLI 通过；完整范围、重叠和 SDK 跳过见[快照读端验证记录](<docs/运行记录 Run Record/2026-10-29 快照读端与派生职责验证.md>)。
+
+入口和交付批次完成取消、批次退出与旧接口清理；两份实际制品各自通过新 venv 的十命令、四 Run 工程旅程。分组回归、共享冲突原例及本次安装来源验证分别在[入口交付运行记录](<docs/运行记录 Run Record/2026-10-29 入口取消与制品交付验证.md>)维护；工程最小旅程仍用显式 Toy/Stub，不把它当作研究精度验收。
 
 历史与当前的本地有界 CPU、有限原生/HF、安装 smoke 与远端 CI 分别按运行记录中的固定身份核对。重构先执行受影响合同回归，再按实际范围验证科学装配、Study 与制品旅程。正式 MNIST/CIFAR、GPU、长程性能、矩阵外环境与原始历史归档可恢复性仍未验收。
 

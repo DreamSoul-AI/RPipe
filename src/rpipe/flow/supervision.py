@@ -18,7 +18,7 @@ from .context import Budget, Cancellation, RunReport, SupervisionLimits
 from rpipe.structure.artifact.io import validate_run_root
 from rpipe.structure.artifact.io import safe_error_record as error_record
 from .run import run
-from rpipe.structure.system.resources import WindowsJob, output_growth, output_snapshot
+from rpipe.structure.system.resources import WindowsFileErrors, WindowsJob, output_growth, output_snapshot
 
 
 def _spec_body(spec):
@@ -88,7 +88,8 @@ def coordinator():
             state['current'] = {'index': index, 'id': spec.id, 'started': time.monotonic()}
             publish()
             # execute() publishes its own config; make([spec]) would truncate the Study index.
-            outcome = run(spec, cancellation=cancellation, retry=request['retry'])
+            outcome = run(spec, cancellation=cancellation, retry=request['retry'],
+                          cleanup_seconds=request['cleanup_seconds'])
             row = {key: value for key, value in asdict(outcome).items() if key != 'result'}
             row.update(index=index, id=spec.id, identity=identity(spec),
                        elapsed_seconds=max(0.0, time.monotonic() - state['current']['started']),
@@ -193,6 +194,7 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
               'accounting': {'rss': 'sampled aggregate working set; not a hard memory quota',
                              'output': 'sampled positive file growth; not a disk quota',
                              'poll_seconds': limits.poll_seconds}, 'tree_empty': False}
+    file_errors = WindowsFileErrors()
     job, child, latest = WindowsJob(), None, None
     baseline = None
     assigned = False
@@ -233,18 +235,51 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
             if latest.get('error'):
                 stop('coordinator_error', error=latest['error'])
 
+    def observe_progress():
+        for attempt in range(3):
+            deadlines(time.monotonic())
+            cleared = file_errors.clear()
+            try:
+                return _progress(progress_path, nonce, specs)
+            except OSError as error:
+                dos_code = file_errors.code()
+                code = getattr(error, 'winerror', None)
+                if code is None and cleared:
+                    code = dos_code
+                if code not in (32, 33):
+                    raise
+                report['observed'].setdefault('progress_read_first_code', code)
+                deadlines(time.monotonic())
+                if attempt == 2 or report['trigger'] is not None:
+                    raise
+                now = time.monotonic()
+                remaining = limits.batch_seconds - (now - started)
+                if latest and latest.get('current') is not None:
+                    remaining = min(remaining, limits.run_seconds - (now - latest['current']['started']))
+                delay = min(0.005, limits.poll_seconds, remaining)
+                if delay <= 0:
+                    deadlines(time.monotonic())
+                    raise
+                observed = report['observed']
+                observed['progress_read_retries'] = observed.get('progress_read_retries', 0) + 1
+                time.sleep(delay)
+                deadlines(time.monotonic())
+                if report['trigger'] is not None:
+                    raise
+
     try:
         evidence.mkdir(parents=True, exist_ok=False)
         evidence_owned = True
         baseline = output_snapshot(roots)
         request_path = evidence / 'request.json'
         write_json(request_path, {'request': nonce, 'specs': [_spec_body(spec) for spec in specs],
-                                 'progress': str(progress_path), 'retry': retry})
+                                 'progress': str(progress_path), 'retry': retry,
+                                 'cleanup_seconds': limits.cleanup_seconds / 2})
         env = os.environ.copy()
         env['PYTHONPATH'] = str(Path(__file__).resolve().parents[2]) + os.pathsep + env.get('PYTHONPATH', '')
         child = subprocess.Popen([sys.executable, '-B', '-m', 'rpipe', '_supervisor-coordinator'],
                                  stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                 env=env)
+                                 env=env, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
         job.assign(child)
         assigned = True
         growth = output_growth(roots, baseline)
@@ -264,7 +299,7 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
                 break
             observed_started = time.monotonic()
             deadlines(observed_started)
-            latest = _progress(progress_path, nonce, specs) or latest
+            latest = observe_progress() or latest
             rss = job.rss_bytes()
             growth = output_growth(roots, baseline)
             report['observed']['sample_seconds_max'] = max(
@@ -281,7 +316,7 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
             if report['trigger']:
                 break
             if child.poll() is not None:
-                latest = _progress(progress_path, nonce, specs) or latest
+                latest = observe_progress() or latest
                 deadlines(time.monotonic())
                 if not latest or not latest['done'] or len(latest['completed']) != len(specs) or child.returncode:
                     stop('coordinator_exit', exit_code=child.returncode)
@@ -353,7 +388,7 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
         admission_failure.cleanup_errors = (*getattr(admission_failure, 'cleanup_errors', ()), *cleanup_failures)
         raise admission_failure
     try:
-        latest = _progress(progress_path, nonce, specs) or latest
+        latest = observe_progress() or latest
     except BaseException as exc:
         stop('observation_failure', error=error_record(exc))
     if latest:
@@ -420,9 +455,10 @@ def _one_root(specs):
 
 def launch(specs, *, budget: Budget | None = None, cancellation: Cancellation | None = None,
            retry: bool = False) -> tuple[RunReport, ...]:
+    cancellation = cancellation or Cancellation()
     specs = tuple(specs)
-    if any(not isinstance(spec, RunSpec) for spec in specs):
-        raise AdmissionError('launch requires RunSpecs')
+    if not specs or any(not isinstance(spec, RunSpec) for spec in specs):
+        raise AdmissionError('launch requires nonempty RunSpecs')
     _one_root(specs)
     if len({spec.id for spec in specs}) != len(specs):
         raise AdmissionError('duplicate Run in launch request')

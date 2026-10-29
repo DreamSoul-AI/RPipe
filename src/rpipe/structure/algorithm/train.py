@@ -125,7 +125,7 @@ class TrainAlgorithm(Algorithm):
         for name in names:
             path = checkpoint.save_snapshot(self.checkpoint_dir / f'{name}.pt', payload)
             if logger is not None:
-                logger.info(f'name={name} path={path}', event='ckpt')
+                logger.info(f'name={name} path={path}', event='checkpoint.saved')
 
     def compute(self, data: DataPort, model: ModelPort, system: SystemPort, tracker: TrackerPort,
                 cancel_check: CancelCheck) -> ComputationObservation:

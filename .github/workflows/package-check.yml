@@ -60,7 +60,7 @@ jobs:
             package_python="$PWD/.tmp/wheel-env/bin/python"
           fi
           "$package_python" -m pip install dist/*.whl 2>&1 | tee "$RPIPE_PACKAGE_EVIDENCE_ROOT/wheel-install.log"
-          "$package_python" tests/package_smoke.py --workspace "$RUNNER_TEMP/rpipe-wheel-smoke" 2>&1 | tee "$RPIPE_PACKAGE_EVIDENCE_ROOT/wheel-smoke.log"
+          "$package_python" tests/package_smoke.py --artifact dist/*.whl --workspace "$RUNNER_TEMP/rpipe-wheel-smoke" 2>&1 | tee "$RPIPE_PACKAGE_EVIDENCE_ROOT/wheel-smoke.log"
 
       - name: Verify source distribution installation and CLI
         shell: bash
@@ -72,7 +72,7 @@ jobs:
             package_python="$PWD/.tmp/sdist-env/bin/python"
           fi
           "$package_python" -m pip install dist/*.tar.gz 2>&1 | tee "$RPIPE_PACKAGE_EVIDENCE_ROOT/sdist-install.log"
-          "$package_python" tests/package_smoke.py --workspace "$RUNNER_TEMP/rpipe-sdist-smoke" 2>&1 | tee "$RPIPE_PACKAGE_EVIDENCE_ROOT/sdist-smoke.log"
+          "$package_python" tests/package_smoke.py --artifact dist/*.tar.gz --workspace "$RUNNER_TEMP/rpipe-sdist-smoke" 2>&1 | tee "$RPIPE_PACKAGE_EVIDENCE_ROOT/sdist-smoke.log"
 
       - name: Upload package check evidence
         if: always()

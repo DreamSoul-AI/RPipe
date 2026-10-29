@@ -2,28 +2,48 @@
 from __future__ import annotations
 from rpipe.structure import make as planning
 import argparse
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import sys
+import signal
 
 from rpipe import __version__
+
+
+
+@contextmanager
+def _interrupt_scope(cancellation):
+    previous = signal.getsignal(signal.SIGINT)
+    def request(signum, frame):
+        cancellation.request()
+    signal.signal(signal.SIGINT, request)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+
+def _batch_succeeded(specs, reports, cancellation):
+    return (bool(specs) and len(reports) == len(specs) and not cancellation.is_set()
+            and all(report.status == 'succeeded' and report.quality is not False
+                    and report.evidence_complete is True for report in reports))
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog='rpipe')
     parser.add_argument('--version', action='version', version=__version__)
     commands = parser.add_subparsers(dest='command', required=True)
-    for name in ('plan', 'make', 'run', 'study', 'launch', 'run-one', 'supervise', 'status', 'logs', 'report', 'process', 'shared', 'data', 'tensorboard'):
+    for name in ('plan', 'make', 'run', 'launch', 'supervise', 'status', 'logs', 'report', 'process', 'shared', 'data', 'tensorboard'):
         command = commands.add_parser(name)
         command.add_argument('study_dir', type=Path)
-        if name == 'run-one': command.add_argument('run_id')
         command.add_argument('--run-root', type=Path)
         command.add_argument('--version', dest='study_version')
         command.add_argument('--id', dest='selected_id')
         if name == 'tensorboard': command.add_argument('--out', type=Path, required=True)
         if name == 'data': command.add_argument('--download', action='store_true')
         if name == 'process': command.add_argument('--figures', action='store_true')
-        if name in ('run', 'study', 'launch', 'run-one'):
+        if name in ('run', 'launch'):
             command.add_argument('--timeout', type=float)
             command.add_argument('--memory-bytes', type=int)
             command.add_argument('--retry', action='store_true')
@@ -56,7 +76,7 @@ def main(argv=None) -> int:
             from .supervision import coordinator
             return coordinator()
         from rpipe.structure.artifact import readout, comparison, io
-        from .context import Budget, SupervisionLimits
+        from .context import Budget, Cancellation, SupervisionLimits
         from .supervision import launch, supervise
         from .process import process_study
         if args.command == 'compare':
@@ -100,7 +120,7 @@ def main(argv=None) -> int:
                                           args.output_bytes, args.poll_seconds, args.cleanup_seconds)
             limits.validate()
         specs = planning.plan(args.study_dir, run_root=args.run_root, version=args.study_version)
-        selected = getattr(args, 'run_id', None) or args.selected_id
+        selected = args.selected_id
         if selected:
             specs = tuple(s for s in specs if s.id == selected)
             if not specs: parser.error('Run id is not in the actual current plan')
@@ -110,20 +130,26 @@ def main(argv=None) -> int:
         elif args.command == 'make':
             value = planning.publish(specs)
         elif args.command == 'supervise':
-            value = supervise(specs, limits=limits, evidence_dir=args.evidence_dir, retry=args.retry)
+            cancellation = Cancellation()
+            with _interrupt_scope(cancellation):
+                value = supervise(specs, limits=limits, evidence_dir=args.evidence_dir,
+                                  cancellation=cancellation, retry=args.retry)
             print(json.dumps(value, default=str))
-            return 0 if value['status'] == 'succeeded' else 1
-        elif args.command in ('run', 'study', 'launch', 'run-one'):
-            if args.command in ('run', 'study'):
-                planning.publish(specs)
-            # A single coordinator handles all public launch paths and the train/eval barrier.
+            return 0 if (not cancellation.is_set() and value['status'] == 'succeeded'
+                         and value.get('evidence_complete') is True) else 1
+        elif args.command in ('run', 'launch'):
+            cancellation = Cancellation()
+            with _interrupt_scope(cancellation):
+                if args.command == 'run':
+                    planning.publish(specs)
+                reports = launch(specs, budget=Budget(args.timeout, args.memory_bytes),
+                                 cancellation=cancellation, retry=args.retry)
             value = [{'status': r.status, 'quality': r.quality, 'evidence_complete': r.evidence_complete,
                       'attempt': r.attempt, 'scientific_status': r.scientific_status,
                       'derived_status': r.derived_status,
-                      'error_type': r.error.get('type') if r.error else None}
-                     for r in launch(specs, budget=Budget(args.timeout, args.memory_bytes), retry=args.retry)]
+                      'error_type': r.error.get('type') if r.error else None} for r in reports]
             print(json.dumps(value, default=str))
-            return 0 if all(r['status'] == 'succeeded' for r in value) else 1
+            return 0 if _batch_succeeded(specs, reports, cancellation) else 1
         elif args.command == 'shared':
             value = {'data': str(args.run_root.resolve() / 'shared' / 'data'),
                      'model': str(args.run_root.resolve() / 'shared' / 'model')}

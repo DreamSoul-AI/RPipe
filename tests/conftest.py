@@ -492,6 +492,7 @@ def science_worker(monkeypatch):
     """Inline the real worker protocol, replacing only scientific phase actions."""
     import multiprocessing
     import os
+    import signal
     import subprocess
     from types import SimpleNamespace
     from rpipe.flow import stages, worker
@@ -538,7 +539,11 @@ def science_worker(monkeypatch):
     monkeypatch.setattr(stages, 'execute', execute)
     monkeypatch.setattr(stages, 'collect', collect)
     monkeypatch.setattr(worker, 'subprocess', SimpleNamespace(Popen=InlineWorker,
-        DEVNULL=subprocess.DEVNULL, STDOUT=subprocess.STDOUT))
+        DEVNULL=subprocess.DEVNULL, STDOUT=subprocess.STDOUT,
+        CREATE_NEW_PROCESS_GROUP=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)))
+    # Inline workers are not child processes and must not replace the pytest owner's handlers.
+    monkeypatch.setattr(worker, 'signal', SimpleNamespace(**{
+        **vars(signal), 'signal': lambda signum, handler: signal.getsignal(signum)}))
     return install
 
 
