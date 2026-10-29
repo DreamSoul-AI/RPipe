@@ -1,4 +1,4 @@
-更新日期：2026年10月29日。本文依据[完整架构设计](<架构设计 Architecture Design 研究流水线.md>)定义目标目录、模块职责、接口和允许依赖，全部内容维护在本文件。它是后续实现的设计依据，不表示源码已完成重组；实现差距、调用影响、工作顺序与验收状态见[开发计划](<开发计划 Development Plan 研究流水线.md>)。
+更新日期：2026年10月29日。本文依据[完整架构设计](<架构设计 Architecture Design 研究流水线.md>)维护当前目标目录、模块职责、接口和允许依赖，全部内容保留在本文件。设计约束与代码验收分别判断；已完成实施、剩余差距、调用影响和后续顺序统一见[开发计划](<开发计划 Development Plan 研究流水线.md>)。
 
 ## 目录
 
@@ -256,9 +256,9 @@ RunReport 的 rejected 表示尚未取得执行权的请求拒绝，无 attempt 
 | supervision.launch | 有序规格及依赖、批次条件、取消 → RunReport 序列 | 复用 run；普通派发不要求启用资源监管；序列不足不视为整批成功 |
 | supervision.supervise | 规格、明确资源停止线和独立证据根 → 监管报告 | 只监管所属进程；未知释放状态停止后续派发 |
 | artifact.readout.read_run/read_study | RunRef 或明确 Study 根/清单 → 正式状态与记录 | 只读，不运行、不修写 |
-| artifact.comparison.compare | 明确对象、比较条件和容差 → DifferenceReport | 缺项不算通过，不猜测历史格式 |
+| artifact.comparison.compare | 明确 RunRef、比较条件和容差 → 差异报告 | 缺项不算通过，不猜测历史格式 |
 | process.process_run/process_study | 正式结果、证据和明确范围 → 派生摘要 | 单次与整轮作用域分开；独立 Study 汇总在写派生物前经 provenance 核来源 |
-| exports.export | 明确派生材料、格式和外部目标 → 文件路径及导出观察 | 导出不改变科学状态或原始输入 |
+| exports.write_learning_curves / export_tensorboard | 正式 Study 清单及轨迹，另给 TensorBoard 目标与可选 Run 选择 → 派生路径 | 无曲线时前者返回 None 且不创建图；TensorBoard 使用新的独立目标；两者均核输入指纹，不改变科学状态或原始输入 |
 
 # 六、依赖与装配规则
 
