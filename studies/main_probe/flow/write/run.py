@@ -64,8 +64,8 @@ def run(ctx):
     row['run_comparison'] = comparison
     row['passed'] &= comparison['passed']
     report['selected_passed'] &= comparison['passed']
-    ctx.state['collected']['metrics']['probe_passed'] = report['selected_passed']
-    ctx.state['result_draft']['metrics']['probe_passed'] = report['selected_passed']
+    ctx.state['collected']['quality'] = report['selected_passed']
+    ctx.state['result_draft']['quality'] = report['selected_passed']
     save_json(cell / 'COMPARISON.json', row)
     save_json(workspace / 'COMPARISON.json', report)
     if not comparison['passed']:
