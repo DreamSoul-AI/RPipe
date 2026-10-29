@@ -22,7 +22,7 @@ RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他�
 | [开发记录 Development Record](<docs/开发记录 Development Record/>) | 日期记录，本轮文档调整与历史集成、分支保全的归属；不复制整份测试结果 |
 | [运行记录 Run Record](<docs/运行记录 Run Record/>) | 各次静态、CPU、安装及 CI 验证的实际身份、结果和缺口；原始证据在 Git 外 |
 | [文献调研 Literature Review](<docs/文献调研 Literature Review 研究流水线.md>) | 按问题比较六篇原始研究的方法、证据和限制，注明阅读深度；非穷尽系统综述，无外部优越性结论 |
-| [研究计划 Research Plan](<docs/研究计划 Research Plan 研究流水线.md>) | 唯一中文研究计划，RQ1–RQ4、全部 Study 的 E0–E4 设计与判据；main_probe E3和main_exp600步配对已通过，本机完整E4已中断交接，待新电脑准入并用新version重新执行，长程科学验收未完成 |
+| [研究计划 Research Plan](<docs/研究计划 Research Plan 研究流水线.md>) | 唯一中文研究计划，RQ1–RQ4、全部 Study 的 E0–E4 设计与判据；main_probe E3和main_exp600步配对已有固定证据，新电脑已重新准入并用新version从头执行完整E4，长程科学验收未完成 |
 
 项目演进、旧文档归并与兼容迁移从[开发记录](<docs/开发记录 Development Record/2026-10-27 文档重构与历史归属.md>)追溯，实际历史验证从[运行记录](<docs/运行记录 Run Record/2026-10-27 历史验证整理.md>)追溯。记录保留原提交、日期及运行身份。
 
@@ -162,4 +162,4 @@ python tests/run.py --core --results-root <external-test-root> --timeout-seconds
 
 当前用户已要求持续完成开发计划。研究资源由Agent按[研究计划的硬件自适应规则](<docs/研究计划 Research Plan 研究流水线.md>)自主测量与分配，不再逐次询问常规预算；科学参数和门限保持，首败停止。main_exp八格CPU准入及[600步CUDA配对](<docs/运行记录 Run Record/2026-10-30 main_exp 600步配对验证.md>)已通过，完整曲线仍待实际验收。pytest使用importlib导入，允许镜像目录中的同名测试完整收集；本机原生DLL启动条件与候选制品验证范围从[本批记录](<docs/运行记录 Run Record/2026-10-30 硬件自适应与交付准入验证.md>)读取，不推定所有机器环境相同。
 
-main_exp完整32train/32eval矩阵已按固定候选与新version启动，当前进度及最终验收从[执行记录](<docs/运行记录 Run Record/2026-10-30 main_exp完整矩阵执行.md>)追溯；运行中不记为研究完成。采用本轮结构的新课题应以当前两份设计和示例直接组织研究代码，使用新version保留来源。旧接口和旧checkpoint不作新版兼容承诺；需要复查的历史Run保留其原源码与环境，不给旧成果换身份，也不要求下游迁移。
+新电脑main_exp完整32train/32eval矩阵已按039c941及新version从头启动，当前进度及最终验收从[新电脑执行记录](<docs/运行记录 Run Record/2026-10-30 新电脑main_exp完整矩阵执行.md>)追溯；[旧电脑执行记录](<docs/运行记录 Run Record/2026-10-30 main_exp完整矩阵执行.md>)保留交接中断事实，不拼接。运行中不记为研究完成。采用本轮结构的新课题应以当前两份设计和示例直接组织研究代码，使用新version保留来源。旧接口和旧checkpoint不作新版兼容承诺；需要复查的历史Run保留其原源码与环境，不给旧成果换身份，也不要求下游迁移。
