@@ -22,7 +22,7 @@ RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他�
 | [开发记录 Development Record](<docs/开发记录 Development Record/>) | 日期记录，本轮文档调整与历史集成、分支保全的归属；不复制整份测试结果 |
 | [运行记录 Run Record](<docs/运行记录 Run Record/>) | 各次静态、CPU、安装及 CI 验证的实际身份、结果和缺口；原始证据在 Git 外 |
 | [文献调研 Literature Review](<docs/文献调研 Literature Review 研究流水线.md>) | 按问题比较六篇原始研究的方法、证据和限制，注明阅读深度；非穷尽系统综述，无外部优越性结论 |
-| [研究计划 Research Plan](<docs/研究计划 Research Plan 研究流水线.md>) | 唯一中文研究计划，RQ1–RQ4、全部 Study 的 E0–E4 设计与判据；main_probe E3和main_exp600步配对已通过，按硬件实测预算执行完整E4，长程科学验收未完成 |
+| [研究计划 Research Plan](<docs/研究计划 Research Plan 研究流水线.md>) | 唯一中文研究计划，RQ1–RQ4、全部 Study 的 E0–E4 设计与判据；main_probe E3和main_exp600步配对已通过，本机完整E4已中断交接，待新电脑准入并用新version重新执行，长程科学验收未完成 |
 
 项目演进、旧文档归并与兼容迁移从[开发记录](<docs/开发记录 Development Record/2026-10-27 文档重构与历史归属.md>)追溯，实际历史验证从[运行记录](<docs/运行记录 Run Record/2026-10-27 历史验证整理.md>)追溯。记录保留原提交、日期及运行身份。
 
@@ -119,7 +119,7 @@ main_probe参考侧训练、周期评测和自身best独立评测也使用同一
 
 Windows 可另选 flow.supervision.supervise / rpipe supervise。CLI 必须显式提供 --run-root、--evidence-dir、--run-seconds、--batch-seconds、--rss-bytes、--output-bytes，另可设置 --poll-seconds 与 --cleanup-seconds。匿名 Job 监管本批协调者、worker 和后代，入组后才放行，首败、质量 False、证据不全、观察失败或超限即停后续派发。
 
-RSS 与输出是采样停止线，可能漏峰或超调，**不是硬内存或磁盘配额**。须使用专用外部运行根与新建独立证据根，保留原 Run owner/unknown 协议，其他平台拒绝此入口。正式资源校准和研究矩阵仍待完成，不能把研究计划提案当已批准预算。详细计量与清理合同见架构第四章。
+RSS 与输出是采样停止线，可能漏峰或超调，**不是硬内存或磁盘配额**。须使用专用外部运行根与新建独立证据根，保留原 Run owner/unknown 协议，其他平台拒绝此入口。用户已授权按本机硬件与准入实测自主设置常规预算；换机须重新核环境、硬件和停止线，完整研究矩阵仍待验收。详细计量与清理合同见架构第四章；本次停止本机实验、推送与换机重新执行的边界见[交接记录](<docs/开发记录 Development Record/2026-10-30 跨电脑交接.md>)。
 
 ## 验证与证据
 
