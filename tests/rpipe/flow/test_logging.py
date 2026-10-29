@@ -1,6 +1,7 @@
 """Owned CPU child output is untrusted; diagnostics retain actual producers."""
 import importlib
 import json
+import os
 import subprocess
 import sys
 
@@ -25,7 +26,7 @@ def test_noisy_worker_is_not_persisted_and_events_keep_child_identity(
     children = []
     gate = tmp_path / 'parent-policy-recorded'
     script = '''
-import sys
+import os, sys
 from pathlib import Path
 from rpipe.flow.worker import worker
 import rpipe.flow.stages as stages
@@ -43,6 +44,7 @@ def execute(ctx):
 def collect(ctx): return {'metrics': {'value': 3.0}}
 stages.prepare, stages.execute, stages.collect = prepare, execute, collect
 # START_GATE
+Path(sys.argv[4]).write_text(str(os.getpid()), encoding='utf-8')
 raise SystemExit(worker(Path(sys.argv[1]), Path(sys.argv[2])))
 '''
     if held_parent_log:
@@ -70,7 +72,8 @@ while not Path(sys.argv[3]).exists():
         def __init__(self, args, **kwargs):
             assert kwargs['stdout'] == subprocess.DEVNULL
             assert kwargs['stderr'] == subprocess.STDOUT
-            super().__init__([sys.executable, '-B', '-c', script, *args[-2:], str(gate)], **kwargs)
+            super().__init__([sys.executable, '-B', '-c', script, *args[-2:], str(gate),
+                              str(tmp_path / 'scientific-pid')], **kwargs)
             children.append(self)
     monkeypatch.setattr(module.subprocess, 'Popen', TinyWorker)
     spec = plan(source_study, run_root=run_root)[0]
@@ -85,7 +88,10 @@ while not Path(sys.argv[3]).exists():
     assert 'NEVER_PERSIST_RAW_WORKER_SECRET' not in text
     rows = [json.loads(line) for path in paths for line in path.read_text(encoding='utf-8').splitlines()]
     assert any(row['event'] == 'logging.unstructured_record' for row in rows)
-    child_rows = [row for row in rows if row['pid'] == children[0].pid]
+    worker_pid = int((tmp_path / 'scientific-pid').read_text(encoding='utf-8'))
+    assert worker_pid > 0 and worker_pid != os.getpid()
+    assert worker_pid == children[0].pid or (os.name == 'nt' and sys.prefix != sys.base_prefix)
+    child_rows = [row for row in rows if row['pid'] == worker_pid]
     assert child_rows and all(row['process_name'] == 'scientific-worker' for row in child_rows)
     assert all(row['task_id'] == spec.id for row in rows)
     assert len({row['runtime_id'] for row in rows}) == 1
@@ -94,12 +100,12 @@ while not Path(sys.argv[3]).exists():
     if worker_fails is True:
         current = [json.loads(line) for line in (spec.assets_dir / 'logs/events.jsonl').read_text(encoding='utf-8').splitlines()]
         failures = [row for row in current if row['event'] == 'task.failed']
-        assert len(failures) == 1 and failures[0]['pid'] == children[0].pid
+        assert len(failures) == 1 and failures[0]['pid'] == worker_pid
         assert 'PRIVATE_WORKER_EXCEPTION' not in text
     if worker_fails == 'close':
         current = [json.loads(line) for line in (spec.assets_dir / 'logs/events.jsonl').read_text(encoding='utf-8').splitlines()]
         cleanup = [row for row in current if row['event'] == 'operation.failed' and row['operation'] == 'cleanup']
-        assert len(cleanup) == 1 and cleanup[0]['pid'] == children[0].pid
+        assert len(cleanup) == 1 and cleanup[0]['pid'] == worker_pid
         assert cleanup[0]['exception_type'] == 'RuntimeError' and 'close' in cleanup[0]['traceback']
         assert 'PRIVATE_WORKER_CLEANUP' not in text
 
