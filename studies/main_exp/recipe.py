@@ -159,6 +159,16 @@ def preflight(data_root: Path | str, output_dir: Path | str, *, steps: int = 200
     A new output directory is required so prior evidence cannot be overwritten.
     This probe verifies a prefix, never claims historical long-curve reproduction.
     """
+    pairs = ([(d, m) for d in DATA_NAMES for m in MODEL_NAMES]
+             if combinations is None else list(combinations))
+    if not pairs or any(not isinstance(pair, (tuple, list)) or len(pair) != 2
+                        or pair[0] not in DATA_NAMES or pair[1] not in MODEL_NAMES
+                        for pair in pairs):
+        raise ValueError('preflight combinations must select supported data/model pairs')
+    pairs = [tuple(pair) for pair in pairs]
+    if len(set(pairs)) != len(pairs):
+        raise ValueError('preflight combinations must be unique')
+
     from rpipe.structure.artifact.io import atomic_write_text
 
     bootstrap()
@@ -182,7 +192,6 @@ def preflight(data_root: Path | str, output_dir: Path | str, *, steps: int = 200
     system_config = SystemConfig.from_mapping({'device': device, 'deterministic': True,
                                               'cudnn_benchmark': False, 'cudnn_deterministic': True,
                                               'cudnn_allow_tf32': False, 'matmul_allow_tf32': False})
-    pairs = list(combinations or [(d, m) for d in DATA_NAMES for m in MODEL_NAMES])
     result: dict[str, Any] = {'historical_commit': COMMIT, 'current_commit': subprocess.check_output(
         ['git', '-c', 'safe.directory=' + str(REPO), 'rev-parse', 'HEAD'], cwd=REPO, text=True).strip(),
         'steps': steps, 'sampler_steps': HORIZON, 'seed': seed, 'device': device,

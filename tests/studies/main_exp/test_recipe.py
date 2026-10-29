@@ -170,6 +170,47 @@ def assert_released(state):
     assert state.peer.read_bytes() == b'previous peer evidence'
 
 
+@pytest.mark.parametrize('selection', [
+    [], iter(()), [('MNIST', 'linear'), ('MNIST', 'linear')],
+    [('unknown', 'linear')], [('MNIST', 'unknown')], ['MNIST'], [('MNIST',)],
+], ids=['empty-list', 'empty-iterator', 'duplicate', 'unknown-data',
+        'unknown-model', 'string-pair', 'short-pair'])
+def test_preflight_rejects_invalid_selection_before_scientific_setup(
+        preflight_run, monkeypatch, selection):
+    state = preflight_run
+
+    def forbidden():
+        raise AssertionError('scientific setup started before selection admission')
+
+    monkeypatch.setattr(state.recipe, 'bootstrap', forbidden)
+    with pytest.raises(ValueError, match='combination'):
+        state.recipe.preflight(state.output.parent / 'data', state.output,
+                               device='cpu', combinations=selection)
+    assert not state.output.exists()
+    assert state.calls == []
+    assert state.peer.read_bytes() == b'previous peer evidence'
+
+
+def test_preflight_consumes_explicit_generator_once(preflight_run):
+    state = preflight_run
+    state.combinations = (pair for pair in [('MNIST', 'linear')])
+    report = state.run()
+    assert [(row['data'], row['model']) for row in report['runs']] == [('MNIST', 'linear')]
+    assert_released(state)
+
+
+def test_preflight_omitted_selection_uses_declared_matrix(preflight_run, monkeypatch):
+    state = preflight_run
+    monkeypatch.setattr(state.recipe, 'DATA_NAMES', ('MNIST', 'CIFAR10'))
+    monkeypatch.setattr(state.recipe, 'MODEL_NAMES', ('linear',))
+    state.combinations = None
+    report = state.run()
+    assert [(row['data'], row['model']) for row in report['runs']] == [
+        ('MNIST', 'linear'), ('CIFAR10', 'linear')]
+    assert len(state.all_resources) == 6
+    assert all(resource.closed == 1 for resource in state.all_resources)
+
+
 @pytest.mark.parametrize('stage', [
     'original_datasets', 'original_writer', 'original_train', 'original_test',
     'original_save', 'original_reset', 'native_system', 'native_logger',
