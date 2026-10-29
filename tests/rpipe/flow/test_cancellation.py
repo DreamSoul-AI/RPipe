@@ -129,7 +129,8 @@ def test_real_cli_sigint_reaches_child_stops_dispatch_and_restores_handler(
     helper = Path(__file__).resolve().parents[2] / '_data/cli_cancel_worker.py'
     evidence = tmp_path / 'cli-cancel.json'
     environment = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
-    environment['PYTHONPATH'] = str(Path(__file__).resolve().parents[3] / 'src')
+    environment['PYTHONPATH'] = (str(Path(__file__).resolve().parents[3] / 'src')
+                                 + os.pathsep + environment.get('PYTHONPATH', ''))
     process = subprocess.run([sys.executable, '-B', str(helper), str(source_study), str(run_root),
                               str(specs[0].assets_dir / 'ready.json'), str(evidence), command],
                              env=environment, capture_output=True, text=True,
