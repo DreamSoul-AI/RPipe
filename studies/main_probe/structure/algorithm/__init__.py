@@ -23,17 +23,18 @@ def register(ctx, pair):
         return engine.native_data(workspace, pair[0], ctx.assets_dir)
 
     class PairedAlgorithm(Algorithm):
-        def __init__(self, config):
-            super().__init__(config)
+        def __init__(self, config, *, checkpoint_dir, train_checkpoint_dir=None):
+            super().__init__(config, checkpoint_dir=checkpoint_dir, train_checkpoint_dir=train_checkpoint_dir)
             self.workspace = workspace
             self.report = None
             self.cleanup_errors = ()
             self.initial_rng = engine.rng(device)
 
-        def run(self, data, model, system, tracker):
+        def compute(self, data, model, system, tracker, cancel_check):
             try:
                 self.report = engine.run_pair(workspace, device, pair,
-                    (data, model, system, tracker, self.initial_rng))
+                    (data, model, system, tracker, self.initial_rng), cancel_check=cancel_check,
+                    checkpoint_dir=self.checkpoint_dir)
             except BaseException as error:
                 self.cleanup_errors = getattr(error, 'cleanup_errors', ())
                 raise

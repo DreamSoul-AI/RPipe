@@ -2,6 +2,7 @@
 
 import ctypes
 import os
+from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -14,6 +15,36 @@ pytestmark = [pytest.mark.content, pytest.mark.p1, pytest.mark.structure_layer,
               pytest.mark.module_system, pytest.mark.cost(cost_class='c1'),
               pytest.mark.result_type('categorical', detail='summary')]
 windows = pytest.mark.skipif(os.name != 'nt', reason='Windows Job contract')
+
+
+@pytest.mark.unit
+def test_file_errors_reject_unsupported_platform(monkeypatch):
+    monkeypatch.setattr(resources, 'os', SimpleNamespace(name='posix'))
+    with pytest.raises(OSError, match='require Windows'):
+        resources.WindowsFileErrors()
+
+
+@windows
+@pytest.mark.unit
+def test_file_errors_use_crt_prototypes_and_do_not_return_stale_failed_reads(monkeypatch):
+    state = SimpleNamespace(clear_status=0, read_status=0)
+    def clear(value):
+        assert value == 0
+        return state.clear_status
+    def read(target):
+        target._obj.value = 32
+        return state.read_status
+    crt = SimpleNamespace(_set_doserrno=clear, _get_doserrno=read)
+    def load(name):
+        assert name == 'ucrtbase'
+        return crt
+    monkeypatch.setattr(resources.ctypes, 'CDLL', load)
+    observer = resources.WindowsFileErrors()
+    assert clear.argtypes == [ctypes.c_ulong] and clear.restype is ctypes.c_int
+    assert read.argtypes == [ctypes.POINTER(ctypes.c_ulong)] and read.restype is ctypes.c_int
+    assert observer.clear() and observer.code() == 32
+    state.clear_status = state.read_status = 1
+    assert observer.clear() is False and observer.code() is None
 
 
 @pytest.mark.unit
@@ -102,6 +133,27 @@ def test_output_broken_file_link_is_observer_failure(tmp_path):
     (tmp_path / 'broken').symlink_to(tmp_path / 'absent')
     with pytest.raises(FileNotFoundError):
         resources.output_snapshot([tmp_path])
+
+
+@pytest.mark.unit
+def test_output_file_reference_moved_between_lstat_and_stat_is_observed_next_sample(tmp_path, monkeypatch):
+    output, staging = tmp_path / 'output', tmp_path / 'output/.building'
+    staging.mkdir(parents=True)
+    raw = tmp_path / 'raw-input'
+    raw.write_bytes(b'immutable raw input')
+    link = staging / 'reference'
+    link.symlink_to(raw)
+    original_stat = Path.stat
+    moved = []
+    def publish(path, *args, **kwargs):
+        if path == link and kwargs.get('follow_symlinks', True) and not moved:
+            staging.rename(output / 'published')
+            moved.append(True)
+        return original_stat(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'stat', publish)
+    assert resources.output_snapshot([output]) == {}
+    assert moved and resources.output_growth([output], {}) == len(raw.read_bytes())
+    assert (output / 'published/reference').read_bytes() == raw.read_bytes()
 
 
 @pytest.mark.unit

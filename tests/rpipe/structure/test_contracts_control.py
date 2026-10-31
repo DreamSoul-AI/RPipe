@@ -1,190 +1,136 @@
+"""Resolved conditions and persisted Run configuration retain scientific meaning."""
+
+import copy
+import json
+
 import pytest
 
-from rpipe.structure.contracts import (
-    ExperimentConfig,
-    control_from_config,
-    control_to_config,
-    run_config_from_merge,
-    validate_run_config,
+from rpipe.structure.control import (
+    ContractError, RunConfig, compute_run_id, resolve_control, validate_control,
 )
 
-pytestmark = [
-    pytest.mark.unit,
-    pytest.mark.content,
-    pytest.mark.p1,
-    pytest.mark.structure_layer,
-    pytest.mark.module_control,
-    pytest.mark.cost(cost_class='c1'),
-    pytest.mark.result_type('categorical', detail='summary'),
-]
+
+pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
+              pytest.mark.structure_layer, pytest.mark.module_control,
+              pytest.mark.cost(cost_class='c1'),
+              pytest.mark.result_type('categorical', detail='summary')]
 
 
-def test_control_from_config_hashes_id_and_layers():
-    cfg = {
-        'seed': 0,
-        'experiment': 'mnist_linear',
-        'data': {'name': 'MNIST'},
-        'model': {'name': 'linear'},
-        'algorithm': {'mode': 'train'},
-        'system': {'device': 'cpu'},
-    }
-    control = control_from_config(cfg)
-    assert control.id
-    assert len(control.id) == 16
-    assert control.seed == 0
-    assert control.data['name'] == 'MNIST'
-    assert control.to_dict()['model']['name'] == 'linear'
-    assert control.to_dict()['id'] == control.id
+def _config():
+    return {'seed': 0, 'experiment': 'toy-linear',
+            'data': {'name': 'Toy', 'source': 'stub'},
+            'model': {'name': 'linear'}, 'algorithm': {'mode': 'train'},
+            'system': {'device': 'cpu'}}
 
 
-def test_same_content_same_id_different_content_different_id():
-    a = control_from_config({'seed': 0, 'data': {'name': 'MNIST'}})
-    b = control_from_config({'seed': 0, 'data': {'name': 'MNIST'}})
-    c = control_from_config({'seed': 1, 'data': {'name': 'MNIST'}})
-    assert a.id == b.id
-    assert a.id != c.id
+def test_resolved_control_contains_four_layer_conditions_and_content_identity():
+    config = _config()
+    control = resolve_control(config)
+    validate_control(control)
+    assert control.seed == 0 and control.experiment == 'toy-linear'
+    assert control.data == config['data']
+    assert control.model == config['model']
+    assert control.algorithm == config['algorithm']
+    assert control.system == config['system']
+    assert control.id == compute_run_id(control.to_dict())
 
 
-def test_run_config_from_merge_patches_experiment_base():
-    base = ExperimentConfig.from_mapping(
-        {
-            'experiment': 'mnist_linear',
-            'data': {'name': 'MNIST', 'source': 'torch'},
-            'algorithm': {'mode': 'train'},
-        }
-    )
-    run = run_config_from_merge(base, {'seed': 0, 'data': {'path': '/data/mnist'}})
-    assert run.seed == 0
-    assert run.experiment == 'mnist_linear'
-    assert run.data.name == 'MNIST'
-    assert run.data.source == 'torch'
-    assert run.data.path == '/data/mnist'
-    assert run.id
-    validate_run_config(run)
+def test_equal_conditions_share_identity_and_changed_scientific_condition_does_not():
+    config = _config()
+    first = resolve_control(config)
+    same = resolve_control(copy.deepcopy(config))
+    changed = resolve_control(config, {'model': {'name': 'mlp'}})
+    assert first.id == same.id and changed.id != first.id
 
 
-def test_control_to_config_roundtrip():
-    control = control_from_config(
-        {
-            'seed': 2,
-            'data': {'name': 'CIFAR'},
-            'algorithm': {'mode': 'eval'},
-        }
-    )
-    mapping = control_to_config(control)
-    again = control_from_config(mapping)
-    assert again.id == control.id
-    assert again.seed == 2
-    assert again.algorithm['mode'] == 'eval'
+def test_resolved_conditions_survive_json_and_run_config_roundtrip():
+    config = {**_config(), 'seed': 2, 'description': 'one repeat', 'version': 'trial-1'}
+    control = resolve_control(config)
+    saved = json.loads(json.dumps(control.to_dict(), allow_nan=False))
+    run = RunConfig.from_mapping(saved)
+    again = resolve_control(run.to_mapping())
+    assert run.id == again.id == control.id
+    assert again.to_dict() == saved
 
 
-def test_legacy_slug_ignored_for_id():
-    a = control_from_config({'slug': 'seed_0', 'seed': 0, 'data': {'name': 'X'}})
-    b = control_from_config({'seed': 0, 'data': {'name': 'X'}})
-    assert a.id == b.id
+def test_nested_overrides_retain_unmodified_conditions_without_mutating_input():
+    base = _config()
+    base['data']['config'] = {'batch_size': 2, 'shape': [1, 4, 4]}
+    base['algorithm']['config'] = {'lr': .1, 'optimizer': 'SGD'}
+    factors = {'data.config.batch_size': 4, 'algorithm': {'config': {'lr': .2}}}
+    before_base, before_factors = copy.deepcopy(base), copy.deepcopy(factors)
+    control = resolve_control(base, factors, seed=7)
+    assert control.data['config'] == {'batch_size': 4, 'shape': [1, 4, 4]}
+    assert control.algorithm['config'] == {'lr': .2, 'optimizer': 'SGD'}
+    assert control.seed == 7
+    assert base == before_base and factors == before_factors
 
 
-def test_description_ignored_tags_affect_run_id():
-    a = control_from_config(
-        {'seed': 0, 'data': {'name': 'X'}, 'description': 'one', 'tags': ['baseline']}
-    )
-    b = control_from_config(
-        {'seed': 0, 'data': {'name': 'X'}, 'description': 'two', 'tags': ['baseline']}
-    )
-    c = control_from_config(
-        {'seed': 0, 'data': {'name': 'X'}, 'description': 'one', 'tags': ['smoke']}
-    )
-    assert a.id == b.id  # description excluded from hash
-    assert a.id != c.id  # tags included in hash
-    assert a.to_dict()['tags'] == ['baseline']
-    assert c.to_dict()['tags'] == ['smoke']
+def test_description_is_human_metadata_but_tags_participate_in_identity():
+    base = {**_config(), 'description': 'first note', 'tags': ['baseline']}
+    first = resolve_control(base)
+    described = resolve_control(base, {'description': 'second note'})
+    tagged = resolve_control(base, {'tags': ['comparison']})
+    assert first.id == described.id and first.id != tagged.id
+    assert described.to_dict()['description'] == 'second note'
 
 
-def test_omitted_version_preserves_existing_run_id():
-    control = control_from_config({'seed': 0, 'data': {'name': 'MNIST'}})
-    # Existing content identity, before adding any version declaration.
-    assert control.id == '96a1993415ec5eae'
-    assert 'version' not in control_to_config(control)
+def test_omitted_version_stays_omitted_through_roundtrip():
+    control = resolve_control(_config())
+    restored = RunConfig.from_mapping(json.loads(json.dumps(control.to_dict())))
+    assert 'version' not in restored.to_mapping()
+    assert restored.id == control.id
 
 
-@pytest.mark.parametrize('version', [7, 'repeat-1', '2026-10-02T10:00:00+08:00'])
-def test_version_same_value_reuses_id_new_value_changes_id(version):
-    config = {'seed': 0, 'data': {'name': 'MNIST'}, 'version': version}
-    first = control_from_config(config)
-    same = control_from_config(dict(config))
-    different = control_from_config({**config, 'version': 'another-repeat'})
-    assert first.id == same.id
-    assert first.id != different.id
-    assert control_to_config(first)['version'] == version
+@pytest.mark.parametrize('version', [7, 'repeat-1', '2026-10-29T10:00:00+08:00'])
+def test_declared_version_survives_serialization_and_distinguishes_repeats(version):
+    config = {**_config(), 'version': version}
+    first = resolve_control(config)
+    same = resolve_control(json.loads(json.dumps(config)))
+    different = resolve_control(config, {'version': 'another-repeat'})
+    assert first.id == same.id and different.id != first.id
+    assert RunConfig.from_mapping(first.to_dict()).to_mapping()['version'] == version
 
 
-@pytest.mark.parametrize(
-    ('patch', 'expected_version'),
-    [({}, 'base'), ({'version': 'repeat'}, 'repeat')],
-    ids=['inherit-base', 'override-base'],
-)
-def test_version_merge_and_roundtrip_preserve_value_and_id(patch, expected_version):
-    base = ExperimentConfig.from_mapping({'version': 'base', 'data': {'name': 'MNIST'}})
-    run = run_config_from_merge(base, {'seed': 0, **patch})
-    mapping = run.to_mapping()
-    # Merge recomputes the ID instead of trusting a serialized id field.
-    again = run_config_from_merge(mapping)
-    assert base.to_mapping()['version'] == 'base'
-    assert mapping['version'] == expected_version
-    assert again.to_mapping() == mapping
+@pytest.mark.parametrize('factors,version', [({}, 'base'), ({'version': 'repeat'}, 'repeat')])
+def test_version_override_recomputes_identity_instead_of_trusting_previous_id(factors, version):
+    base = resolve_control({**_config(), 'version': 'base'}).to_dict()
+    before = copy.deepcopy(base)
+    control = resolve_control(base, factors)
+    assert base == before
+    assert control.to_dict()['version'] == version
+    assert control.id == compute_run_id(control.to_dict())
+    if factors:
+        assert control.id != base['id']
 
 
-@pytest.mark.parametrize('kind,identifier', [('experiment', None), ('run', ''), ('run', 'chosen')])
-def test_root_mapping_preserves_layer_calls_extras_identity_and_id_position(kind, identifier):
-    from rpipe.structure.contracts import RunConfig
-    calls = []
-    class Layer:
-        def __init__(self, label):
-            self.label = label
-        def to_mapping(self):
-            calls.append(self.label)
-            return {'label': self.label}
-    token = object()
-    tags = ('x',)
-    options = dict(seed=0, experiment='', description='', tags=tags,
-                   extras={'seed': None, 'data': token, 'id': 'extra', 'tail': token},
-                   **{name: Layer(name) for name in ('data', 'model', 'algorithm', 'system')})
-    value = ExperimentConfig(**options) if kind == 'experiment' else RunConfig(id=identifier, **options)
-    result = value.to_mapping()
-    assert calls == ['data', 'model', 'algorithm', 'system']
-    keys = ['seed', 'experiment', 'description', 'tags', 'data', 'model', 'algorithm', 'system']
-    assert list(result) == (['id', *keys, 'tail'] if identifier else [*keys, 'id', 'tail'])
-    assert result['id'] == 'extra' and result['seed'] is None
-    assert result['data'] is token and result['tail'] is token
-    assert result['tags'] == ['x'] and result['tags'] is not tags
+def test_persisted_id_cannot_disagree_with_effective_conditions():
+    saved = resolve_control(_config()).to_dict()
+    saved['data']['name'] = 'different-data'
+    with pytest.raises(ContractError, match='id'):
+        RunConfig.from_mapping(saved)
 
 
-@pytest.mark.parametrize('kind', ['experiment', 'run'])
-def test_root_mapping_layer_failure_preserves_original_exception_and_call_order(kind):
-    from rpipe.structure.contracts import RunConfig
-    failure, calls = RuntimeError('model mapping refused'), []
-    class Layer:
-        def __init__(self, label):
-            self.label = label
-        def to_mapping(self):
-            calls.append(self.label)
-            if self.label == 'model':
-                raise failure
-            return {}
-    cls = ExperimentConfig if kind == 'experiment' else RunConfig
-    value = cls(**{name: Layer(name) for name in ('data', 'model', 'algorithm', 'system')})
-    with pytest.raises(RuntimeError) as caught:
-        value.to_mapping()
-    assert caught.value is failure and calls == ['data', 'model']
+def test_removed_slug_field_is_rejected_instead_of_ignored():
+    with pytest.raises(ContractError, match='slug'):
+        resolve_control({**_config(), 'slug': 'old-run-name'})
 
 
-@pytest.mark.parametrize('kind', ['experiment', 'run'])
-def test_root_mapping_does_not_expand_subclass_default_fields(kind):
-    from dataclasses import dataclass
-    from rpipe.structure.contracts import RunConfig
-    base = ExperimentConfig if kind == 'experiment' else RunConfig
-    @dataclass
-    class Extended(base):
-        future: str = 'default'
-    value = Extended(seed=0)
-    assert value.future == 'default' and 'future' not in value.to_mapping()
+def test_empty_optional_fields_and_zero_values_survive_configuration_roundtrip():
+    config = {**_config(), 'experiment': '', 'description': '',
+              'algorithm': {'mode': 'train', 'config': {'lr': 0, 'enabled': False}},
+              'data': {'name': 'Toy', 'path': '', 'config': {}}}
+    saved = resolve_control(config).to_dict()
+    restored = RunConfig.from_mapping(json.loads(json.dumps(saved))).to_mapping()
+    assert restored == saved
+    assert restored['experiment'] == restored['description'] == restored['data']['path'] == ''
+    assert restored['algorithm']['config'] == {'lr': 0, 'enabled': False}
+
+
+@pytest.mark.parametrize('value', [object(), {1, 2}, float('nan'), float('inf')],
+                         ids=['runtime-object', 'set', 'nan', 'infinity'])
+def test_non_json_or_nonfinite_conditions_are_explicitly_rejected(value):
+    config = _config()
+    config['algorithm']['config'] = {'custom': value}
+    with pytest.raises(ContractError):
+        resolve_control(config)

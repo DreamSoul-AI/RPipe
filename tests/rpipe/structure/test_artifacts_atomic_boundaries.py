@@ -5,7 +5,7 @@ import threading
 
 import pytest
 
-from rpipe.structure.artifacts import atomic_write_text
+from rpipe.structure.artifact.io import atomic_write_text
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.structure_layer, pytest.mark.module_artifact,
@@ -15,7 +15,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
 
 @pytest.mark.parametrize('clock', ['real', 'frozen'])
 def test_atomic_writers_publish_complete_payloads_and_keep_peer_stage(tmp_path, monkeypatch, clock):
-    import rpipe.structure.artifacts as atomic
+    import rpipe.structure.artifact.io as atomic
 
     if clock == 'frozen':
         from types import SimpleNamespace

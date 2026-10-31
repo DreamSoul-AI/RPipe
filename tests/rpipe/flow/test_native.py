@@ -7,9 +7,10 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
               pytest.mark.result_type('categorical', detail='summary')]
 
 
-def test_injected_native_prepare_before_runs_once_with_system_ready(tensor_study, run_root):
-    from rpipe.api import plan, run
-    from rpipe.flow.native import NativeRun
+def test_native_prepare_before_runs_once_with_system_ready(tensor_study, run_root):
+    from rpipe.structure.make import plan
+    from rpipe.flow.run import run
+    from rpipe.flow import stages
 
     with (tensor_study / 'study.yaml').open('a', encoding='utf-8') as stream:
         stream.write('flow: {study_phases: true}\n')
@@ -25,16 +26,17 @@ def run(ctx):
     (flow / 'summarize.py').write_text('''def run(ctx):
     ctx.state['result_draft']['before_count'] = ctx.state['before_count']
 ''', encoding='utf-8')
-    outcome = run(plan(tensor_study, run_root=run_root)[0], payload=NativeRun())
+    outcome = run(plan(tensor_study, run_root=run_root)[0])
     assert outcome.status == 'succeeded', outcome.error
     assert outcome.result['before_count'] == 1
 
 
-def test_sequential_injected_native_studies_do_not_share_recipe_builders(
+def test_sequential_native_studies_do_not_share_recipe_builders(
         tensor_study, run_root, monkeypatch):
-    from rpipe.api import plan, run
+    from rpipe.structure.make import plan
+    from rpipe.flow.run import run
     from rpipe.structure.data.factory import DataRegistry
-    from rpipe.flow.native import NativeRun
+    from rpipe.flow import stages
 
     monkeypatch.setattr(DataRegistry, '_items', dict(DataRegistry._items))
     name = 'RunScopedFixture'
@@ -42,12 +44,12 @@ def test_sequential_injected_native_studies_do_not_share_recipe_builders(
         path = tensor_study / filename
         path.write_text(path.read_text().replace('TinyCPU', name), encoding='utf-8')
     assert DataRegistry.get(name, 'fixture') is None
-    assert run(plan(tensor_study, run_root=run_root)[0], payload=NativeRun()).status == 'succeeded'
+    assert run(plan(tensor_study, run_root=run_root)[0]).status == 'succeeded'
     other = tensor_study.parent / 'other'
     other.mkdir()
     (other / 'study.yaml').write_text('study: no_recipe\nseeds: [7]\n', encoding='utf-8')
     (other / 'experiment_config.yaml').write_bytes((tensor_study / 'experiment_config.yaml').read_bytes())
-    outcome = run(plan(other, run_root=run_root)[0], payload=NativeRun())
+    outcome = run(plan(other, run_root=run_root)[0])
     assert outcome.status == 'failed'
     assert outcome.error['type'] == 'ValueError'
     assert outcome.error['message'] == '[redacted]'
@@ -58,11 +60,11 @@ def test_sequential_injected_native_studies_do_not_share_recipe_builders(
 def test_native_profile_output_is_external_and_explicit_stats_resolve_from_source(
         source_study, run_root, file_bytes, monkeypatch, explicit_stats):
     import yaml
-    from rpipe.api import plan
-    from rpipe.structure.data.factory import Data, DataFactory
-    from rpipe.flow.native import NativeRun
-    from rpipe.structure.contracts import Cancellation
-    from rpipe.structure.execution import RunContext
+    from rpipe.structure.make import plan
+    from rpipe.structure.data.factory import Data
+    from rpipe.flow import stages
+    from rpipe.flow.context import Cancellation
+    from rpipe.flow.context import ScienceContext
 
     path = source_study / 'experiment_config.yaml'
     config = yaml.safe_load(path.read_text())
@@ -81,12 +83,13 @@ def test_native_profile_output_is_external_and_explicit_stats_resolve_from_sourc
         return Data(name='MNIST', source='fixture', loaders={},
                     meta={'data_size': [1, 28, 28], 'target_size': 10})
 
-    monkeypatch.setattr(DataFactory, 'build', build)
-    payload = NativeRun()
-    from rpipe.structure.artifacts import ArtifactLayout
-    ctx = RunContext(spec=spec, cancellation=Cancellation(), layout=ArtifactLayout(spec))
+    monkeypatch.setattr('rpipe.structure.data.factory.build_data', build)
+    from rpipe.structure.artifact.io import ArtifactLayout
+    ctx = ScienceContext(spec=spec, cancel_check=lambda: None, layout=ArtifactLayout(spec))
+    ctx.state['attempt'] = 'a' * 32
+    stages.configure_science(ctx, logging_context={}, request_id=None)
     try:
-        payload.prepare(ctx)
+        stages.prepare(ctx)
         data_config, assets, profile = calls[0]
         assert assets == run_root / 'shared' / 'data'
         assert profile == spec.study_root / 'shared' / 'data' / 'mnist' / 'stats.yaml'
@@ -94,4 +97,4 @@ def test_native_profile_output_is_external_and_explicit_stats_resolve_from_sourc
             assert data_config.config['stats_path'] == str(stats)
         assert file_bytes(source_study) == before
     finally:
-        payload.close(ctx)
+        stages.close_science(ctx)

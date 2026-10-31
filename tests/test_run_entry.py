@@ -31,7 +31,7 @@ def test_captured_launcher_keeps_child_environment_output_and_exit(tmp_path, exi
     (module / '__init__.py').write_text('', encoding='utf-8')
     (module / '__main__.py').write_text(
         "import json,os,sys\n"
-        "print('launcher-child='+json.dumps({'token':os.environ.get('RPIPE_ENTRY_PROBE'), 'args':sys.argv[1:]}),flush=True)\n"
+        "print('launcher-child='+json.dumps({'token':os.environ.get('RPIPE_ENTRY_PROBE'), 'args':sys.argv[1:], 'prefix':sys.prefix, 'owned':os.environ.get('RPIPE_TEST_OWNER_PID')==str(os.getppid())}),flush=True)\n"
         "print('launcher-child-stderr',file=sys.stderr,flush=True)\n"
         "from pathlib import Path\n"
         "p=Path(os.environ['RPIPE_TEST_RUN_DIR'])/'manifest.json'\n"
@@ -49,6 +49,7 @@ def test_captured_launcher_keeps_child_environment_output_and_exit(tmp_path, exi
     line = next(line for line in result.stdout.splitlines() if line.startswith('launcher-child='))
     observed = json.loads(line.removeprefix('launcher-child='))
     assert observed['token'] == 'known-test-value'
+    assert observed['owned'] and observed['prefix'] == sys.prefix
     assert observed['args'] == ['-m', '(unit and not slow and not external and not gpu)',
                                 '--cost-class', 'c1', '--cost-class', 'c2', '--tb=no']
     assert 'launcher-child-stderr' in result.stderr

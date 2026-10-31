@@ -39,7 +39,7 @@ def main(recipe, argv):
               'complete': False, 'status': 'running', 'expected_groups': 4,
               'checkpoint_local_only': str(args.checkpoint.resolve()), 'groups': [],
               'scope': 'same checkpoint/full test; FP32 supported gate, TF32 diagnostic not a replacement baseline'}
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
     original = recipe.source_manifest()
     report['source_hashes'] = original
     for tf32 in (False, True):
@@ -79,19 +79,19 @@ def main(recipe, argv):
 
 
 def _worker(recipe, args):
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
 
     import torch
-    from rpipe.structure.contracts import AlgorithmConfig
+    from rpipe.structure.control import AlgorithmConfig
     from rpipe.structure.algorithm.evaluation import EvalAlgorithm
     from rpipe.structure.algorithm.metrics import MetricBundle
     from rpipe.structure.algorithm.tracker import AlgorithmTracker
-    from rpipe.structure.contracts import DataConfig
-    from rpipe.structure.data.factory import DataFactory
-    from rpipe.structure.contracts import ModelConfig
-    from rpipe.structure.model.factory import ModelFactory
-    from rpipe.structure.contracts import SystemConfig
-    from rpipe.structure.system.factory import SystemFactory
+    from rpipe.structure.control import DataConfig
+    from rpipe.structure.data.factory import build_data
+    from rpipe.structure.control import ModelConfig
+    from rpipe.structure.model.factory import build_model
+    from rpipe.structure.control import SystemConfig
+    from rpipe.structure.system.factory import build_system
     from rpipe.structure.system.runtime import apply_runtime
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
@@ -100,10 +100,10 @@ def _worker(recipe, args):
         'cudnn_benchmark': False, 'cudnn_allow_tf32': args.tf32, 'matmul_allow_tf32': False})
     runtime = apply_runtime(0, config)
     assets = args.output / 'assets'
-    data = DataFactory.build(DataConfig.from_mapping({'name': 'CIFAR10', 'source': recipe.SOURCE,
+    system = build_system(config, assets)
+    data = build_data(DataConfig.from_mapping({'name': 'CIFAR10', 'source': recipe.SOURCE,
         'config': {'batch_size': 250, 'pin_memory': True, 'num_workers': 0}}), assets, seed=0)
-    model = ModelFactory.build(ModelConfig.from_mapping({'name': 'cnn', 'source': recipe.SOURCE}), assets, data_meta=data.meta)
-    system = SystemFactory.build(config, assets)
+    model = build_model(ModelConfig.from_mapping({'name': 'cnn', 'source': recipe.SOURCE}), assets, data_meta=data.meta, system=system)
     inputs, predictions, logits_hash = hashlib.sha256(), hashlib.sha256(), hashlib.sha256()
     counts = {'samples': 0, 'correct_samples': 0, 'topk_argmax_disagreements': 0}
     tensors = []
@@ -121,18 +121,18 @@ def _worker(recipe, args):
                 tensors.append(output.detach().cpu())
             return super().evaluate(split, mode, input, output)
     tracker = AlgorithmTracker(assets, Captured())
-    algorithm = EvalAlgorithm(AlgorithmConfig.from_mapping({'mode': 'eval', 'resume_from': str(args.checkpoint.resolve()), 'eval_num_steps': -1}))
+    algorithm = EvalAlgorithm(AlgorithmConfig.from_mapping({'mode': 'eval', 'resume_from': str(args.checkpoint.resolve()), 'eval_num_steps': -1}), checkpoint_dir=(assets / 'checkpoints').resolve())
     activities = [torch.profiler.ProfilerActivity.CPU]
     if torch.profiler.ProfilerActivity.CUDA in torch.profiler.supported_activities():
         activities.append(torch.profiler.ProfilerActivity.CUDA)
     if args.profile:
         with torch.profiler.profile(activities=activities) as profile:
-            summary = algorithm.run(data, model, system, tracker)
+            summary = algorithm.compute(data, model, system, tracker, cancel_check=lambda: None)
         profile.export_chrome_trace(str(args.output / 'trace.json'))
         trace = json.loads((args.output / 'trace.json').read_text(encoding='utf-8'))
         kernels = sorted({event['name'] for event in trace['traceEvents'] if event.get('cat') == 'kernel'})
     else:
-        summary = algorithm.run(data, model, system, tracker)
+        summary = algorithm.compute(data, model, system, tracker, cancel_check=lambda: None)
         kernels = []
     state = hashlib.sha256()
     for name, tensor in sorted(model.module.state_dict().items()):

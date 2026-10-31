@@ -14,7 +14,8 @@ def test_real_mnist_public_cli_preserves_sources_and_completes_expected_runs(tmp
     if not prepared or not Path(prepared).is_dir():
         pytest.skip('requires explicitly pre-staged read-only RPIPE_TEST_MNIST_ROOT; no downloads')
     import yaml
-    from rpipe.api import plan, read_run
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.cli import main
     pytest.importorskip('transformers')
     repo = Path(__file__).resolve().parents[3]
@@ -36,7 +37,7 @@ def test_real_mnist_public_cli_preserves_sources_and_completes_expected_runs(tmp
     assert {s.config['algorithm']['source'] for s in specs} == {'custom_torch', 'transformers_trainer'}
     for command in ('make', 'launch', 'process'):
         assert main([command, str(study), '--run-root', str(root)]) == 0
-    results = [read_run(spec) for spec in specs]
+    results = [read_run(spec.ref) for spec in specs]
     assert all(row['status'] == 'succeeded' for row in results)
     assert all('accuracy' in row['metrics'] for row in results)
     derived = json.loads((specs[0].study_root / 'summary/process.json').read_text())

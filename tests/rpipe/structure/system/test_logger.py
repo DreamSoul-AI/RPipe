@@ -53,6 +53,15 @@ def test_default_debug_and_unknown_context_are_omitted(tmp_path):
     assert 'request_id' not in row and 'task_id' not in row and row['level'] == 'INFO'
 
 
+def test_explicit_checkpoint_event_names_are_preserved_without_alias_translation(tmp_path):
+    logger = Logger(tmp_path, stdout=False)
+    for event in ('checkpoint.saved', 'checkpoint.restored', 'ckpt', 'resume'):
+        logger.info('checkpoint observation', event=event)
+    assert [row['event'] for row in records(logger.path)] == [
+        'checkpoint.saved', 'checkpoint.restored',
+        'logging.unstructured_record', 'logging.unstructured_record']
+
+
 def test_privacy_and_controls_are_handled_before_either_sink(tmp_path, capsys):
     logger = Logger(tmp_path)
     logger.info('token=TEST_SECRET path=C:\\private\\person.txt email=person@example.test\n'
@@ -199,13 +208,12 @@ def test_report_keeps_diagnostic_metrics_without_arbitrary_extra(tmp_path, capsy
     assert '[split] test [metric] Accuracy=0.8000 Loss=0.5000' in row['message']
     assert 'lr=0.1 step=2' in row['message'] and 'PRIVATE_BODY' not in str(row)
     assert row['event'] == 'metrics.reported'
-    assert logger.state_dict() == {'path': str(logger.path)}
-    logger.load_state_dict({'path': '/must/not/be/read'})
+    assert not hasattr(logger, 'state_dict') and not hasattr(logger, 'load_state_dict')
     assert capsys.readouterr().out
 
 
 def test_busy_cross_process_log_lock_never_waits_for_scientific_owner(tmp_path):
-    from rpipe.structure.artifacts import cache_lock
+    from rpipe.structure.artifact.io import cache_lock
     logger = Logger(tmp_path)
     before = logger.path.read_bytes()
     script = ('import sys; from rpipe.structure.system.logger import Logger; '
@@ -224,12 +232,12 @@ def test_busy_cross_process_log_lock_never_waits_for_scientific_owner(tmp_path):
 
 def test_explicit_factory_logger_injection_does_not_create_another_sink(tmp_path, monkeypatch):
     import rpipe.structure.system.factory as factory
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.control import SystemConfig
     logger = Logger(tmp_path)
     def unexpected(*args, **kwargs):
         raise AssertionError('must reuse the execution logger')
     monkeypatch.setattr(factory, 'Logger', unexpected)
-    assert factory.SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path,
+    assert factory.build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path,
                                        logger=logger).logger is logger
 
 

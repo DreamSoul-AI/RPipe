@@ -6,7 +6,7 @@ from ...recipe import COMMIT, SOURCE
 def validate_runtime(ctx):
     import json
     import torch
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
 
     expected = {'deterministic': True, 'cudnn_deterministic': True, 'cudnn_benchmark': False,
                 'cudnn_allow_tf32': False, 'matmul_allow_tf32': False}

@@ -1,4 +1,5 @@
 """CLI plan/read commands have observable zero execution and zero output writes."""
+from rpipe.structure import make as planning
 
 import pytest
 
@@ -9,12 +10,15 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
 
 @pytest.mark.parametrize('command', ['plan', 'status', 'logs', 'report'])
 def test_cli_read_command_preserves_source_and_runtime_bytes(
-        source_study, run_root, payload_factory, file_bytes, command, capsys):
-    from rpipe.api import plan, run
+        source_study, run_root, science_factory, file_bytes, command, capsys, science_worker):
+    from rpipe.structure.make import plan, publish
+    from rpipe.flow.run import run
     from rpipe.flow.cli import main
 
     specs = plan(source_study, run_root=run_root)
-    assert run(specs[0], payload=payload_factory()).status == 'succeeded'
+    publish(specs)
+    science_worker(science_factory())
+    assert run(specs[0]).status == 'succeeded'
     before_source, before_runtime = file_bytes(source_study), file_bytes(run_root)
     assert main([command, str(source_study), '--run-root', str(run_root)]) == 0
     assert capsys.readouterr().err == ''
@@ -22,7 +26,7 @@ def test_cli_read_command_preserves_source_and_runtime_bytes(
     assert file_bytes(run_root) == before_runtime
 
 
-def test_cli_legacy_compare_is_readonly_and_unverified(tmp_path, file_bytes, capsys):
+def test_cli_rejects_retired_legacy_option_without_any_write(tmp_path, file_bytes, capsys):
     from rpipe.flow.cli import main
 
     for name in ('left', 'right'):
@@ -30,12 +34,45 @@ def test_cli_legacy_compare_is_readonly_and_unverified(tmp_path, file_bytes, cap
         directory.mkdir()
         (directory / 'result.json').write_text('{"status":"succeeded"}', encoding='utf-8')
     before = file_bytes(tmp_path)
-    assert main(['compare', str(tmp_path / 'left'), str(tmp_path / 'right'), '--legacy']) == 1
-    import json
-    observed = json.loads(capsys.readouterr().out)
-    assert observed['passed'] is False
-    assert observed['verified'] is False and observed['evidence_complete'] is False
+    with pytest.raises(SystemExit) as caught:
+        main(['compare', str(tmp_path / 'left'), str(tmp_path / 'right'), '--legacy'])
+    assert caught.value.code == 2
+    assert capsys.readouterr().err
     assert file_bytes(tmp_path) == before
+
+
+def test_cli_reads_declared_nondefault_version_after_source_content_changes(
+        source_study, run_root, file_bytes, monkeypatch, capsys):
+    from rpipe.structure.artifact.io import load_config, write_config
+    from rpipe.flow.cli import main
+    path = source_study / 'experiment_config.yaml'
+    config = load_config(path)
+    config['version'] = 'declared-v1'
+    write_config(path, config)
+    specs = planning.plan(source_study, run_root=run_root)
+    planning.publish(specs)
+    assert specs[0].version == 'declared-v1'
+    config['data']['name'] = 'changed_after_publication'
+    write_config(path, config)
+    before = file_bytes(run_root)
+    monkeypatch.setattr(planning, 'plan', lambda *args, **kwargs: pytest.fail('readonly command replanned current source'))
+    for command in ('status', 'report'):
+        assert main([command, str(source_study), '--run-root', str(run_root)]) == 0
+        assert specs[0].id in capsys.readouterr().out
+    assert file_bytes(run_root) == before
+
+
+def test_cli_explicit_saved_version_reads_when_source_path_is_unavailable(
+        source_study, run_root, tmp_path, file_bytes, capsys):
+    from rpipe.flow.cli import main
+    specs = planning.plan(source_study, run_root=run_root, version='recorded-v1')
+    planning.publish(specs)
+    unavailable = tmp_path / 'unavailable' / source_study.name
+    assert not unavailable.exists()
+    before = file_bytes(run_root)
+    assert main(['status', str(unavailable), '--run-root', str(run_root), '--version', 'recorded-v1']) == 0
+    assert specs[0].id in capsys.readouterr().out
+    assert file_bytes(run_root) == before
 
 
 def test_cli_make_requires_explicit_run_root_before_any_write(source_study, file_bytes):
@@ -49,15 +86,15 @@ def test_cli_make_requires_explicit_run_root_before_any_write(source_study, file
 
 
 def test_cli_retry_is_passed_only_when_explicitly_selected(source_study, run_root, monkeypatch, capsys):
-    from rpipe import api
     from rpipe.flow.cli import main
-    from rpipe.structure.contracts import RunOutcome
+    from rpipe.flow.context import RunReport
 
     calls = []
     def launch(specs, **kwargs):
         calls.append(kwargs['retry'])
-        return (RunOutcome('failed'),)
-    monkeypatch.setattr(api, 'launch', launch)
+        return (RunReport('failed'),)
+    from rpipe.flow import supervision
+    monkeypatch.setattr(supervision, 'launch', launch)
     for flag in ([], ['--retry']):
         assert main(['launch', str(source_study), '--run-root', str(run_root), *flag]) == 1
         assert capsys.readouterr().err == ''
@@ -65,11 +102,11 @@ def test_cli_retry_is_passed_only_when_explicitly_selected(source_study, run_roo
 
 
 def test_cli_tensorboard_passes_explicit_selected_run_ids(source_study, run_root, tmp_path, monkeypatch, capsys):
-    from rpipe import api
     from rpipe.flow import exports
     from rpipe.flow.cli import main
 
-    specs = api.plan(source_study, run_root=run_root)
+    specs = planning.plan(source_study, run_root=run_root)
+    planning.publish(specs)
     selections = []
     def export(root, out, **kwargs):
         selections.append(kwargs['run_ids'])
@@ -108,7 +145,6 @@ def test_cli_data_profiles_only_the_selected_effective_input(source_study, run_r
     import json
     import yaml
     import torch
-    from rpipe import api
     from rpipe.flow.cli import main
     from rpipe.structure.data import profile
     from rpipe.structure.data.factory import Data
@@ -118,7 +154,7 @@ def test_cli_data_profiles_only_the_selected_effective_input(source_study, run_r
     (source_study / 'experiment_config.yaml').write_text(
         yaml.safe_dump({'data': {'name': 'MNIST', 'source': 'custom'}, 'algorithm': {'mode': 'train'}}),
         encoding='utf-8')
-    selected = api.plan(source_study, run_root=run_root)[1]
+    selected = planning.plan(source_study, run_root=run_root)[1]
     calls = []
 
     def build(config, shared, **kwargs):
@@ -129,7 +165,7 @@ def test_cli_data_profiles_only_the_selected_effective_input(source_study, run_r
             'train': [(torch.tensor([[[[0.7, 0.8]]]]), torch.tensor([0]))],
         })
 
-    monkeypatch.setattr(profile.DataFactory, 'build', build)
+    monkeypatch.setattr(profile, 'build_data', build)
     assert main(['data', str(source_study), '--run-root', str(run_root), '--id', selected.id]) == 0
     captured = capsys.readouterr()
     assert captured.err == '' and len(calls) == 1

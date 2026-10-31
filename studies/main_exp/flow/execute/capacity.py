@@ -35,7 +35,7 @@ def worker_prepare(ctx):
 
 def worker_write(ctx):
     import torch
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
     body = {'peak_allocated_bytes': torch.cuda.max_memory_allocated(),
             'peak_reserved_bytes': torch.cuda.max_memory_reserved(),
             'flow_seconds': time.perf_counter() - ctx.state['capacity_started'],
@@ -64,9 +64,12 @@ def main(recipe, argv):
     if args.rounds[0] != 1 or len(set(args.rounds)) != len(args.rounds) or len(set(args.models)) != len(args.models):
         parser.error('use unique models and rounds, starting with round1 as the strict baseline')
     recipe.bootstrap()
-    from rpipe.structure.artifacts import atomic_write_text
-    from rpipe.structure.artifacts import load_config, write_config
-    from rpipe.api import plan, make, run as run_spec, read_run, compare_runs
+    from rpipe.structure.artifact.io import atomic_write_text
+    from rpipe.structure.artifact.io import load_config, write_config
+    from rpipe.structure.make import plan, publish
+    from rpipe.flow.run import run as run_spec
+    from rpipe.structure.artifact.readout import read_run
+    from rpipe.structure.artifact.comparison import compare
     ident = 'capacity-' + time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8]
     root = args.run_root / 'validation' / ident
     root.mkdir(parents=True, exist_ok=False)
@@ -88,7 +91,7 @@ def main(recipe, argv):
             folder.mkdir(parents=True)
             combinations = [('cnn', 0), ('resnet18', 0), ('linear', 0)] if model == 'mixed' else [(model, n) for n in range(3)]
             write_config(folder / 'study.yaml', {'study': ident, 'recipe': 'recipe.py',
-                'flow': {'study_phases': True, 'prepare_shared': False},
+                'flow': {'study_phases': True},
                 'axes': {'model.name': [m for m, _ in combinations]} if model == 'mixed' else {},
                 'seeds': [0] if model == 'mixed' else [0, 1, 2]})
             write_config(folder / 'experiment_config.yaml', {'version': f'{ident}-{model}-{round_size}',
@@ -106,7 +109,7 @@ def main(recipe, argv):
                 atomic_write_text(path / '__init__.py', 'from .run import before, run\n' if phase == 'prepare' else 'from .run import run\n')
             # Mixed factors use seed0 consistently; the same cells repeat in every round.
             specs = plan(folder, run_root=root / 'output')
-            make(specs)
+            publish(specs)
             samples = _gpu_sample()
             if samples[0]['free_bytes'] < round_size * 4 * 1024**3 * 1.25:
                 raise RuntimeError('not enough free GPU memory for the bounded capacity measurement')
@@ -124,7 +127,7 @@ def main(recipe, argv):
             for spec in specs:
                 run = spec.run_dir
                 cfg = spec.to_config()
-                result = read_run(spec)
+                result = read_run(spec.ref)
                 if result.get('status') != 'succeeded' or not (run / 'assets/capacity.json').is_file():
                     group['runs'].append({'run_id': spec.id, 'status': result.get('status'), 'error': result.get('error')})
                     passed = False
@@ -135,9 +138,9 @@ def main(recipe, argv):
                 passed &= capacity['execute']['steps'] == 800 and len(history) == 4
                 key = (model, cfg['model']['name'], cfg['seed'])
                 if round_size == 1:
-                    baseline[key] = run
+                    baseline[key] = spec.ref
                 else:
-                    comparison = compare_runs(baseline[key], run, checkpoints=['latest', 'best'])
+                    comparison = compare(baseline[key], spec.ref, checkpoints=['latest', 'best'])
                     # Elapsed time differs by design; checkpoint/history remain strict zero-tolerance gates.
                     passed &= all(item['passed'] for name, item in comparison['items'].items() if name != 'metrics')
                     group['comparisons'].append(comparison)

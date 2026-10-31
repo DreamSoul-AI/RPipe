@@ -5,7 +5,8 @@ from rpipe.structure.model.factory import Model, ModelRegistry
 
 
 class Once(Algorithm):
-    def run(self, data, model, system, tracker):
+    def compute(self, data, model, system, tracker, cancel_check):
+        cancel_check()
         with (system.assets_dir / 'attempts.txt').open('a', encoding='utf-8') as stream:
             stream.write('attempt\n')
         (system.assets_dir / 'exclusive').mkdir()

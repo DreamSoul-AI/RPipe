@@ -6,8 +6,9 @@ import math
 from pathlib import Path
 from typing import Any, Callable
 
-from rpipe.structure.contracts import ModelConfig
-from rpipe.structure.artifacts import cache_lock
+from rpipe.structure.control import ModelConfig
+from rpipe.structure.api import ModelPort, SystemPort
+from rpipe.structure.artifact.io import cache_lock
 from rpipe.structure.system.origin import apply_model_origin, normalize_origin
 
 
@@ -40,6 +41,10 @@ def resolve_shape(cfg: dict[str, Any], data_meta: dict[str, Any] | None) -> tupl
         data_size = (int(cfg['in_features']),)
     else:
         data_size = (1, 28, 28)
+    features = cfg.get('in_features')
+    if features is not None:
+        if math.prod(data_size) != int(features):
+            raise ValueError('in_features must match the flattened input size')
     return data_size, target_size
 
 
@@ -81,29 +86,31 @@ class ModelRegistry:
         return sorted(cls._items)
 
 
-class ModelFactory:
-    @staticmethod
-    def build(
-        model_config: ModelConfig,
-        assets_dir: Path | str,
-        data_meta: dict[str, Any] | None = None,
-        origin: str | None = None,
-    ) -> Model:
-        name = model_config.name
-        source = model_config.source if model_config.source is not None else 'custom_torch'
-        builder = ModelRegistry.get(name, source)
-        if builder is None:
-            raise ValueError(f'unknown model name/source: {name!r}/{source!r}')
-        if origin not in (None, ''):
-            apply_model_origin(origin)
-        with cache_lock(assets_dir):
-            model = builder(model_config, Path(assets_dir), data_meta=data_meta)
-        model.module = _attach_input_norm(model.module, data_meta)
-        if origin not in (None, ''):
-            chosen = normalize_origin(origin)
-            model.meta['origin'] = chosen
-            model.meta['hub'] = apply_model_origin(chosen)
-        return model
+def build_model(
+    model_config: ModelConfig,
+    assets_dir: Path | str,
+    *,
+    data_meta: dict[str, Any] | None,
+    system: SystemPort,
+    origin: str | None = None,
+) -> ModelPort:
+    name = model_config.name
+    source = model_config.source if model_config.source is not None else 'custom_torch'
+    builder = ModelRegistry.get(name, source)
+    if builder is None:
+        raise ValueError(f'unknown model name/source: {name!r}/{source!r}')
+    if origin not in (None, ''):
+        apply_model_origin(origin)
+    with cache_lock(assets_dir):
+        model = builder(model_config, Path(assets_dir), data_meta=data_meta)
+    model.module = _attach_input_norm(model.module, data_meta)
+    if origin not in (None, ''):
+        chosen = normalize_origin(origin)
+        model.meta['origin'] = chosen
+        model.meta['hub'] = apply_model_origin(chosen)
+    if model.module is not None:
+        model.module = system.place_module(model.module)
+    return model
 
 
 def _attach_input_norm(module: Any, data_meta: dict[str, Any] | None) -> Any:

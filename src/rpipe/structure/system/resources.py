@@ -10,6 +10,26 @@ import stat
 import time
 
 
+class WindowsFileErrors:
+    """Capture the observing thread's Win32 file error retained by the CRT."""
+
+    def __init__(self):
+        if os.name != 'nt':
+            raise OSError('Windows CRT file errors require Windows')
+        self.crt = ctypes.CDLL('ucrtbase')
+        self.crt._set_doserrno.argtypes = [ctypes.c_ulong]
+        self.crt._set_doserrno.restype = ctypes.c_int
+        self.crt._get_doserrno.argtypes = [ctypes.POINTER(ctypes.c_ulong)]
+        self.crt._get_doserrno.restype = ctypes.c_int
+        self._value = ctypes.c_ulong()
+
+    def clear(self) -> bool:
+        return self.crt._set_doserrno(0) == 0
+
+    def code(self) -> int | None:
+        return self._value.value if self.crt._get_doserrno(ctypes.byref(self._value)) == 0 else None
+
+
 class _BasicLimits(ctypes.Structure):
     _fields_ = [('process_time', ctypes.c_longlong), ('job_time', ctypes.c_longlong),
                 ('flags', wintypes.DWORD), ('minimum_ws', ctypes.c_size_t),
@@ -171,7 +191,15 @@ def _output_info(path):
         return None
     if stat.S_ISLNK(info.st_mode):
         # Input references may be file symlinks; only inspect their target metadata.
-        target = path.stat()
+        try:
+            target = path.stat()
+        except FileNotFoundError:
+            # Atomic publication may move the reference between the two reads.
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return None
+            raise
         if not stat.S_ISREG(target.st_mode):
             raise OSError(f'directory or unsupported output link: {path}')
         return target

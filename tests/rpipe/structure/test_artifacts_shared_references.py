@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from rpipe.structure import artifacts as _atomic, artifacts as shared
+from rpipe.structure.artifact import io as _atomic, io as shared
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.structure_layer, pytest.mark.module_artifact,

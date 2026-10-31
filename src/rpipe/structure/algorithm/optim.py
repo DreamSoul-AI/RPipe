@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.kwargs import algorithm_blob, filter_args, torch_attr
 
 OPTIM_ALIASES = {
@@ -94,3 +94,10 @@ def make_scheduler(optimizer: Any, config: AlgorithmConfig, t_max: int) -> Any:
     blob.setdefault('total_iters', horizon)
     kwargs = filter_args(cls, blob)
     return cls(optimizer, **kwargs)
+
+
+def current_lr(optimizer: Any, fallback: float) -> float:
+    groups = getattr(optimizer, 'param_groups', None)
+    if not groups:
+        return fallback
+    return float(groups[0].get('lr', fallback))

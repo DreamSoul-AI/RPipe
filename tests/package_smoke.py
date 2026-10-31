@@ -1,12 +1,14 @@
 """Verify an installed distribution through its public, offline CLI.
 
-Invoke with the Python that owns the installed wheel/sdist and a new workspace.
+Invoke with the new venv Python, the installed wheel/sdist, and a new workspace.
 The Toy/Stub route verifies packaging and artifact contracts, not ML accuracy.
 """
 from __future__ import annotations
 
 import argparse
-import importlib.metadata
+import base64
+import hashlib
+from importlib import import_module, metadata, util
 import json
 import os
 from pathlib import Path
@@ -14,40 +16,123 @@ import subprocess
 import sys
 import sysconfig
 import time
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _verify_record_file(distribution, entry):
+    path = Path(distribution.locate_file(entry)).resolve()
+    encoded = base64.urlsafe_b64encode(bytes.fromhex(_sha256(path))).decode().rstrip('=')
+    if entry.hash is None or entry.hash.mode != 'sha256' or entry.hash.value != encoded:
+        raise RuntimeError(f'installed file differs from its distribution RECORD: {entry}')
+    return path
+
+
+def _installed_identity(artifact):
+    prefix = Path(sys.prefix).resolve()
+    if prefix == Path(sys.base_prefix).resolve():
+        raise RuntimeError('package smoke requires its own new venv')
+    libraries = {Path(sysconfig.get_path(name)).resolve() for name in ('purelib', 'platlib')}
+    if any(not path.is_relative_to(prefix) for path in libraries):
+        raise RuntimeError('venv library paths escape this environment')
+    distribution = metadata.distribution('rpipe')
+    distribution_root = Path(distribution.locate_file('')).resolve()
+    if distribution_root not in libraries:
+        raise RuntimeError('rpipe distribution metadata belongs to another environment')
+    artifact = Path(artifact).resolve(strict=True)
+    if not artifact.name.endswith(('.whl', '.tar.gz')):
+        raise RuntimeError('the installed artifact must be an explicit wheel or sdist')
+    artifact_sha = _sha256(artifact)
+    try:
+        origin = json.loads(distribution.read_text('direct_url.json'))
+        url = urlsplit(origin['url'])
+        archive = origin['archive_info']
+        digest = archive.get('hashes', {}).get('sha256')
+        old_digest = archive.get('hash', '').removeprefix('sha256=')
+        if digest is None:
+            digest = old_digest
+        if (url.scheme != 'file' or url.netloc not in ('', 'localhost')
+                or Path(url2pathname(url.path)).resolve() != artifact
+                or digest != artifact_sha or old_digest and old_digest != artifact_sha
+                or origin.get('dir_info', {}).get('editable')):
+            raise ValueError('artifact provenance mismatch')
+    except (ValueError, TypeError, KeyError) as error:
+        raise RuntimeError('installed distribution is not from the specified artifact bytes') from error
+    files = distribution.files or []
+    package_files = [entry for entry in files if entry.as_posix().startswith('rpipe/')
+                     and entry.suffix == '.py']
+    if not package_files:
+        raise RuntimeError('installed distribution has no recorded rpipe Python files')
+    for entry in package_files:
+        path = _verify_record_file(distribution, entry)
+        if not path.is_relative_to(distribution_root / 'rpipe'):
+            raise RuntimeError('installed rpipe file escapes its distribution')
+    recorded = {Path(distribution.locate_file(entry)).resolve() for entry in package_files}
+    actual = {path.resolve() for path in (distribution_root / 'rpipe').rglob('*.py')}
+    if actual != recorded:
+        raise RuntimeError('unrecorded Python files remain in the installed package')
+    expected = (distribution_root / 'rpipe/__init__.py').resolve()
+    spec = util.find_spec('rpipe')
+    if spec is None or spec.origin is None or Path(spec.origin).resolve() != expected:
+        raise RuntimeError('rpipe import resolves outside the installed distribution')
+    module = import_module('rpipe')
+    if Path(module.__file__).resolve() != expected or distribution.version != module.__version__:
+        raise RuntimeError('distribution metadata and imported module differ')
+    scripts = Path(sysconfig.get_path('scripts')).resolve()
+    console = scripts / ('rpipe.exe' if os.name == 'nt' else 'rpipe')
+    if not scripts.is_relative_to(prefix) or not console.is_file() or not console.resolve().is_relative_to(scripts):
+        raise RuntimeError('installed console script is outside this venv or missing')
+    entries = [entry for entry in files if Path(distribution.locate_file(entry)).resolve() == console.resolve()]
+    if len(entries) != 1:
+        raise RuntimeError('console script is absent from the installed distribution RECORD')
+    _verify_record_file(distribution, entries[0])
+    if not any(entry.group == 'console_scripts' and entry.name == 'rpipe'
+               and entry.value == 'rpipe.flow.cli:main' for entry in distribution.entry_points):
+        raise RuntimeError('installed console entry does not target the current CLI')
+    return {'installed_module': str(expected), 'version': module.__version__,
+            'python': sys.executable, 'venv_prefix': str(prefix),
+            'distribution_root': str(distribution_root), 'console': str(console),
+            'artifact': str(artifact), 'artifact_sha256': artifact_sha,
+            'verified_python_files': len(package_files)}
+
+
+def _command_environment():
+    environment = dict(os.environ)
+    environment.pop('PYTHONPATH', None)
+    environment.pop('PYTHONHOME', None)
+    environment.update(PYTHONNOUSERSITE='1', PYTHONDONTWRITEBYTECODE='1')
+    return environment
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--workspace', required=True, type=Path)
+    parser.add_argument('--artifact', required=True, type=Path)
     args = parser.parse_args()
     workspace = args.workspace.resolve()
     if workspace.exists():
         parser.error('workspace must be new; retained smoke artifacts are never overwritten')
+    installed = _installed_identity(args.artifact)
     workspace.mkdir(parents=True)
-    # Import after cwd changes; never insert the repository src path.
     os.chdir(workspace)
-    import rpipe
-
-    repo_src = Path(__file__).resolve().parents[1] / 'src'
-    module_file = Path(rpipe.__file__).resolve()
-    if module_file.is_relative_to(repo_src.resolve()):
-        raise RuntimeError(f'expected an installed distribution, imported source checkout: {module_file}')
-    if importlib.metadata.version('rpipe') != rpipe.__version__:
-        raise RuntimeError('distribution metadata and imported version differ')
-    scripts = Path(sysconfig.get_path('scripts'))
-    console = scripts / ('rpipe.exe' if os.name == 'nt' else 'rpipe')
-    if not console.is_file():
-        raise RuntimeError(f'installed console script missing: {console}')
-
-    evidence = {'installed_module': str(module_file), 'version': rpipe.__version__,
-                'python': sys.executable, 'scope': 'offline Toy/Stub packaging and CLI contract',
+    console = Path(installed['console'])
+    evidence = {**installed, 'scope': 'offline Toy/Stub packaging and CLI contract',
                 'gpu_used': False, 'commands': [], 'passed': False}
+    environment = _command_environment()
 
     def command(argv, *, expected=0):
         launch_errors = []
         for attempt in range(20):
             try:
-                completed = subprocess.run(argv, cwd=workspace, env=dict(os.environ),
+                completed = subprocess.run(argv, cwd=workspace, env=environment,
                                            capture_output=True, text=True,
                                            encoding='utf-8', errors='replace', timeout=120)
                 break
@@ -106,8 +191,11 @@ axes:
     for row in planned:
         run_dir = Path(row['run_dir'])
         body = json.loads((run_dir / 'result.json').read_text(encoding='utf-8'))
-        if body['status'] != 'succeeded' or body['structure']['data']['source'] != 'stub':
+        if (body['status'] != 'succeeded' or body.get('evidence_complete') is not True
+                or body.get('quality') is False or body['structure']['data']['source'] != 'stub'):
             raise RuntimeError(f'invalid Run status/source: {row["id"]}')
+        if (run_dir / '.execution').exists():
+            raise RuntimeError('a completed smoke Run still has an execution owner')
         if (run_dir / 'config.yaml').read_bytes() != config_before[row['id']]:
             raise RuntimeError('launch mutated a generated config')
         log = run_dir / 'assets/logs/events.jsonl'
@@ -138,7 +226,7 @@ axes:
     evidence.update(passed=True, runs_succeeded=4, experiments_complete=2,
                     generated_configs_unchanged=True, completed_runs_rejected_on_second_launch=True, source_tree_unchanged=True)
     (workspace / 'SMOKE_RESULT.json').write_text(json.dumps(evidence, indent=2) + '\n', encoding='utf-8')
-    print(json.dumps({'passed': True, 'installed_module': str(module_file), 'workspace': str(workspace),
+    print(json.dumps({'passed': True, 'installed_module': installed['installed_module'], 'workspace': str(workspace),
                       'commands': len(evidence['commands']), 'runs_succeeded': 4}))
     return 0
 

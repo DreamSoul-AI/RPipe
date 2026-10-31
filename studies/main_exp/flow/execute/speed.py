@@ -38,7 +38,7 @@ def correct_samples(accuracy, count):
 
 
 def main(recipe, argv):
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run-root', type=Path, required=True)
@@ -65,15 +65,15 @@ def main(recipe, argv):
     recipe.bootstrap()
     os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
     import torch
-    from rpipe.structure.contracts import AlgorithmConfig
+    from rpipe.structure.control import AlgorithmConfig
     from rpipe.structure.algorithm.train import TrainAlgorithm
     from rpipe.structure.algorithm.tracker import AlgorithmTracker
-    from rpipe.structure.contracts import DataConfig
-    from rpipe.structure.data.factory import DataFactory
-    from rpipe.structure.contracts import ModelConfig
-    from rpipe.structure.model.factory import ModelFactory
-    from rpipe.structure.contracts import SystemConfig
-    from rpipe.structure.system.factory import SystemFactory
+    from rpipe.structure.control import DataConfig
+    from rpipe.structure.data.factory import build_data
+    from rpipe.structure.control import ModelConfig
+    from rpipe.structure.model.factory import build_model
+    from rpipe.structure.control import SystemConfig
+    from rpipe.structure.system.factory import build_system
     from rpipe.structure.system.runtime import apply_runtime
 
     torch.set_num_threads(2)
@@ -170,12 +170,12 @@ def main(recipe, argv):
         torch.cuda.reset_peak_memory_stats()
         start = time.perf_counter()
         assets = output / 'current/assets'
-        data = DataFactory.build(DataConfig.from_mapping({'name': args.data, 'source': recipe.SOURCE,
+        system = build_system(controls, assets)
+        data = build_data(DataConfig.from_mapping({'name': args.data, 'source': recipe.SOURCE,
             'config': {'batch_size': 250, 'pin_memory': True, 'num_workers': 0}}), assets, seed=0)
-        model = ModelFactory.build(ModelConfig.from_mapping({'name': args.model, 'source': recipe.SOURCE}),
-            assets, data_meta=data.meta)
+        model = build_model(ModelConfig.from_mapping({'name': args.model, 'source': recipe.SOURCE}),
+            assets, data_meta=data.meta, system=system)
         initial = recipe._state_cpu(model.module)
-        system = SystemFactory.build(controls, assets)
         tracker = AlgorithmTracker(assets)
         segments = []
         class MeasuredTrain(TrainAlgorithm):
@@ -198,12 +198,12 @@ def main(recipe, argv):
                     segments[-1]['checkpoint_seconds'] += elapsed
                     segments[-1]['memory']['checkpoint'] = memory()
                 self.segment_start = time.perf_counter()
-        algorithm = MeasuredTrain(AlgorithmConfig.from_mapping(mapping))
+        algorithm = MeasuredTrain(AlgorithmConfig.from_mapping(mapping), checkpoint_dir=(assets / 'checkpoints').resolve())
         sync()
         setup = time.perf_counter() - start
         setup_memory = memory()
         algorithm.segment_start = time.perf_counter()
-        summary, elapsed = timed(lambda: algorithm.run(data, model, system, tracker))
+        summary, elapsed = timed(lambda: algorithm.compute(data, model, system, tracker, cancel_check=lambda: None))
         histories = {k: list(v.history) for k, v in tracker._meters['test'].items()}
         for i, row in enumerate(segments):
             row['test'] = {'test/' + k: float(v[i]) for k, v in histories.items()}

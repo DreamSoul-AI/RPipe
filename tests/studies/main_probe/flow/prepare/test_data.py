@@ -11,7 +11,8 @@ import uuid
 import pytest
 import yaml
 
-from rpipe.structure.artifacts import source_digest
+from rpipe.structure.artifact.provenance import source_digest
+from rpipe.structure.control import SystemConfig
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.flow_layer, pytest.mark.module_data,
@@ -147,8 +148,9 @@ def parity(probe, monkeypatch):
         path.write_bytes(b'synthetic cache')
     monkeypatch.setenv('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
     for name, value in {'bootstrap': lambda: None, 'MainArchive': lambda *a: archive,
-            'native_data': lambda *a: current, 'native_model': lambda *a: model,
-            'prepared_inputs': lambda *a: (cache, 'cache-digest'), 'seed_runtime': lambda *a: None,
+            'native_data': lambda *a: current, 'native_model': lambda *a, **kwargs: model,
+            'prepared_inputs': lambda *a: (cache, 'cache-digest'),
+            'seed_runtime': lambda *a: SystemConfig.from_mapping({'device': 'cpu'}),
             'rng': lambda *a: {}, 'model_state': lambda *a: {},
             'state_compare': lambda *a: {'exact': True}, 'rng_equal': lambda *a: True}.items():
         monkeypatch.setattr(probe.module, name, value)
@@ -169,7 +171,7 @@ def test_success_records_fixed_inputs_and_actual_runtime(probe, parity):
     assert not list(probe.workspace.rglob('download.part'))
     assert partial.read_bytes() == b'leave this alone'
     assert parity.closed == ['model', 'data']
-    assert json.loads((probe.workspace / 'PREPARED.json').read_text()) == result
+    assert json.loads((probe.workspace / 'PREPARED.json').read_text(encoding='utf-8')) == result
 
 
 def test_derived_cache_references_only_fixed_inputs(probe, parity, monkeypatch):

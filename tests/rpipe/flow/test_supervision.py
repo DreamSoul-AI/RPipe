@@ -12,8 +12,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from rpipe.structure.artifacts import identity, write_json
-from rpipe.structure.contracts import AdmissionError, Cancellation, RunOutcome, SupervisionLimits
+from rpipe.structure.artifact.io import identity, write_json
+from rpipe.structure.control import AdmissionError
+from rpipe.flow.context import Cancellation, RunReport, SupervisionLimits
 
 pytestmark = [pytest.mark.content, pytest.mark.p1,
               pytest.mark.cost(cost_class='c2'),
@@ -27,7 +28,7 @@ def module():
 
 @pytest.fixture
 def specs(source_study, run_root):
-    from rpipe.api import plan
+    from rpipe.structure.make import plan
     return plan(source_study, run_root=run_root)
 
 
@@ -41,7 +42,8 @@ def progress(request, specs, *, status='succeeded', quality=True, complete=True,
     rows = [] if current else [{'index': 0, 'id': specs[0].id, 'identity': identity(specs[0]),
                                'status': status, 'quality': quality, 'evidence_complete': complete,
                                'cleanup_errors': [], 'elapsed_seconds': 0.01}]
-    return {'schema': 1, 'request': request['request'], 'identities': [identity(s) for s in specs],
+    return {'schema': 1, 'request': request['request'], 'coordinator_pid': 99999,
+            'identities': [identity(s) for s in specs],
             'completed': rows, 'current': {'index': 0, 'id': specs[0].id,
                                            'started': time.monotonic()} if current else None,
             'done': not current, 'error': None}
@@ -60,7 +62,7 @@ def fake_parent(monkeypatch, module, specs, *, scenario=None, assign_error=False
                 body = json.loads(line)
                 state.sent.append(body)
                 if 'request_path' in body and scenario is not None:
-                    scenario(json.loads(Path(body['request_path']).read_text()), state)
+                    scenario(json.loads(Path(body['request_path']).read_text(encoding='utf-8')), state)
                 elif body.get('action') == 'cancel':
                     state.child.returncode = 1
 
@@ -70,6 +72,7 @@ def fake_parent(monkeypatch, module, specs, *, scenario=None, assign_error=False
 
         def __init__(self, *args, **kwargs):
             state.child = self
+            state.popen_kwargs = kwargs
             self.stdin = Pipe()
 
         def poll(self):
@@ -107,9 +110,18 @@ def fake_parent(monkeypatch, module, specs, *, scenario=None, assign_error=False
         def close(self):
             pass
 
+    class FileErrors:
+        def clear(self):
+            return True
+        def code(self):
+            return None
+
     monkeypatch.setattr(module, 'os', SimpleNamespace(name='nt', environ=os.environ, pathsep=os.pathsep))
     monkeypatch.setattr(module, 'WindowsJob', Job)
-    monkeypatch.setattr(module.subprocess, 'Popen', Child)
+    monkeypatch.setattr(module, 'WindowsFileErrors', FileErrors)
+    monkeypatch.setattr(module, 'subprocess', SimpleNamespace(**{
+        **vars(subprocess), 'Popen': Child,
+        'CREATE_NEW_PROCESS_GROUP': getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0x200)}))
     monkeypatch.setattr(module, 'output_snapshot', lambda roots: {})
     monkeypatch.setattr(module, 'output_growth', lambda roots, baseline: growth if state.sent else 0)
     return state
@@ -142,6 +154,129 @@ def test_assignment_failure_never_releases_stdin_gate(module, specs, limits, tmp
     assert report['trigger']['kind'] == 'observation_failure'
     assert state.killed and state.sent == [] and report['tree_empty']
     assert not specs[0].run_root.exists()
+
+
+@pytest.mark.unit
+def test_coordinator_has_its_own_process_group_before_stdin_grant(module, specs, limits, tmp_path, monkeypatch):
+    specs = specs[:1]
+    def scenario(request, state):
+        write_json(Path(request['progress']), progress(request, specs))
+        state.child.returncode = 0
+    state = fake_parent(monkeypatch, module, specs, scenario=scenario)
+    report = module.supervise(specs, limits=limits, evidence_dir=tmp_path / 'evidence')
+    assert state.popen_kwargs['creationflags'] & module.subprocess.CREATE_NEW_PROCESS_GROUP
+    assert state.sent and report['status'] == 'succeeded'
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('code', [32, 33])
+def test_progress_retries_only_confirmed_sharing_then_uses_valid_snapshot(
+        module, specs, limits, tmp_path, monkeypatch, code):
+    specs = specs[:1]
+    def scenario(request, state):
+        write_json(Path(request['progress']), progress(request, specs))
+        state.child.returncode = 0
+    fake_parent(monkeypatch, module, specs, scenario=scenario)
+    native_read, reads = module.read_json, []
+    def read(path):
+        reads.append(path)
+        if len(reads) <= 2:
+            error = PermissionError(13, 'controlled Windows sharing violation')
+            error.winerror = code
+            raise error
+        return native_read(path)
+    monkeypatch.setattr(module, 'read_json', read)
+    report = module.supervise(specs, limits=limits, evidence_dir=tmp_path / 'evidence')
+    assert report['status'] == 'succeeded' and report['tree_empty']
+    assert report['observed']['progress_read_retries'] == 2
+    assert report['observed']['progress_read_first_code'] == code
+    assert all(path.name == 'progress.json' for path in reads)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('code', [32, 5, None])
+def test_progress_sharing_exhaustion_and_nonsharing_failures_stop_without_grant(
+        module, specs, limits, tmp_path, monkeypatch, code):
+    def scenario(request, state):
+        write_json(Path(request['progress']), progress(request, specs, current=True))
+    state = fake_parent(monkeypatch, module, specs, scenario=scenario)
+    calls = []
+    def read(path):
+        calls.append(state.child.poll())
+        error = PermissionError(13, 'controlled file denial')
+        if code is not None:
+            error.winerror = code
+        raise error
+    monkeypatch.setattr(module, 'read_json', read)
+    report = module.supervise(specs, limits=limits, evidence_dir=tmp_path / 'evidence')
+    assert report['trigger']['kind'] == 'observation_failure' and report['status'] != 'succeeded'
+    assert report['trigger']['error']['type'] == 'PermissionError'
+    assert sum(value is None for value in calls) == (3 if code == 32 else 1)
+    assert report['observed'].get('progress_read_retries', 0) == (2 if code == 32 else 0)
+    assert not any(row.get('action') == 'continue' for row in state.sent)
+    assert not specs[1].run_dir.exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('cleared', [True, False])
+def test_progress_crt_fallback_requires_a_successful_clear(
+        module, specs, limits, tmp_path, monkeypatch, cleared):
+    specs = specs[:1]
+    def scenario(request, state):
+        write_json(Path(request['progress']), progress(request, specs))
+        state.child.returncode = 0
+    fake_parent(monkeypatch, module, specs, scenario=scenario)
+    class FileErrors:
+        def clear(self):
+            return cleared
+        def code(self):
+            return 32
+    monkeypatch.setattr(module, 'WindowsFileErrors', FileErrors)
+    native_read, reads = module.read_json, []
+    def read(path):
+        reads.append(path)
+        if len(reads) == 1:
+            raise PermissionError(13, 'CRT-only sharing code or stale code')
+        return native_read(path)
+    monkeypatch.setattr(module, 'read_json', read)
+    report = module.supervise(specs, limits=limits, evidence_dir=tmp_path / 'evidence')
+    assert report['observed'].get('progress_read_retries', 0) == int(cleared)
+    assert report['status'] == ('succeeded' if cleared else 'failed')
+    assert report['trigger'] is None if cleared else report['trigger']['kind'] == 'observation_failure'
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('stop', ['cancel', 'deadline'])
+def test_progress_sharing_retry_never_outlives_cancellation_or_batch_budget(
+        module, specs, tmp_path, monkeypatch, stop):
+    token, active_reads = Cancellation(), []
+    def scenario(request, state):
+        write_json(Path(request['progress']), progress(request, specs, current=True))
+    state = fake_parent(monkeypatch, module, specs, scenario=scenario)
+    native_read = module.read_json
+    def read(path):
+        if state.child.poll() is not None:
+            return native_read(path)  # Final saved-fact reconciliation is not a dispatch observation.
+        active_reads.append(path)
+        if len(active_reads) == 1:
+            return native_read(path)
+        assert len(active_reads) == 2, 'retried progress after cancellation or budget expired'
+        if stop == 'cancel':
+            token.request()
+        else:
+            time.sleep(.06)
+        error = PermissionError(13, 'sharing while stopping')
+        error.winerror = 32
+        raise error
+    monkeypatch.setattr(module, 'read_json', read)
+    limits = SupervisionLimits(run_seconds=1, batch_seconds=.05, rss_bytes=1024 * 1024,
+                               output_bytes=1024 * 1024, poll_seconds=.001, cleanup_seconds=.1)
+    report = module.supervise(specs, limits=limits, evidence_dir=tmp_path / 'evidence', cancellation=token)
+    assert report['trigger']['kind'] == ('cancelled' if stop == 'cancel' else 'batch_timeout')
+    assert report['observed'].get('progress_read_retries', 0) == 0
+    assert len(active_reads) == 2
+    assert not any(row.get('action') == 'continue' for row in state.sent)
+    assert not specs[1].run_dir.exists()
 
 
 @pytest.mark.unit
@@ -253,7 +388,7 @@ def test_poll_sleep_is_capped_by_nearest_deadline(module, specs, tmp_path, monke
 
 @pytest.mark.unit
 @pytest.mark.parametrize(('status', 'quality', 'complete'), [
-    ('failed', None, False), ('unknown', None, False), ('succeeded', False, True),
+    ('failed', None, False), ('unknown', None, False), ('rejected', None, False), ('succeeded', False, True),
     ('succeeded', True, False)])
 def test_first_bad_outcome_stops_without_rewriting_science(module, specs, limits, tmp_path,
                                                            monkeypatch, status, quality, complete):
@@ -289,7 +424,7 @@ def test_stop_keeps_partial_publication_and_busy_owner(module, specs, limits, tm
     assert report['interrupted']['scientific_status'] == 'succeeded'
     assert report['interrupted']['busy'] and not report['interrupted']['evidence_complete']
     assert (spec.run_dir / '.execution').is_dir()
-    assert json.loads(spec.result_path.read_text())['status'] == 'succeeded'
+    assert json.loads(spec.result_path.read_text(encoding='utf-8'))['status'] == 'succeeded'
 
 
 @pytest.mark.unit
@@ -313,12 +448,51 @@ def test_foreign_progress_fails_closed(module, specs, tmp_path):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize('fault', ['quality', 'incomplete', 'failed', 'exception'])
+def test_coordinator_pid_outside_owned_job_cannot_hide_a_descendant(
+        module, specs, limits, tmp_path, monkeypatch):
+    def scenario(request, state):
+        body = progress(request, specs)
+        body['coordinator_pid'] = 99998
+        body['done'] = False
+        write_json(Path(request['progress']), body)
+    state = fake_parent(monkeypatch, module, specs, scenario=scenario)
+    report = module.supervise(specs, limits=limits, evidence_dir=tmp_path / 'evidence')
+    assert report['trigger']['kind'] == 'observation_failure'
+    assert report['trigger']['error']['type'] == 'AdmissionError'
+    assert not any(body.get('action') == 'continue' for body in state.sent)
+    assert report['tree_empty']
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('done', [False, True])
+def test_finished_coordinator_may_exit_before_its_venv_launcher(
+        module, specs, limits, tmp_path, monkeypatch, done):
+    specs = specs[:1]
+    def scenario(request, state):
+        body = progress(request, specs)
+        body.update(coordinator_pid=99998, done=done)
+        write_json(Path(request['progress']), body)
+        calls = []
+        def poll():
+            calls.append(True)
+            if len(calls) > 1:
+                body['done'] = True
+                write_json(Path(request['progress']), body)
+                state.child.returncode = 0
+            return state.child.returncode
+        state.child.poll = poll
+    fake_parent(monkeypatch, module, specs, scenario=scenario)
+    report = module.supervise(specs, limits=limits, evidence_dir=tmp_path / 'evidence')
+    assert report['status'] == 'succeeded' and report['tree_empty']
+    assert len(report['completed']) == 1 and not report['cleanup_errors']
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('fault', ['quality', 'incomplete', 'failed', 'rejected', 'exception'])
 def test_coordinator_stops_first_failure_using_existing_run_contract(module, specs, tmp_path,
                                                                     monkeypatch, fault):
-    from rpipe import api
     request = {'request': 'test', 'specs': [module._spec_body(spec) for spec in specs],
-               'progress': str(tmp_path / 'progress.json'), 'retry': False}
+               'progress': str(tmp_path / 'progress.json'), 'retry': False, 'cleanup_seconds': .1}
     write_json(tmp_path / 'request.json', request)
     gate = {'request': 'test', 'request_path': str(tmp_path / 'request.json')}
     monkeypatch.setattr(module.sys, 'stdin', io.StringIO(json.dumps(gate) + '\n'))
@@ -328,11 +502,12 @@ def test_coordinator_stops_first_failure_using_existing_run_contract(module, spe
         calls.append((spec.id, kwargs))
         if fault == 'exception':
             raise RuntimeError('prepare failed')
-        return RunOutcome('failed' if fault == 'failed' else 'succeeded',
+        return RunReport(fault if fault in {'failed', 'rejected'} else 'succeeded',
                           quality=fault != 'quality', evidence_complete=fault != 'incomplete')
-    monkeypatch.setattr(api, 'run', run)
+    import importlib
+    monkeypatch.setattr(module, 'run', run)
     assert module.coordinator() == 1
-    body = json.loads((tmp_path / 'progress.json').read_text())
+    body = json.loads((tmp_path / 'progress.json').read_text(encoding='utf-8'))
     assert len(calls) == 1 and calls[0][1]['retry'] is False
     assert body['done'] and len(body['completed']) == (0 if fault == 'exception' else 1)
 
@@ -345,9 +520,10 @@ def test_coordinator_eof_is_a_closed_gate(module, monkeypatch):
 
 _TINY_COORDINATOR = '''import json, subprocess, sys, time
 from pathlib import Path
-from rpipe import api
-from rpipe.structure.artifacts import identity, write_json
-from rpipe.structure.contracts import RunOutcome
+import importlib
+run_module = importlib.import_module('rpipe.flow.supervision')
+from rpipe.structure.artifact.io import identity, write_json
+from rpipe.flow.context import RunReport
 from rpipe.flow.supervision import coordinator
 mode = sys.argv[1]
 def run(spec, **kwargs):
@@ -370,9 +546,9 @@ def run(spec, **kwargs):
         child = subprocess.Popen([sys.executable, '-B', '-c', 'import time; time.sleep(60)'])
         (spec.assets_dir / 'orphan-pid').write_text(str(child.pid))
     owner.rmdir()
-    return RunOutcome('failed' if mode == 'failed' else 'succeeded',
+    return RunReport('failed' if mode == 'failed' else 'succeeded',
                       quality=mode != 'quality', evidence_complete=mode != 'incomplete')
-api.run = run
+run_module.run = run
 raise SystemExit(coordinator())
 '''
 
@@ -407,9 +583,22 @@ def test_real_windows_deadline_covers_blocked_coordinator_phase(module, specs, t
 @pytest.mark.parametrize('mode', ['failed', 'quality', 'incomplete', 'success'])
 def test_real_windows_sequential_grants_and_first_failure(module, specs, tmp_path, monkeypatch, mode):
     tiny_coordinator(monkeypatch, module, mode)
+    native_read, observed_at, read_errors = module.read_json, time.monotonic(), []
+    def diagnose_progress_read(path):
+        try:
+            return native_read(path)
+        except PermissionError as error:
+            if path == tmp_path / 'evidence/progress.json':
+                read_errors.append({'type': type(error).__name__, 'errno': error.errno,
+                    'winerror': getattr(error, 'winerror', None), 'strerror': error.strerror,
+                    'filename': path.name, 'elapsed_seconds': time.monotonic() - observed_at})
+            raise
+    monkeypatch.setattr(module, 'read_json', diagnose_progress_read)
     limits = SupervisionLimits(run_seconds=4, batch_seconds=8, rss_bytes=128 * 1024 * 1024,
                                output_bytes=1024 * 1024, poll_seconds=.01, cleanup_seconds=.3)
     report = module.supervise(specs, limits=limits, evidence_dir=tmp_path / 'evidence')
+    if read_errors:
+        (tmp_path / 'PROGRESS_READ_FAILURE.json').write_text(json.dumps(read_errors), encoding='utf-8')
     assert report['tree_empty']
     if mode == 'success':
         assert report['status'] == 'succeeded' and len(report['completed']) == len(specs)
@@ -490,7 +679,8 @@ def test_real_windows_active_cancel_and_observer_failure_retain_owner(module, sp
 @pytest.mark.integration
 @pytest.mark.skipif(os.name != 'nt', reason='Windows Job Object process-tree contract')
 def test_real_public_run_owns_and_releases_tiny_train_eval(module, tensor_study, run_root, tmp_path):
-    from rpipe.api import plan, read_run
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact.readout import read_run
     specs = plan(tensor_study, run_root=run_root)
     limits = SupervisionLimits(run_seconds=20, batch_seconds=45, rss_bytes=2 * 1024 ** 3,
                                output_bytes=8 * 1024 ** 2, poll_seconds=.02, cleanup_seconds=1)
@@ -498,16 +688,16 @@ def test_real_public_run_owns_and_releases_tiny_train_eval(module, tensor_study,
     assert report['status'] == 'succeeded', report
     assert report['evidence_complete'] and report['tree_empty']
     assert len(report['completed']) == 2
-    assert all(read_run(spec)['scientific_status'] == 'succeeded' for spec in specs)
+    assert all(read_run(spec.ref)['scientific_status'] == 'succeeded' for spec in specs)
     assert all(not (spec.run_dir / '.execution').exists() for spec in specs)
-    assert read_run(specs[0])['execute']['steps'] == 2
+    assert read_run(specs[0].ref)['execute']['steps'] == 2
 
 
 @pytest.mark.integration
 @pytest.mark.skipif(os.name != 'nt', reason='Windows Job Object process-tree contract')
 def test_real_publication_hook_timeout_preserves_science_and_busy_owner(module, tensor_study,
                                                                        run_root, tmp_path):
-    from rpipe.api import plan
+    from rpipe.structure.make import plan
     with (tensor_study / 'study.yaml').open('a', encoding='utf-8') as stream:
         stream.write('flow: {study_phases: true}\n')
     (tensor_study / 'flow').mkdir()
@@ -522,3 +712,71 @@ def test_real_publication_hook_timeout_preserves_science_and_busy_owner(module, 
     assert report['trigger']['kind'] == 'run_timeout' and report['status'] == 'unknown'
     assert report['tree_empty'] and report['interrupted']['scientific_status'] == 'succeeded'
     assert (specs[0].run_dir / '.execution').is_dir() and not specs[1].run_dir.exists()
+
+
+@pytest.mark.integration
+def test_launch_unknown_owner_stops_new_dispatch(source_study, run_root, monkeypatch):
+    from rpipe.flow.context import RunReport
+    from rpipe.structure import make as planning
+
+    specs = planning.plan(source_study, run_root=run_root)
+    calls = []
+
+    def unresolved(spec, **kwargs):
+        calls.append(spec.id)
+        return RunReport('unknown')
+
+    import importlib
+    execution = importlib.import_module('rpipe.flow.supervision')
+    from rpipe.flow.supervision import launch
+    monkeypatch.setattr(execution, 'run', unresolved)
+    assert [outcome.status for outcome in launch(specs)] == ['unknown']
+    assert calls == [specs[0].id]
+
+
+@pytest.mark.integration
+def test_launch_preserves_explicit_retry_choice(source_study, run_root, monkeypatch):
+    from rpipe.flow.context import RunReport
+    from rpipe.structure import make as planning
+
+    specs = planning.plan(source_study, run_root=run_root)
+    calls = []
+    def execute(spec, **kwargs):
+        calls.append(kwargs['retry'])
+        return RunReport('succeeded', evidence_complete=True)
+    import importlib
+    execution = importlib.import_module('rpipe.flow.supervision')
+    from rpipe.flow.supervision import launch
+    monkeypatch.setattr(execution, 'run', execute)
+    launch(specs, retry=True)
+    assert calls == [True, True]
+
+
+@pytest.mark.unit
+def test_empty_launch_rejects_before_dispatch_or_output(source_study, run_root, monkeypatch):
+    from rpipe.flow import supervision
+    monkeypatch.setattr(supervision, 'run', lambda *a, **k: pytest.fail('empty batch dispatched a Run'))
+    with pytest.raises(AdmissionError):
+        supervision.launch([])
+    assert not run_root.exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('fault', ['quality', 'evidence', 'cancelled-before-start'])
+def test_launch_stops_on_bad_observations_or_preexisting_cancellation(
+        source_study, run_root, monkeypatch, fault):
+    from rpipe.flow import supervision
+    from rpipe.structure.make import plan
+    token = Cancellation()
+    specs = plan(source_study, run_root=run_root)
+    calls = []
+    if fault == 'cancelled-before-start':
+        token.request()
+    def execute(spec, **kwargs):
+        calls.append(spec.id)
+        return RunReport('succeeded', quality=False if fault == 'quality' else None,
+                          evidence_complete=fault != 'evidence')
+    monkeypatch.setattr(supervision, 'run', execute)
+    reports = supervision.launch(specs, cancellation=token)
+    assert len(reports) == len(calls) == (0 if fault == 'cancelled-before-start' else 1)
+    assert not run_root.exists()

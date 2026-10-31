@@ -12,18 +12,19 @@ import threading
 import time
 import uuid
 
-from rpipe.structure.artifacts import (contained, identity, read_json, validate_input_paths,
-                                       write_json)
-from rpipe.structure.contracts import (AdmissionError, Cancellation, RunSpec, SupervisionLimits,
-                                       validate_run_root)
-from rpipe.structure.execution import error_record
-from rpipe.structure.system.resources import WindowsJob, output_growth, output_snapshot
+from rpipe.structure.artifact.io import contained, identity, read_json, validate_input_paths, write_json
+from rpipe.structure.control import AdmissionError, RunSpec
+from .context import Budget, Cancellation, RunReport, SupervisionLimits
+from rpipe.structure.artifact.io import validate_run_root
+from rpipe.structure.artifact.io import safe_error_record as error_record
+from .run import run
+from rpipe.structure.system.resources import WindowsFileErrors, WindowsJob, output_growth, output_snapshot
 
 
 def _spec_body(spec):
     return {name: str(getattr(spec, name)) if name in {'source_dir', 'run_root'}
             else spec.to_config() if name == 'config' else getattr(spec, name)
-            for name in RunSpec.__dataclass_fields__}
+            for name, descriptor in RunSpec.__dataclass_fields__.items() if descriptor.init}
 
 
 def _successful(outcome):
@@ -33,7 +34,6 @@ def _successful(outcome):
 
 def coordinator():
     """The child cannot inspect a Study or create a Run before its stdin grant."""
-    from rpipe import api
 
     line = sys.stdin.readline()
     if not line:
@@ -70,7 +70,8 @@ def coordinator():
             grant.set()
 
     threading.Thread(target=controls, daemon=True).start()
-    state = {'schema': 1, 'request': nonce, 'identities': [identity(spec) for spec in specs],
+    state = {'schema': 1, 'request': nonce, 'coordinator_pid': os.getpid(),
+             'identities': [identity(spec) for spec in specs],
              'completed': [], 'current': None, 'done': False, 'error': None}
 
     def publish():
@@ -88,7 +89,8 @@ def coordinator():
             state['current'] = {'index': index, 'id': spec.id, 'started': time.monotonic()}
             publish()
             # execute() publishes its own config; make([spec]) would truncate the Study index.
-            outcome = api.run(spec, cancellation=cancellation, retry=request['retry'])
+            outcome = run(spec, cancellation=cancellation, retry=request['retry'],
+                          cleanup_seconds=request['cleanup_seconds'])
             row = {key: value for key, value in asdict(outcome).items() if key != 'result'}
             row.update(index=index, id=spec.id, identity=identity(spec),
                        elapsed_seconds=max(0.0, time.monotonic() - state['current']['started']),
@@ -115,6 +117,7 @@ def _progress(path, nonce, specs):
         raise AdmissionError('supervision progress exceeds the bounded summary size')
     body = read_json(path)
     if (body.get('schema') != 1 or body.get('request') != nonce
+            or type(body.get('coordinator_pid')) is not int or body['coordinator_pid'] <= 0
             or body.get('identities') != [identity(spec) for spec in specs]
             or not isinstance(body.get('completed'), list) or type(body.get('done')) is not bool):
         raise AdmissionError('invalid or foreign supervision progress')
@@ -124,7 +127,7 @@ def _progress(path, nonce, specs):
     for index, row in enumerate(completed):
         if (not isinstance(row, dict) or row.get('index') != index or row.get('id') != specs[index].id
                 or row.get('identity') != identity(specs[index])
-                or row.get('status') not in {'succeeded', 'failed', 'cancelled', 'unknown'}
+                or row.get('status') not in {'succeeded', 'failed', 'cancelled', 'unknown', 'rejected'}
                 or type(row.get('evidence_complete')) is not bool
                 or row.get('quality') is not None and type(row['quality']) is not bool
                 or not isinstance(row.get('cleanup_errors'), list)
@@ -171,7 +174,6 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
     if type(retry) is not bool:
         raise AdmissionError('retry must be a boolean')
     specs = tuple(specs)
-    from rpipe.api import _one_root
     if not specs or any(not isinstance(spec, RunSpec) for spec in specs):
         raise AdmissionError('a nonempty RunSpec batch is required')
     _one_root(specs)
@@ -194,6 +196,7 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
               'accounting': {'rss': 'sampled aggregate working set; not a hard memory quota',
                              'output': 'sampled positive file growth; not a disk quota',
                              'poll_seconds': limits.poll_seconds}, 'tree_empty': False}
+    file_errors = WindowsFileErrors()
     job, child, latest = WindowsJob(), None, None
     baseline = None
     assigned = False
@@ -234,18 +237,61 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
             if latest.get('error'):
                 stop('coordinator_error', error=latest['error'])
 
+    def observe_progress():
+        for attempt in range(3):
+            deadlines(time.monotonic())
+            cleared = file_errors.clear()
+            try:
+                body = _progress(progress_path, nonce, specs)
+                if body is not None:
+                    pid = body['coordinator_pid']
+                    finished = body['current'] is None and (
+                        body['done'] or len(body['completed']) == len(specs)
+                        or body['completed'] and not _successful(body['completed'][-1]))
+                    # The coordinator can finish before its venv redirector exits.
+                    if (latest is not None and pid != latest['coordinator_pid']
+                            or not finished and child.poll() is None and pid not in job.pids()):
+                        raise AdmissionError('supervision coordinator identity changed or escaped its Job')
+                return body
+            except OSError as error:
+                dos_code = file_errors.code()
+                code = getattr(error, 'winerror', None)
+                if code is None and cleared:
+                    code = dos_code
+                if code not in (32, 33):
+                    raise
+                report['observed'].setdefault('progress_read_first_code', code)
+                deadlines(time.monotonic())
+                if attempt == 2 or report['trigger'] is not None:
+                    raise
+                now = time.monotonic()
+                remaining = limits.batch_seconds - (now - started)
+                if latest and latest.get('current') is not None:
+                    remaining = min(remaining, limits.run_seconds - (now - latest['current']['started']))
+                delay = min(0.005, limits.poll_seconds, remaining)
+                if delay <= 0:
+                    deadlines(time.monotonic())
+                    raise
+                observed = report['observed']
+                observed['progress_read_retries'] = observed.get('progress_read_retries', 0) + 1
+                time.sleep(delay)
+                deadlines(time.monotonic())
+                if report['trigger'] is not None:
+                    raise
+
     try:
         evidence.mkdir(parents=True, exist_ok=False)
         evidence_owned = True
         baseline = output_snapshot(roots)
         request_path = evidence / 'request.json'
         write_json(request_path, {'request': nonce, 'specs': [_spec_body(spec) for spec in specs],
-                                 'progress': str(progress_path), 'retry': retry})
+                                 'progress': str(progress_path), 'retry': retry,
+                                 'cleanup_seconds': limits.cleanup_seconds / 2})
         env = os.environ.copy()
         env['PYTHONPATH'] = str(Path(__file__).resolve().parents[2]) + os.pathsep + env.get('PYTHONPATH', '')
         child = subprocess.Popen([sys.executable, '-B', '-m', 'rpipe', '_supervisor-coordinator'],
                                  stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                 env=env)
+                                 env=env, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
         job.assign(child)
         assigned = True
         growth = output_growth(roots, baseline)
@@ -265,7 +311,7 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
                 break
             observed_started = time.monotonic()
             deadlines(observed_started)
-            latest = _progress(progress_path, nonce, specs) or latest
+            latest = observe_progress() or latest
             rss = job.rss_bytes()
             growth = output_growth(roots, baseline)
             report['observed']['sample_seconds_max'] = max(
@@ -282,17 +328,17 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
             if report['trigger']:
                 break
             if child.poll() is not None:
-                latest = _progress(progress_path, nonce, specs) or latest
+                latest = observe_progress() or latest
                 deadlines(time.monotonic())
                 if not latest or not latest['done'] or len(latest['completed']) != len(specs) or child.returncode:
                     stop('coordinator_exit', exit_code=child.returncode)
-                elif set(job.pids()) - {child.pid}:
+                elif set(job.pids()) - {child.pid, latest['coordinator_pid']}:
                     stop('descendants_remain')
                 break
             if latest and latest['current'] is None and not latest['done']:
                 next_index = len(latest['completed'])
                 if next_index > granted and next_index < len(specs):
-                    if set(job.pids()) - {child.pid}:
+                    if set(job.pids()) - {child.pid, latest['coordinator_pid']}:
                         stop('descendants_remain', index=next_index - 1)
                         break
                     send('continue', index=next_index)
@@ -354,7 +400,7 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
         admission_failure.cleanup_errors = (*getattr(admission_failure, 'cleanup_errors', ()), *cleanup_failures)
         raise admission_failure
     try:
-        latest = _progress(progress_path, nonce, specs) or latest
+        latest = observe_progress() or latest
     except BaseException as exc:
         stop('observation_failure', error=error_record(exc))
     if latest:
@@ -412,3 +458,29 @@ def supervise(specs, *, limits, evidence_dir, cancellation=None, retry=False):
             report.update(status='unknown', evidence_complete=False)
         write_json(report_path, report)
     return report
+
+
+def _one_root(specs):
+    if len({(s.study_root, s.source_dir, s.source_digest) for s in specs}) > 1:
+        raise AdmissionError('one Study source/version/output root is required')
+
+
+def launch(specs, *, budget: Budget | None = None, cancellation: Cancellation | None = None,
+           retry: bool = False) -> tuple[RunReport, ...]:
+    cancellation = cancellation or Cancellation()
+    specs = tuple(specs)
+    if not specs or any(not isinstance(spec, RunSpec) for spec in specs):
+        raise AdmissionError('launch requires nonempty RunSpecs')
+    _one_root(specs)
+    if len({spec.id for spec in specs}) != len(specs):
+        raise AdmissionError('duplicate Run in launch request')
+    outcomes = []
+    for spec in specs:
+        if cancellation and cancellation.is_set():
+            break
+        outcomes.append(run(spec, budget=budget, cancellation=cancellation, retry=retry))
+        outcome = outcomes[-1]
+        if (outcome.status != 'succeeded' or outcome.quality is False
+                or not outcome.evidence_complete):
+            break
+    return tuple(outcomes)

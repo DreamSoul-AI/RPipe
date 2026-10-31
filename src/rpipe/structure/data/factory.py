@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Iterator, Callable
-from rpipe.structure.contracts import DataConfig
+from rpipe.structure.control import DataConfig
+from rpipe.structure.api import DataPort
 
-from rpipe.structure.artifacts import cache_lock, reference_tree, contained
+from rpipe.structure.artifact.io import cache_lock, reference_tree, contained
 
 from rpipe.structure.system.origin import apply_model_origin, bind_endpoint, discard_bad_archive, endpoint_for
 
@@ -28,11 +29,22 @@ class Data:
         self._resume_data = None
         self._iterators = {}
 
-    def iter_batches(self, split: str) -> Iterator[Any]:
+    def has_split(self, split: str) -> bool:
+        return self._loaders.get(split) is not None
+
+    def dataset(self, split: str) -> Any | None:
+        return getattr(self._loaders.get(split), 'dataset', None)
+
+    def batch_size(self, split: str = 'train') -> int | None:
+        return getattr(self._loaders.get(split), 'batch_size', None)
+
+    def iter_batches(self, split: str, *, resumable: bool = True) -> Iterator[Any]:
+        if type(resumable) is not bool:
+            raise ValueError('resumable must be a boolean')
         loader = self._loaders.get(split)
         if loader is None:
             return iter(())
-        if split == 'train':
+        if split == 'train' and resumable:
             from rpipe.structure.data.resume import (
                 BatchCursor, cursor_loader, generator_states, loader_spec, restore_generators,
             )
@@ -92,17 +104,53 @@ class Data:
                 'consumed': cursor.consumed, 'exhausted': cursor.exhausted,
                 'start': self._train_start, 'after': generator_states(loader)}
 
-    def restore_training_state(self, state: dict[str, Any]) -> bool:
-        from rpipe.structure.data.resume import loader_spec
+    def validate_training_state(self, state: dict[str, Any], *, num_steps: int | None = None,
+                                step_period: int = 1) -> None:
+        import json
+        import math
+        import torch
+        from rpipe.structure.data.resume import generators, loader_spec
 
         loader = self._loaders.get('train')
-        if state.get('version') != 1 or state.get('spec') != loader_spec(loader) or state.get('seed') != self.meta.get('seed'):
+        expected = loader_spec(loader)
+        if expected is not None and num_steps is not None and self._train_set is not None:
+            expected = dict(expected)
+            size = int(self.meta.get('batch_size') or getattr(loader, 'batch_size', 1) or 1)
+            expected.update(dataset_size=len(self._train_set), batch_size=size,
+                            num_samples=size * int(num_steps) * max(int(step_period), 1),
+                            sampler='RandomSampler', replacement=False, drop_last=False)
+        if (not isinstance(state, dict) or expected is None
+                or type(state.get('version')) is not int or state['version'] != 1):
+            raise ValueError('unsupported checkpoint data state')
+        if (json.dumps(state.get('spec'), sort_keys=True) != json.dumps(expected, sort_keys=True)
+                or json.dumps(state.get('seed')) != json.dumps(self.meta.get('seed'))):
             raise ValueError('checkpoint data sampler/batch/seed does not match current data')
-        if state.get('identity') != {'name': self.name, 'source': self.source, 'config': self.meta.get('config')}:
+        identity = {'name': self.name, 'source': self.source, 'config': self.meta.get('config')}
+        if json.dumps(state.get('identity'), sort_keys=True, allow_nan=False) != json.dumps(identity, sort_keys=True, allow_nan=False):
             raise ValueError('checkpoint data identity/config does not match current data')
         consumed = state.get('consumed')
-        if type(consumed) is not int or not 0 <= consumed <= len(loader.batch_sampler) or type(state.get('exhausted')) is not bool:
+        batches = (expected['num_samples'] // expected['batch_size'] if expected['drop_last']
+                   else math.ceil(expected['num_samples'] / expected['batch_size']))
+        if type(consumed) is not int or not 0 <= consumed <= batches or type(state.get('exhausted')) is not bool:
             raise ValueError('invalid checkpoint data cursor')
+        for field in ('start', 'after'):
+            values = state.get(field)
+            if not isinstance(values, dict) or set(values) != {'sampler', 'loader'}:
+                raise ValueError('invalid checkpoint data generators')
+            actual = generators(loader)
+            for name, value in values.items():
+                present = (name == 'sampler' and self.meta.get('seed') is not None
+                           if num_steps is not None and self._train_set is not None
+                           else actual[name] is not None)
+                if (value is not None) != present:
+                    raise ValueError('checkpoint loader generator does not match current data')
+                if value is not None:
+                    if type(value) is not torch.Tensor:
+                        raise ValueError('invalid checkpoint generator state')
+                    torch.Generator().set_state(value.cpu())
+
+    def restore_training_state(self, state: dict[str, Any]) -> bool:
+        self.validate_training_state(state)
         self._resume_data = state
         return not state['exhausted']
 
@@ -230,28 +278,26 @@ class DataRegistry:
     def list(cls) -> list[tuple[str, str]]:
         return sorted(cls._items)
 
-class DataFactory:
-    @staticmethod
-    def build(
-        data_config: DataConfig,
-        assets_dir: Path | str,
-        seed: int | None = None,
-        origin: str | None = None,
-        *,
-        profile_path: Path | str | None = None,
-    ) -> Data:
-        name = data_config.name
-        source = data_config.source if data_config.source is not None else 'torch'
-        builder = DataRegistry.get(name, source)
-        if builder is None:
-            raise ValueError(f'unknown data name/source: {name!r}/{source!r}')
-        if origin not in (None, ''):
-            apply_model_origin(origin)
-        with cache_lock(assets_dir):
-            if builder is _build_torch_vision:
-                return _build_torch_vision(data_config, Path(assets_dir), seed=seed, origin=origin,
-                                           profile_path=profile_path)
-            return builder(data_config, Path(assets_dir), seed=seed)
+def build_data(
+    data_config: DataConfig,
+    assets_dir: Path | str,
+    seed: int | None = None,
+    origin: str | None = None,
+    *,
+    profile_path: Path | str | None = None,
+) -> DataPort:
+    name = data_config.name
+    source = data_config.source if data_config.source is not None else 'torch'
+    builder = DataRegistry.get(name, source)
+    if builder is None:
+        raise ValueError(f'unknown data name/source: {name!r}/{source!r}')
+    if origin not in (None, ''):
+        apply_model_origin(origin)
+    with cache_lock(assets_dir):
+        if builder is _build_torch_vision:
+            return _build_torch_vision(data_config, Path(assets_dir), seed=seed, origin=origin,
+                                       profile_path=profile_path)
+        return builder(data_config, Path(assets_dir), seed=seed)
 
 def _build_stub(data_config: DataConfig, assets_dir: Path, seed: int | None = None) -> Data:
     name = data_config.name or 'unknown'

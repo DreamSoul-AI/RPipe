@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from typing import Any
+from pathlib import Path
+
+from rpipe.structure.api import CancelCheck, ComputationObservation, DataPort, ModelPort, SystemPort, TrackerPort
 
 from rpipe.structure.algorithm.factory import Algorithm
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.batch import prepare_tensors
 from rpipe.structure.algorithm.evaluation_support import (
     _is_better,
@@ -14,7 +17,7 @@ from rpipe.structure.algorithm.evaluation_support import (
     eval_test_split,
     should_early_stop,
 )
-from rpipe.structure.algorithm.optim import clip_gradients, make_scheduler
+from rpipe.structure.algorithm.optim import clip_gradients, current_lr
 from rpipe.structure.algorithm.progress import (
     UNIT_EPOCH,
     UNIT_STEP,
@@ -25,18 +28,18 @@ from rpipe.structure.algorithm.progress import (
     due_period,
     format_hms,
     infer_steps_per_epoch,
+    hook_observation,
     resolve_budget,
 )
-from rpipe.structure.algorithm.tracker import AlgorithmTracker
-from rpipe.structure.algorithm.resume import capture_rng, restore_rng, partial_resume_warning
+from rpipe.structure.algorithm.resume import admit_resume, apply_resume, build_training_snapshot, load_resume, partial_resume_warning
+from rpipe.structure.artifact import checkpoint
+from rpipe.structure.system.runtime import capture_rng, restore_rng
 from rpipe.structure.algorithm.metrics import BATCH_NAMES, MetricBundle
 
-due_eval_period = due_period
-
-
 class TrainAlgorithm(Algorithm):
-    def __init__(self, config: AlgorithmConfig) -> None:
-        super().__init__(config)
+    def __init__(self, config: AlgorithmConfig, *, checkpoint_dir: Path,
+                 train_checkpoint_dir: Path | None = None) -> None:
+        super().__init__(config, checkpoint_dir=checkpoint_dir, train_checkpoint_dir=train_checkpoint_dir)
         self._best_test: float | None = None
         self._best_metric = best_spec(config)[1]
         self._stall = 0
@@ -44,19 +47,23 @@ class TrainAlgorithm(Algorithm):
 
     def on_eval_period(
         self,
-        tracker: AlgorithmTracker,
+        tracker: TrackerPort,
         logger: Any,
         data: Any,
         model: Any,
         system: Any,
         extra: dict[str, Any] | None = None,
+        *,
+        cancel_check: CancelCheck,
     ) -> bool:
+        cancel_check()
         extra = extra if extra is not None else {}
         self.last_improved = False
         if getattr(model, 'module', None) is None:
             return False
         metrics = eval_test_split(
-            tracker, logger, data, model, system, extra, num_steps=eval_batch_limit(self.config)
+            tracker, logger, data, model, system, extra, num_steps=eval_batch_limit(self.config),
+            cancel_check=cancel_check,
         )
         split, metric, mode = best_spec(self.config)
         self._best_metric = metric
@@ -95,7 +102,7 @@ class TrainAlgorithm(Algorithm):
 
     def on_checkpoint(
         self,
-        tracker: AlgorithmTracker,
+        tracker: TrackerPort,
         logger: Any,
         data: Any,
         model: Any,
@@ -106,8 +113,7 @@ class TrainAlgorithm(Algorithm):
         extra = extra or {}
         names = list(extra.get('checkpoint_names') or [])
         payload = extra.get('payload')
-        writer = getattr(system, 'save_checkpoint', None)
-        if not names or payload is None or not callable(writer):
+        if not names or payload is None:
             return
         payload = dict(payload)
         payload['best_metric'] = self._best_metric
@@ -117,77 +123,27 @@ class TrainAlgorithm(Algorithm):
         else:
             payload.pop('best_accuracy', None)
         for name in names:
-            path = writer(payload, name)
+            path = checkpoint.save_snapshot(self.checkpoint_dir / f'{name}.pt', payload)
             if logger is not None:
-                logger.info(f'name={name} path={path}', event='ckpt')
+                logger.info(f'name={name} path={path}', event='checkpoint.saved')
 
-    def run(self, data: Any, model: Any, system: Any, tracker: AlgorithmTracker) -> dict[str, Any]:
+    def compute(self, data: DataPort, model: ModelPort, system: SystemPort, tracker: TrackerPort,
+                cancel_check: CancelCheck) -> ComputationObservation:
+        cancel_check()
         if getattr(data, 'source', None) == 'stub' and (getattr(data, 'meta', None) or {}).get('stub') is True:
             return _run_stub(self.config, tracker)
         if getattr(model, 'module', None) is None or not callable(getattr(data, 'iter_batches', None)):
             raise ValueError('train requires a model module and data.iter_batches; use explicit stub data for flow checks')
-        return _run_supervised(self, data, model, system, tracker)
+        return _run_supervised(self, data, model, system, tracker, cancel_check)
 
 
-def run(control_algorithm: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
-    """Legacy dict entry; prefer TrainAlgorithm.run."""
-    algo = TrainAlgorithm(AlgorithmConfig.from_mapping(control_algorithm))
-    return algo.run(
-        state.get('data'),
-        state.get('model'),
-        state.get('system'),
-        state['tracker'],
-    )
 
 
-def _current_lr(optimizer: Any, fallback: float) -> float:
-    groups = getattr(optimizer, 'param_groups', None)
-    if not groups:
-        return fallback
-    return float(groups[0].get('lr', fallback))
 
 
-def _hook_extra(*, epoch: int, lr: float, step: int | None = None) -> dict[str, Any]:
-    extra: dict[str, Any] = {'epoch': epoch, 'lr': lr}
-    if step is not None:
-        extra['step'] = step
-    return extra
 
 
-def _build_payload(
-    module: Any,
-    optimizer: Any,
-    scheduler: Any,
-    extra: dict[str, Any],
-    tracker: AlgorithmTracker | None = None,
-    logger: Any | None = None,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        'epoch': extra.get('epoch'),
-        'step': extra.get('step'),
-        'model': module.state_dict(),
-        'optimizer': optimizer.state_dict() if optimizer is not None else None,
-        'scheduler': scheduler.state_dict() if scheduler is not None else None,
-    }
-    if extra.get('test_accuracy') is not None:
-        payload['test_accuracy'] = extra['test_accuracy']
-    if extra.get('best_accuracy') is not None:
-        payload['best_accuracy'] = extra['best_accuracy']
-    if extra.get('best_value') is not None:
-        payload['best_value'] = extra['best_value']
-        payload['best_metric'] = extra.get('best_metric')
-    if tracker is not None:
-        payload['tracker'] = tracker.state_dict()
-        progress = extra.get('progress') or extra
-        payload['tracker']['progress'] = {
-            key: progress[key] for key in ('step', 'epoch') if key in progress
-        }
-    if logger is not None and hasattr(logger, 'state_dict'):
-        payload['logger'] = logger.state_dict()
-    return payload
-
-
-def _run_stub(config: AlgorithmConfig, tracker: AlgorithmTracker) -> dict[str, Any]:
+def _run_stub(config: AlgorithmConfig, tracker: TrackerPort) -> dict[str, Any]:
     budget = resolve_budget(config, steps_per_epoch=1)
     tracker.append('train', n=1, values={'Loss': 0.0})
     tracker.save('train')
@@ -224,15 +180,15 @@ def _run_supervised(
     data: Any,
     model: Any,
     system: Any,
-    tracker: AlgorithmTracker,
+    tracker: TrackerPort,
+    cancel_check: CancelCheck,
 ) -> dict[str, Any]:
     import torch
     import torch.nn.functional as F
 
     config = algo.config
     device = torch.device(getattr(system, 'device', 'cpu'))
-    module = system.place_module(model.module)
-    model.module = module
+    module = model.module
     logger = getattr(system, 'logger', None)
     budget = resolve_budget(config, steps_per_epoch=infer_steps_per_epoch(data))
     lr = float(config.setting('lr', 0.1))
@@ -246,21 +202,10 @@ def _run_supervised(
     already_percent: set[float] = set()
 
     resume_extra: dict[str, Any] = {}
-    restored = algo.resume(data, model, system, tracker, resume_extra)
+    restored = load_resume(config, checkpoint_dir=algo.checkpoint_dir,
+                           train_checkpoint_dir=algo.train_checkpoint_dir, observation=resume_extra)
     optimizer = algo.make_optimizer(module)
     scheduler = algo.make_scheduler(optimizer, budget.scheduler_t_max())
-    if restored:
-        opt_state = restored.get('optimizer')
-        if opt_state is not None:
-            optimizer.load_state_dict(opt_state)
-        sched_state = restored.get('scheduler')
-        if scheduler is not None and sched_state is not None:
-            scheduler.load_state_dict(sched_state)
-        if restored.get('best_value') is not None:
-            algo._best_test = restored['best_value']
-        elif algo._best_metric == 'Accuracy' and restored.get('best_accuracy') is not None:
-            algo._best_test = restored['best_accuracy']
-    module.train()
     epoch = int(restored.get('epoch') or 0) if restored else 0
     steps = int(restored.get('step') or 0) if restored else 0
     period = max(int(config.setting('step_period', 1) or 1), 1)
@@ -278,13 +223,26 @@ def _run_supervised(
     exact_metrics = (device.type in ('cpu', 'cuda') and type(tracker.metrics) is MetricBundle
                      and set(tracker.metrics.names_for('train')) <= BATCH_NAMES)
     contract['metrics'] = getattr(tracker.metrics, 'names', None)
+    contract['model'] = {'name': getattr(model, 'name', None), 'source': getattr(model, 'source', None),
+                         'config': (getattr(model, 'meta', None) or {}).get('config')}
+    admit_resume(restored, model=model, tracker=tracker, data=data, contract=contract,
+                 num_steps=budget.num_steps if budget.unit == UNIT_STEP else None, step_period=period)
+    if restored:
+        if restored.get('training_state') is None:
+            partial_resume_warning(logger)
+        if restored.get('optimizer') is not None:
+            optimizer.load_state_dict(restored['optimizer'])
+        if scheduler is not None and restored.get('scheduler') is not None:
+            scheduler.load_state_dict(restored['scheduler'])
+        if restored.get('best_value') is not None:
+            algo._best_test = restored['best_value']
+        elif algo._best_metric == 'Accuracy' and restored.get('best_accuracy') is not None:
+            algo._best_test = restored['best_accuracy']
+    apply_resume(restored, model=model, tracker=tracker)
+    module.train()
     training_state = (restored or {}).get('training_state')
     resume_inside_epoch = False
     if training_state is not None:
-        if training_state.get('version') != 1:
-            raise ValueError('unsupported checkpoint training_state version')
-        if training_state.get('data') is not None and training_state.get('contract') != contract:
-            raise ValueError('checkpoint training contract differs; keep budget/settings/runtime unchanged')
         algo._stall = int(training_state.get('stall', 0))
         already_percent = set(training_state.get('already_percent') or [])
     tracker.begin_run((restored or {}).get('tracker'))
@@ -300,7 +258,7 @@ def _run_supervised(
         restore_rng(training_state['rng'])
     clock = EtaClock(origin=steps if budget.unit == UNIT_STEP else epoch)
     stop = bool(training_state and training_state.get('stopped'))
-    used_lr = _current_lr(optimizer, lr)
+    used_lr = current_lr(optimizer, lr)
 
     def _timing() -> dict[str, str]:
         current = steps if budget.unit == UNIT_STEP else epoch
@@ -320,10 +278,12 @@ def _run_supervised(
     def fire_eval(extra: dict[str, Any]) -> bool:
         if budget.unit == UNIT_STEP:
             finish_train_segment(extra, reported=bool(log_period and steps % log_period == 0))
-        return bool(algo.on_eval_period(tracker, logger, data, model, system, extra))
+        return bool(algo.on_eval_period(tracker, logger, data, model, system, extra,
+                                        cancel_check=cancel_check))
 
     def fire_ckpt(*, extra: dict[str, Any], improved: bool, is_last: bool) -> None:
         nonlocal already_percent
+        cancel_check()
         current = budget.progress(epoch=epoch, step=steps)
         names = checkpoint_names(
             mode=ckpt_mode,
@@ -341,7 +301,7 @@ def _run_supervised(
             return
         extra = dict(extra)
         extra['checkpoint_names'] = names
-        extra['payload'] = _build_payload(module, optimizer, scheduler, extra, tracker, logger)
+        extra['payload'] = build_training_snapshot(module, optimizer, scheduler, extra, tracker)
         data_state = getattr(data, 'training_state', None)
         hits = crossed_percents(current, budget.total, percents, already_percent) if ckpt_mode == 'percent' else []
         extra['payload']['training_state'] = {
@@ -358,11 +318,12 @@ def _run_supervised(
     wrote_last_ckpt = stop
     try:
         if already_done:
-            extra = _hook_extra(epoch=epoch, lr=used_lr, step=steps)
+            extra = hook_observation(epoch=epoch, lr=used_lr, step=steps)
             extra.update(_timing())
             fire_eval(extra)
         else:
             while True:
+                cancel_check()
                 if stop:
                     break
                 finishing_restored_epoch = resume_inside_epoch
@@ -375,8 +336,7 @@ def _run_supervised(
                 step_period = max(int(config.setting('step_period', 1) or 1), 1)
                 optimizer.zero_grad()
                 for batch in data.iter_batches('train'):
-                    from rpipe.structure.system.runtime import check_cancelled
-                    check_cancelled(system)
+                    cancel_check()
                     batches_this_epoch += 1
                     images, targets = prepare_tensors(batch, module, device)
                     logits = module(images)
@@ -388,7 +348,7 @@ def _run_supervised(
                     if accum % step_period != 0:
                         continue
                     clip_gradients(module, config)
-                    used_lr = _current_lr(optimizer, lr)
+                    used_lr = current_lr(optimizer, lr)
                     optimizer.step()
                     optimizer.zero_grad()
                     steps += 1
@@ -398,7 +358,7 @@ def _run_supervised(
                         logger.report(tracker, 'train', extra=extra)
                         tracker.flush('train', progress=extra)
                     if budget.unit == UNIT_STEP:
-                        extra = _hook_extra(epoch=epoch, lr=used_lr, step=steps)
+                        extra = hook_observation(epoch=epoch, lr=used_lr, step=steps)
                         extra.update(_timing())
                         improved = False
                         if due_period(eval_period, steps):
@@ -418,10 +378,10 @@ def _run_supervised(
                     raise ValueError('empty train iterator cannot satisfy a positive training budget')
                 if batches_this_epoch and steps == steps_at_epoch_start and not finishing_restored_epoch:
                     raise ValueError('train iterator has fewer batches than step_period; no optimizer update is possible')
-                extra = _hook_extra(epoch=epoch, lr=used_lr, step=steps)
+                extra = hook_observation(epoch=epoch, lr=used_lr, step=steps)
                 extra.update(_timing())
                 finish_train_segment(extra)
-                extra = _hook_extra(epoch=epoch, lr=used_lr, step=steps)
+                extra = hook_observation(epoch=epoch, lr=used_lr, step=steps)
                 extra.update(_timing())
                 if budget.unit == UNIT_EPOCH:
                     improved = False
@@ -441,7 +401,7 @@ def _run_supervised(
                         wrote_last_ckpt = True
                 if steps >= budget.num_steps:
                     stop = True
-        extra = _hook_extra(epoch=epoch, lr=used_lr, step=steps)
+        extra = hook_observation(epoch=epoch, lr=used_lr, step=steps)
         if eval_period <= 0 and not already_done:
             fire_eval(extra)
             if keep_best and algo.last_improved:
@@ -482,7 +442,3 @@ def _run_supervised(
     summary['elapsed'] = format_hms(clock.elapsed_seconds())
     summary['elapsed_seconds'] = float(clock.elapsed_seconds())
     return summary
-
-
-def budget_for(config: AlgorithmConfig) -> ProgressBudget:
-    return resolve_budget(config)

@@ -9,7 +9,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
 
 def test_plan_expands_factors_and_seeds_without_loading_payload_or_writing(
         source_study, run_root, file_bytes):
-    from rpipe.api import plan
+    from rpipe.structure.make import plan
 
     with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
         stream.write('axes: {algorithm.lr: [0.1, 0.2]}\nrecipe: missing_recipe.py\n')
@@ -32,7 +32,7 @@ def test_plan_expands_factors_and_seeds_without_loading_payload_or_writing(
     'study: toy\nseeds: [0]\nunrecognized: value\n',
 ], ids=['duplicate-seed', 'boolean-seed', 'negative-seed', 'duplicate-factor', 'unknown-field'])
 def test_plan_invalid_declaration_rejects_before_output(source_study, run_root, declaration):
-    from rpipe.api import plan
+    from rpipe.structure.make import plan
 
     (source_study / 'study.yaml').write_text(declaration, encoding='utf-8')
     with pytest.raises((TypeError, ValueError)):
@@ -41,7 +41,7 @@ def test_plan_invalid_declaration_rejects_before_output(source_study, run_root, 
 
 
 def test_plan_rejects_runtime_output_inside_source(source_study):
-    from rpipe.api import plan
+    from rpipe.structure.make import plan
 
     with pytest.raises((TypeError, ValueError)):
         plan(source_study, run_root=source_study / 'runs')
@@ -49,7 +49,7 @@ def test_plan_rejects_runtime_output_inside_source(source_study):
 
 
 def test_train_only_display_tags_do_not_break_same_seed_eval_pair(source_study, run_root):
-    from rpipe.api import plan
+    from rpipe.structure.make import plan
 
     with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
         stream.write('axes: {algorithm.mode: [train, eval]}\n'
@@ -66,7 +66,7 @@ def test_train_only_display_tags_do_not_break_same_seed_eval_pair(source_study, 
 
 
 def test_run_description_is_rendered_from_effective_scientific_settings(source_study, run_root):
-    from rpipe.api import plan
+    from rpipe.structure.make import plan
 
     original = plan(source_study, run_root=run_root)
     with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
@@ -81,7 +81,7 @@ def test_run_description_is_rendered_from_effective_scientific_settings(source_s
 
 @pytest.mark.parametrize('template', ['{missing}', '{seed.__class__}', '{seed:1000000000}', '{seed!r}'])
 def test_run_description_rejects_unknown_or_unbounded_format_syntax(source_study, run_root, template):
-    from rpipe.api import plan
+    from rpipe.structure.make import plan
     import yaml
 
     declaration = {'study': 'toy', 'run_description': template}
@@ -98,7 +98,7 @@ def test_run_description_rejects_unknown_or_unbounded_format_syntax(source_study
     ('flow: {unknown_stage: true}\n', 'flow'),
 ])
 def test_unimplemented_or_ambiguous_declarations_fail_explicitly(source_study, run_root, declaration, phrase):
-    from rpipe.api import plan
+    from rpipe.structure.make import plan
 
     (source_study / 'study.yaml').write_text('study: toy\n' + declaration, encoding='utf-8')
     with pytest.raises(ValueError, match=phrase):

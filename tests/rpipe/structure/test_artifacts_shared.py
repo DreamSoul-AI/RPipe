@@ -5,8 +5,8 @@ import sys
 
 import pytest
 
-from rpipe.structure.artifacts import cache_lock, link_input
-from rpipe.structure.artifacts import prepared_resource
+from rpipe.structure.artifact.io import cache_lock, link_input
+from rpipe.structure.artifact.io import prepared_resource
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.structure_layer, pytest.mark.module_artifact,
@@ -40,7 +40,7 @@ def test_input_reference_never_copies_or_overwrites(tmp_path):
 
 
 def test_identical_raw_duplicates_become_one_file(tmp_path):
-    from rpipe.structure.artifacts import reference_tree
+    from rpipe.structure.artifact.io import reference_tree
     source, target = tmp_path / 'raw', tmp_path / 'backend'
     source.mkdir()
     target.mkdir()
@@ -71,7 +71,7 @@ def test_interprocess_prepare_has_one_writer_and_recovers_after_exit(tmp_path):
     script = '''
 from pathlib import Path
 import sys, time
-from rpipe.structure.artifacts import cache_lock
+from rpipe.structure.artifact.io import cache_lock
 root = Path(sys.argv[1])
 with cache_lock(root, timeout=20):
     target = root / 'download.bin'
@@ -95,7 +95,7 @@ with cache_lock(root, timeout=20):
 def test_terminated_writer_does_not_leave_an_owned_lock(tmp_path):
     script = '''
 import sys, time
-from rpipe.structure.artifacts import cache_lock
+from rpipe.structure.artifact.io import cache_lock
 with cache_lock(sys.argv[1]):
     print('locked', flush=True)
     time.sleep(30)
@@ -177,7 +177,7 @@ def test_nan_cache_lock_budget_cannot_disable_contention_deadline(tmp_path, monk
     import errno
     import time
     from types import SimpleNamespace
-    import rpipe.structure.artifacts as shared
+    import rpipe.structure.artifact.io as shared
 
     sleeps = []
     def busy(*args):
@@ -223,7 +223,7 @@ def test_interrupted_resource_retry_preserves_failed_staging_and_publishes_fresh
 def test_zero_wait_busy_lock_preserves_cause_and_releases_handle(tmp_path, monkeypatch):
     import errno
     from types import SimpleNamespace
-    import rpipe.structure.artifacts as shared
+    import rpipe.structure.artifact.io as shared
 
     error = BlockingIOError(errno.EACCES, 'fixture occupied lock')
     def busy(*args):
@@ -249,7 +249,7 @@ def test_zero_wait_busy_lock_preserves_cause_and_releases_handle(tmp_path, monke
 def test_non_contention_lock_error_is_not_retried_or_wrapped(tmp_path, monkeypatch):
     import errno
     from types import SimpleNamespace
-    import rpipe.structure.artifacts as shared
+    import rpipe.structure.artifact.io as shared
 
     error = OSError(errno.EBADF, 'fixture invalid descriptor')
     calls = []
@@ -296,7 +296,7 @@ def test_nested_lock_exception_keeps_outer_owner_then_releases_for_other_thread(
 def test_finite_lock_deadline_has_bounded_retry_timeline(tmp_path, monkeypatch):
     import errno
     from types import SimpleNamespace
-    import rpipe.structure.artifacts as shared
+    import rpipe.structure.artifact.io as shared
 
     clock = iter([0.0, 0.0, 0.05, 0.1])
     attempts, sleeps = [], []
@@ -324,7 +324,7 @@ def test_finite_lock_deadline_has_bounded_retry_timeline(tmp_path, monkeypatch):
 def test_cancelled_wait_cleans_handle_before_next_acquisition(tmp_path, monkeypatch):
     import errno
     from types import SimpleNamespace
-    import rpipe.structure.artifacts as shared
+    import rpipe.structure.artifact.io as shared
 
     cancelled = KeyboardInterrupt('fixture cancelled wait')
     attempts = []
@@ -415,7 +415,7 @@ def shared_publication_case(tmp_path, monkeypatch, request):
 
 @pytest.mark.parametrize('cleanup', ['failed-permission', 'failed-io', 'committed-io', 'program-error'])
 def test_shared_owned_cleanup_preserves_publication_outcome(tmp_path, monkeypatch, shared_publication_case, cleanup):
-    from rpipe.structure import artifacts as _atomic
+    from rpipe.structure.artifact import io as _atomic
 
     source, target, destination, invoke = shared_publication_case
     peer = tmp_path / 'peer.link'
@@ -456,7 +456,7 @@ def test_shared_owned_cleanup_preserves_publication_outcome(tmp_path, monkeypatc
     os.name != 'nt', reason='Windows read-only hardlink replacement/unlink semantics'))],
     ids=['native-writable', 'native-readonly'])
 def test_shared_native_readonly_cleanup_keeps_original_replace_error(tmp_path, monkeypatch, shared_publication_case, readonly):
-    from rpipe.structure import artifacts as _atomic
+    from rpipe.structure.artifact import io as _atomic
 
     source, target, destination, invoke = shared_publication_case
     if readonly:
