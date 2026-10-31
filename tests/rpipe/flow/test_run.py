@@ -11,6 +11,61 @@ pytestmark = [pytest.mark.content, pytest.mark.p1,
               pytest.mark.result_type('categorical', detail='summary')]
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize('parent_state', [
+    'result_only', 'missing_outcome', 'busy', 'mismatched_attempt',
+    'quality_failed', 'incomplete', 'closed',
+])
+def test_eval_admission_requires_closed_successful_training_evidence(
+        source_study, run_root, science_factory, science_worker, parent_state):
+    from rpipe.structure.make import plan, publish
+    from rpipe.structure.artifact import io
+    from rpipe.structure.artifact.readout import read_run
+    from rpipe.flow.run import run
+
+    (source_study / 'study.yaml').write_text(
+        'study: toy\nseeds: [0]\naxes: {algorithm.mode: [train, eval]}\n', encoding='utf-8')
+    train, evaluate = plan(source_study, run_root=run_root)
+    publish((train, evaluate))
+    attempt = 'a' * 32
+    quality, complete = parent_state != 'quality_failed', parent_state != 'incomplete'
+    result = {'id': train.id, 'identity': io.identity(train), 'attempt': attempt,
+              'status': 'succeeded', 'quality': quality, 'evidence_complete': complete, 'metrics': {}}
+    record = {'schema': 1, 'identity': io.identity(train), 'attempt': attempt,
+              'owner_token': 'b' * 32, 'phase': 'closing', 'candidate_status': 'succeeded',
+              'quality': quality, 'evidence_complete': True, 'scientific_result_published': True,
+              'derived_status': 'not_run', 'error': None, 'cleanup_errors': [], 'cancelled': False}
+    io.write_json(train.result_path, result)
+    if parent_state != 'result_only':
+        io.write_json(train.run_dir / 'execution.json', record)
+        if parent_state != 'missing_outcome':
+            io.write_json(train.run_dir / 'attempts' / attempt / 'outcome.json', record)
+    if parent_state == 'busy':
+        (train.run_dir / '.execution').mkdir()
+    if parent_state == 'mismatched_attempt':
+        io.write_json(train.result_path, {**result, 'attempt': 'c' * 32})
+    before = {p.relative_to(train.run_dir): p.read_bytes()
+              for p in train.run_dir.rglob('*') if p.is_file()}
+    observed = read_run(train.ref)
+    payload = science_factory()
+    science_worker(payload)
+    outcome = run(evaluate)
+    if parent_state == 'closed':
+        assert observed['status'] == outcome.status == 'succeeded'
+        assert payload.calls
+    else:
+        assert (observed['status'] != 'succeeded' or not observed['evidence_complete']
+                or observed['quality'] is False)
+        assert outcome.status == 'rejected'
+        assert outcome.error['type'] == 'AdmissionError'
+        assert payload.calls == []
+        assert not (evaluate.run_dir / 'execution.json').exists()
+        assert not (evaluate.run_dir / '.execution').exists()
+        assert not (evaluate.run_dir / 'attempts').exists()
+    assert before == {p.relative_to(train.run_dir): p.read_bytes()
+                      for p in train.run_dir.rglob('*') if p.is_file()}
+
+
 @pytest.mark.e2e
 def test_native_public_run_trains_two_updates_then_independently_evaluates_own_best(
         tensor_study, run_root, file_bytes):

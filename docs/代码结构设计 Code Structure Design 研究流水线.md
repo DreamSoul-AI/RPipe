@@ -248,6 +248,8 @@ write 前的研究证据和数值门在科学进程结束前完成，worker 随�
 
 RunReport 的 rejected 表示尚未取得执行权的请求拒绝，无 attempt 和目标记录写入；它不属于持久化 Run 的科学状态。科学失败、取消、unknown 和成功只有在对应执行事实中解释，不能把 rejected 变成目标失败。
 
+依赖eval在持权前通过artifact.io.validate_train核父训练的条件、seed与来源，并复用正式记录校验及执行投影核闭合状态。父项必须succeeded、证据完整且quality不是false；busy、缺当前attempt/outcome或记录不一致均拒绝，不以result.json存在代替完成。验证只读父项，拒绝不创建子项attempt。
+
 初始响应、终态响应及清理观察与 Run 身份和请求标识绑定。超时、丢响应或未确认释放不能按退出码或文件存在补成成功。执行权覆盖准入、执行、检查、发布与必要收尾；process 不再使用已经关闭的科学对象。
 
 ## （四）执行、派发与观察

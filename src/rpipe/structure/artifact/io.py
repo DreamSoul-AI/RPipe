@@ -184,6 +184,17 @@ def validate_train(spec: RunSpec) -> None:
             or conditions(cfg) != conditions(spec.to_config())
             or parent.get('status') != 'succeeded' or parent.get('identity') != identity(train)):
         raise AdmissionError('eval requires its own successful train with matching conditions and seed')
+    try:
+        validate_run_record(parent, expected_identity=identity(train))
+        record, complete = read_execution(train)
+        state = project_execution(record, parent,
+                                  busy=contained(root / '.execution', spec.run_root).exists(),
+                                  complete=complete)
+    except (OSError, ValueError, TypeError, RecursionError) as exc:
+        raise AdmissionError('own train execution evidence is missing or invalid') from exc
+    if (state['status'] != 'succeeded' or not state['evidence_complete']
+            or state['quality'] is False):
+        raise AdmissionError('eval requires a closed successful train with complete evidence and no failed quality')
 
 
 class Ownership:
