@@ -4,7 +4,7 @@ RPipe（Research Pipeline，研究流水线）是用于搭建研究实验的参�
 
 RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他项目长期安装调用的通用 package 为产品目标，也不要求衍生项目持续跟随本仓接口。模板自身仍需讲清职责、保持可运行并验证示例，帮助研究者把有效配置、执行事实、科学结果和比较分析连接起来。Python 包名 `rpipe`、安装命令和打包配置是当前源码的组织与运行方式，不构成跨项目稳定 API 的承诺。仓库为 [DreamSoul-AI/RPipe](https://github.com/DreamSoul-AI/RPipe)，采用 [MIT 许可](LICENSE.md)。
 
-当前包元数据为 **0.4.1**。五批核心重构及研究接入工程验证已本地提交；main_probe在固定环境、seed0和每侧60步条件下，8格CUDA配对及Study终验通过，见[本轮运行记录](<docs/运行记录 Run Record/2026-10-30 main_probe CUDA配对验证.md>)。首轮缺历史依赖的失败保留原身份，没有回签。架构和代码结构设计各以一份完整Markdown维护当前目标，剩余工作从[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)进入。main_exp八格600步CUDA配对及039c941全新version的完整E4已按固定协议通过，证据与适用范围见[新电脑执行记录](<docs/运行记录 Run Record/2026-10-30 新电脑main_exp完整矩阵执行.md>)。测试组织、模块无环、外部资源与模型合同四项整改已实施并验证，代码候选ad2df8b自身9项CI成功，详见[四项整改验证](<docs/运行记录 Run Record/2026-11-02 四项整改验证.md>)；PR仍为Draft，版本号不表示已发布。
+当前包元数据为 **0.4.1**。五批核心重构及研究接入工程验证已本地提交；main_probe在固定环境、seed0和每侧60步条件下，8格CUDA配对及Study终验通过，见[本轮运行记录](<docs/运行记录 Run Record/2026-10-30 main_probe CUDA配对验证.md>)。首轮缺历史依赖的失败保留原身份，没有回签。架构和代码结构设计各以一份完整Markdown维护当前目标，剩余工作从[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)进入。main_exp八格600步CUDA配对及039c941全新version的完整E4已按固定协议通过，证据与适用范围见[新电脑执行记录](<docs/运行记录 Run Record/2026-10-30 新电脑main_exp完整矩阵执行.md>)。测试组织、模块无环、外部资源与模型合同四项整改已实施并验证，代码候选ad2df8b及文档候选1def3fa各自9项CI成功，详见[四项整改验证](<docs/运行记录 Run Record/2026-11-02 四项整改验证.md>)；PR仍为Draft，版本号不表示已发布。
 
 ## 文档与阅读顺序
 
@@ -98,13 +98,15 @@ Study 至少有 `study.yaml` 和 `experiment_config.yaml`。因素轴展开为 E
 
 发布先写完整配置，最后以单次原子替换提交 schema 3 的 index，来源清单与运行索引在同一记录内，所有目标 Run 在提交前持续持权。重复发布不改已有配置字节；既有配置、结果、执行事实或计划来源不匹配时拒绝，不自动给旧记录换身份。需要新实测时选择明确新 version；不提供旧格式回退。
 
-先用只读计划核对配置与输出身份。以下外部路径由调用方替换，不能将占位符作为实际路径：
+先用只读计划核对 Run 数量、版本、依赖和输出身份。当前 CLI plan 不打印完整有效配置，设备、训练预算与部件参数须另核程序化 plan 返回的 RunSpec.to_config()，或 make 后的 config.yaml。基底配置先合并 study.yaml 的 fixed，再由 axes 取值覆盖相应条件。以下外部路径由调用方替换，不能将占位符作为实际路径：
 
 ```console
 python -m rpipe plan studies/_template --run-root <external-run-root>
 python -m rpipe status studies/_template --run-root <external-run-root>
 python -m rpipe report studies/_template --run-root <external-run-root>
 ```
+
+复制模板后的常见调整和当前走查缺口见[开发计划](<docs/开发计划 Development Plan 研究流水线.md#四模板使用走查与下一批工作>)。当前实现中，基底遗留的 num_epochs 会参与步数推导，即使新增 num_steps 并选择 step 单位也不会自动清除它。切换成纯步数训练时须清除不再采用的 epoch 条件并核有效配置。目标规则已确认改为两种预算同时非空即拒绝，该修复尚未实施。
 
 **`_template` 当前是 MNIST/CUDA、20 epoch 示例，不是离线 CPU smoke。** 复制后先在研究计划登记问题、条件和判据，再核有效声明、数据/模型来源、设备、精度与预算。plan 不下载或训练。模板配置注释指向本节。离线合成安装旅程由 tests/package_smoke.py 提供，不能外推到模板科学实验。
 
@@ -147,7 +149,7 @@ main_probe参考侧训练、周期评测和自身best独立评测也使用同一
 
 Windows 可另选 flow.supervision.supervise / rpipe supervise。CLI 必须显式提供 --run-root、--evidence-dir、--run-seconds、--batch-seconds、--rss-bytes、--output-bytes，另可设置 --poll-seconds 与 --cleanup-seconds。匿名 Job 监管本批协调者、worker 和后代，入组后才放行，首败、质量 False、证据不全、观察失败或超限即停后续派发。
 
-RSS 与输出是采样停止线，可能漏峰或超调，**不是硬内存或磁盘配额**。须使用专用外部运行根与新建独立证据根，保留原 Run owner/unknown 协议，其他平台拒绝此入口。用户已授权按本机硬件与准入实测自主设置常规预算；换机须重新核环境、硬件和停止线，完整研究矩阵仍待验收。详细计量与清理合同见架构第四章；本次停止本机实验、推送与换机重新执行的边界见[交接记录](<docs/开发记录 Development Record/2026-10-30 跨电脑交接.md>)。
+RSS 与输出是采样停止线，可能漏峰或超调，**不是硬内存或磁盘配额**。须使用专用外部运行根与新建独立证据根，保留原 Run owner/unknown 协议，其他平台拒绝此入口。用户已授权按本机硬件与准入实测自主设置常规预算；换机须重新核环境、硬件和停止线。039c941的完整研究矩阵已按记录验收，当前工程候选未重新做完整矩阵，不继承旧SHA的科学验收。详细计量与清理合同见架构第四章；本次停止本机实验、推送与换机重新执行的边界见[交接记录](<docs/开发记录 Development Record/2026-10-30 跨电脑交接.md>)。
 
 ## 验证与证据
 
@@ -174,7 +176,7 @@ python tests/run.py --core --results-root <external-test-root> --timeout-seconds
 
 入口和交付批次完成取消、批次退出与旧接口清理；两份实际制品各自通过新 venv 的十命令、四 Run 工程旅程。分组回归、共享冲突原例及本次安装来源验证分别在[入口交付运行记录](<docs/运行记录 Run Record/2026-10-29 入口取消与制品交付验证.md>)维护；工程最小旅程仍用显式 Toy/Stub，不把它当作研究精度验收。
 
-历史与当前的本地有界 CPU、有限原生/HF、安装 smoke 与远端 CI 分别按运行记录中的固定身份核对。重构先执行受影响合同回归，再按实际范围验证科学装配、Study 与制品旅程。main_probe与main_exp的MNIST/CIFAR10八格CUDA短前缀均已按各自固定环境通过；完整曲线、长程性能、矩阵外环境与原始历史归档可恢复性仍未验收。
+历史与当前的本地有界 CPU、有限原生/HF、安装 smoke 与远端 CI 分别按运行记录中的固定身份核对。重构先执行受影响合同回归，再按实际范围验证科学装配、Study 与制品旅程。main_probe与main_exp的MNIST/CIFAR10八格CUDA短前缀均已按各自固定环境通过；039c941的main_exp完整曲线已按固定协议验收。当前工程候选的完整科学矩阵、专门的长程性能评价、矩阵外环境及原始历史归档可恢复性未另行验收。
 
 来源完整度按范围解释：通用 input_provenance 只观察声明及默认引用，Study 自定义输入另保存核验证据。已完成八格的准备、raw 哈希及归档关联经[只读复核](<docs/运行记录 Run Record/2026-10-30 来源边界与准入选择验证.md>)确认，未改写旧 Run。main_exp preflight 已拒绝空、重复或不支持的显式组合，避免意外扩大执行；600步实际执行证据见当前研究状态，不能用该离线修复代替。
 

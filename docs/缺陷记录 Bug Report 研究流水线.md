@@ -2,7 +2,9 @@
 
 # 一、活动事项
 
-本轮暂无新增待处理产品缺陷。测试重构提交ba3613c在四格CPU CI暴露统计消费用例导入遗漏（4项NameError），现已将两函数完整迁至test_factory_stats，data目录68项通过；修复提交ad2df8b自身四格CPU及全部9项CI成功，该问题已关闭，原失败保留在本轮运行记录。父训练执行未闭合仍放行eval的问题已在768e57b38c979d3200bdfa51a3edb678a7adf839修复，原反例及独立复审通过，该SHA自身9项CI全部成功，关闭经过见[开发记录](<开发记录 Development Record/2026-10-31 独立审查与交付收尾.md>)及[运行记录](<运行记录 Run Record/2026-10-31 独立审查与交付验证.md>)。
+本轮新增活动问题：模板切换为step预算时，基底num_epochs可覆盖显式num_steps，导致超出使用者预期的更新数。源码位于algorithm/progress.py的resolve_budget，旧test_budget_epochs_overwrite_steps_when_inferred认可该行为。1def3fa外部微型Study设num_steps=2、progress_unit=step，继承num_epochs=20后实际40次更新。用户已确认双预算同时非空即拒绝，两份目标设计已更新，代码尚未修复。关闭条件是回归本轮原反例并在训练前拒绝，同时保持单一epoch/step、恢复及后端合法路径，实际更新数与有效条件一致。见[开发计划第四章](<开发计划 Development Plan 研究流水线.md#四模板使用走查与下一批工作>)及[走查记录](<运行记录 Run Record/2026-11-02 模板使用走查.md>)。
+
+以下属于已关闭批次。测试重构提交ba3613c在四格CPU CI暴露统计消费用例导入遗漏（4项NameError），现已将两函数完整迁至test_factory_stats，data目录68项通过；修复提交ad2df8b自身四格CPU及全部9项CI成功，该问题已关闭，原失败保留在本轮运行记录。父训练执行未闭合仍放行eval的问题已在768e57b38c979d3200bdfa51a3edb678a7adf839修复，原反例及独立复审通过，该SHA自身9项CI全部成功，关闭经过见[开发记录](<开发记录 Development Record/2026-10-31 独立审查与交付收尾.md>)及[运行记录](<运行记录 Run Record/2026-10-31 独立审查与交付验证.md>)。
 
 本轮测试组织、依赖环、真实目录别名忽略与模型冲突合同已按确认方向实施；原反例、修复及独立验证见[四项整改记录](<开发记录 Development Record/2026-11-02 四项整改.md>)和[验证记录](<运行记录 Run Record/2026-11-02 四项整改验证.md>)。本轮代码候选自身CI已成功，详细验收沿[开发计划](<开发计划 Development Plan 研究流水线.md>)核验，不以分项通过冒充整批完成。新电脑实际启动方式取消准入已完成；旧0050c1f外部中断报告缺失的原因仍未知、原owner保留，不能用新环境通过补签历史事故。原生DLL只在已核profile及环境下确认，不外推所有上下文。
 

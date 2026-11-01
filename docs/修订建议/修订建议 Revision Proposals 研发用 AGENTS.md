@@ -1,6 +1,6 @@
 # 一、用途与当前状态
 
-更新日期：2026年10月31日。本文是 RPipe 向共用[《研发用 AGENTS.md》](https://dreamsoul.feishu.cn/docx/QICWdeEokobO9RxYR9zcjE6Pnyg)反馈问题的单一建议入口，由用户要求建立，允许后续增量维护。它不是第二份 AGENTS、架构设计或开发计划，不自动生效，也不代表共用正文、飞书或其他仓库已经修改。
+更新日期：2026年11月2日。本文是 RPipe 向共用[《研发用 AGENTS.md》](https://dreamsoul.feishu.cn/docx/QICWdeEokobO9RxYR9zcjE6Pnyg)反馈问题的单一建议入口，由用户要求建立，允许后续增量维护。它不是第二份 AGENTS、架构设计或开发计划，不自动生效，也不代表共用正文、飞书或其他仓库已经修改。
 
 每项建议保留来源、问题、拟修订文字、适用边界、验证条件及处理状态。项目整改进入[开发计划](<../开发计划 Development Plan 研究流水线.md>)，本次阅读范围、基线和证据见[规范复核记录](<../运行记录 Run Record/2026-10-31 规范复核与计划重排.md>)。当前提案都未提交上游 Issue、未采纳、未同步云端。
 
