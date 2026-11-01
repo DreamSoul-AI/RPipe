@@ -34,6 +34,8 @@ flowchart LR
 
 Windows Job可以将关联进程作为一组管理，子进程继承及breakaway有明确条件，不能从根进程退出推断整棵树已停止。RPipe的显式监管须在放行前建立所属关系，失败时保留unknown，不扫描或终止不属于本次的进程。[Microsoft Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
 
+Job 的 kill-on-close 取决于最后一个句柄关闭，启动器或后代持有额外句柄会影响这一边界。命名 Job 允许实际计算进程显式打开、自入组后关闭局部句柄，父端再核成员放行；创建命中已有名字会返回现有对象及 ERROR_ALREADY_EXISTS，必须在配置或终止前拒绝碰撞，不能接管别人的对象。[Job 句柄与关闭](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)、[CreateJobObjectW](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-createjobobjectw)。Windows8及以后支持符合层级条件的嵌套 Job，成员顺序及限制仍可能使入组失败；不存在“有外层Job便可省去内层所有权核验”的保证。[AssignProcessToJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject)、[Nested Jobs](https://learn.microsoft.com/en-us/windows/win32/procthread/nested-jobs)。本仓普通Run采用本次随机专属Job和身份绑定的启动门，外层监管继续按批次所属处理；实际进程、venv和嵌套失败窗口的有限证据见[运行记录](<运行记录 Run Record/2026-11-02 模板使用走查.md#十一所属job修复与受影响验证>)，不外推所有Windows环境。
+
 ## （二）发布与持久化
 
 单文件完整写入临时对象后再替换，可收窄读取半文件的窗口。Python的os.replace允许在权限条件满足时替换既有文件，但跨文件系统可能失败，文档说明的成功原子重命名也不等于目录事务或断电持久性。[Python3.13 os.replace](https://docs.python.org/3.13/library/os.html#os.replace)
@@ -76,4 +78,4 @@ PyTorch区分随机源控制与非确定性算法，且不保证跨发布、平�
 
 # 六、来源版本与结论范围
 
-直接来源包括：Python3.13接口文档、Microsoft Job文档及本次定向补核的文件共享/CRT正文、W3C PROV-DM 2013正式推荐、PyTorch2.14、Snakemake9.27.1、MLflow滚动Tracking页和WRROC官方概览。版本固定来源不与滚动页拼成统一运行环境。本文未对MLflow、Snakemake等候选路线做安装或运行对照，不给符合性、性能或外部故障能力结论。实际访问和定向阅读范围见相应运行记录，本仓工程验证不代替这些外部对照。本次文档复核未刷新外部检索日期或来源版本。
+直接来源包括：Python3.13接口文档、Microsoft Job文档及本次定向补核的文件共享/CRT正文、W3C PROV-DM 2013正式推荐、PyTorch2.14、Snakemake9.27.1、MLflow滚动Tracking页和WRROC官方概览。版本固定来源不与滚动页拼成统一运行环境。本文未对MLflow、Snakemake等候选路线做安装或运行对照，不给符合性、性能或外部故障能力结论。实际访问和定向阅读范围见相应运行记录，本仓工程验证不代替这些外部对照。本次定向补核Job创建、成员与嵌套正文，未刷新其他外部路线的来源版本。

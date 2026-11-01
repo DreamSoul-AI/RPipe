@@ -535,6 +535,13 @@ def science_worker(monkeypatch):
         def wait(self, timeout=None):
             return self.returncode
 
+    def start_inline(ctx, command, env, options, folder, deadline):
+        child = InlineWorker(command)
+        ctx.state['child'] = child
+        return child
+    # Lifecycle tests replace transport, not the actual Windows containment tests.
+    monkeypatch.setattr(worker, '_start_windows_worker', start_inline)
+
     monkeypatch.setattr(stages, 'prepare', prepare)
     monkeypatch.setattr(stages, 'execute', execute)
     monkeypatch.setattr(stages, 'collect', collect)

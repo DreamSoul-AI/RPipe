@@ -163,6 +163,21 @@ def test_job_platform_fails_closed(monkeypatch):
         resources.WindowsJob()
 
 
+@windows
+@pytest.mark.unit
+def test_named_job_collision_does_not_configure_or_terminate_existing_owner():
+    import uuid
+    name = 'Local\\RPipe-' + uuid.uuid4().hex
+    owner = resources.WindowsJob(name=name)
+    try:
+        with pytest.raises(FileExistsError):
+            resources.WindowsJob(name=name)
+        assert owner.pids() == ()
+        assert not os.get_handle_inheritable(owner.handle)
+    finally:
+        owner.close()
+
+
 def _fake_job(monkeypatch, pids=(101, 102)):
     job = object.__new__(resources.WindowsJob)
     job.handle = 1

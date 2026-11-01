@@ -69,12 +69,13 @@ def main(argv=None) -> int:
     worker = commands.add_parser('_worker', help=argparse.SUPPRESS)
     worker.add_argument('request', type=Path)
     worker.add_argument('output', type=Path)
+    worker.add_argument('--job-name')
     commands.add_parser('_supervisor-coordinator', help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     try:
         if args.command == '_worker':
             from .worker import worker as execute_worker
-            return execute_worker(args.request, args.output)
+            return execute_worker(args.request, args.output, job_name=args.job_name)
         if args.command == '_supervisor-coordinator':
             from .supervision import coordinator
             return coordinator()

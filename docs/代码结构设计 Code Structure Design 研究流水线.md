@@ -205,6 +205,8 @@ provenance 和 checkpoint 可使用 io，io 不反向导入它们。readout 使�
 
 supervision 的私有活进度除 request nonce、Run 身份、当前项与完成项外，记录实际 coordinator_pid，并保持同一批次不变。Windows venv 启动器PID与实际协调器可不同；活动或仍可继续派发时核Job成员，终态退出窗口不要求已退出协调器仍在Job内。放行下一项及最终收尾继续检查除已识别启动器/协调器外的后代，不能把未知PID、未结束工作或仅有成功前缀当作完成。
 
+Windows 普通 worker 复用 system.resources 的 WindowsJob，以本次启动唯一随机名字定位专属容器，启动器和实际 worker 分别核身份与退出；实际 worker 在科学模块及研究代码执行前入组，以本次 request、Run identity、attempt 和实际 PID 交接 ready，父端核成员后才通过私有输入管道放行。Job 句柄不传给启动器；实际 worker 以明确名字打开、入组后关闭自己的非继承句柄，避免启动器或后代持有副本而拖延 kill-on-close。命名冲突拒绝，不接管既有 Job。普通 Run 的 Job 可嵌套在 supervision 的所属 Job 内，入组失败不绕过准入。worker.close 独立核树空，残留即记录清理失败并有界回收，查询、回收或句柄关闭不确定均保留 unknown 与 owner；首错与清理错分开。仅根退出或 science_closed 响应不足以发布成功。现有 Windows 扩展/可生子后端的硬 timeout 拒绝范围保持，不把新增闭合机制宣称为新资源配额能力。
+
 原生/HF 的来源选择归 algorithm.factory，组件装配归 prepare。后端若仅检查来源再调用相同装配，不另设一套运行类。训练差异落在算法，不能复制生命周期和结果发布协议。
 
 # 五、接口与数据合同

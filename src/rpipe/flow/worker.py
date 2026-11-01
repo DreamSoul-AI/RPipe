@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import multiprocessing
 from contextlib import contextmanager
+import json
 import os
 from pathlib import Path
 import re
@@ -17,6 +18,7 @@ from rpipe.structure.artifact.io import (
 )
 from rpipe.structure.artifact.provenance import environment_snapshot, validate_source
 from rpipe.structure.control import AdmissionError, RunSpec
+from rpipe.structure.system.resources import WindowsJob, join_windows_job
 
 from .context import Budget, Cancelled, RunContext, ScienceContext, validate_draft
 from .study import study_phase_files
@@ -117,6 +119,9 @@ def _receive_response(ctx):
     child = ctx.state['child']
     if child.poll() is None:
         raise AdmissionError('a worker response is not final before its process exits')
+    job = ctx.state.get('worker_job')
+    if job is not None and ctx.state.get('worker_pid') in job.pids():
+        raise AdmissionError('the actual scientific worker has not exited')
     ctx.state['worker_response_attempted'] = True
     folder = contained(ctx.spec.run_dir / 'attempts' / ctx.state['attempt'], ctx.spec.run_root)
     output = folder / 'worker-output.json'
@@ -147,6 +152,55 @@ def _worker_signals():
     finally:
         if previous is not None:
             signal.signal(signal.SIGINT, previous)
+
+
+def _check_wait(ctx, deadline):
+    if deadline is not None and time.monotonic() >= deadline:
+        ctx.state['worker_hard_timeout'] = True
+        raise TimeoutError('scientific child exceeded hard timeout')
+    if ctx.cancellation.is_set():
+        raise Cancelled('scientific child cancellation requested')
+
+
+def _grant_windows_worker(ctx, folder, deadline):
+    child, job = ctx.state['child'], ctx.state['worker_job']
+    ready_path = folder / 'worker-ready.json'
+    startup_deadline = min(deadline, time.monotonic() + 120) if deadline else time.monotonic() + 120
+    while not ready_path.is_file():
+        _check_wait(ctx, deadline)
+        if child.poll() is not None:
+            raise WorkerFailure({'type': 'ChildExit', 'exit_code': child.returncode})
+        if time.monotonic() >= startup_deadline:
+            raise TimeoutError('scientific worker startup handshake exceeded 120 seconds')
+        time.sleep(0.02)
+    ready = read_json(contained(ready_path, folder))
+    expected = {'schema': 1, 'request': ctx.state['worker_request'],
+                'identity': identity(ctx.spec), 'attempt': ctx.state['attempt']}
+    if (type(ready.get('schema')) is not int or type(ready.get('pid')) is not int
+            or ready['pid'] <= 0 or ready != {**expected, 'pid': ready['pid']}):
+        raise AdmissionError('scientific worker readiness belongs to a different launch')
+    if ready['pid'] not in job.pids():
+        raise AdmissionError('the actual scientific worker is not in its owned Job')
+    ctx.state['worker_pid'] = ready['pid']
+    _check_wait(ctx, deadline)
+    # A failed flush can still have delivered the grant; treat this as started.
+    ctx.state['worker_gate_granted'] = True
+    child.stdin.write((json.dumps({**expected, 'action': 'run'}) + '\n').encode('utf-8'))
+    child.stdin.flush()
+    child.stdin.close()
+
+
+def _start_windows_worker(ctx, command, env, options, folder, deadline):
+    job_name = 'Local\\RPipe-' + uuid.uuid4().hex
+    job = ctx.state['worker_job'] = WindowsJob(name=job_name)
+    child = subprocess.Popen([*command, '--job-name', job_name],
+                             cwd=ctx.study_dir, env=env, stdin=subprocess.PIPE,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+                             close_fds=True, **options)
+    ctx.state['child'] = child
+    job.assign(child)
+    _grant_windows_worker(ctx, folder, deadline)
+    return child
 
 
 def compute(ctx: RunContext, budget: Budget) -> dict:
@@ -182,18 +236,18 @@ def compute(ctx: RunContext, budget: Budget) -> dict:
     validate_source(ctx.spec)
     if ctx.cancellation.is_set():
         raise Cancelled('cancelled during scientific child admission')
-    child = subprocess.Popen([sys.executable, '-m', 'rpipe', '_worker', str(request), str(output)],
-                             cwd=ctx.study_dir, env=env, stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, **options)
-    ctx.state['child'] = child
     deadline = time.monotonic() + budget.timeout_seconds if budget.timeout_seconds else None
     ctx.state['worker_deadline'] = deadline
-    while child.poll() is None:
-        if deadline is not None and time.monotonic() >= deadline:
-            ctx.state['worker_hard_timeout'] = True
-            raise TimeoutError('scientific child exceeded hard timeout')
-        if ctx.cancellation.is_set():
-            raise Cancelled('scientific child cancellation requested')
+    command = [sys.executable, '-m', 'rpipe', '_worker', str(request), str(output)]
+    if os.name == 'nt':
+        child = _start_windows_worker(ctx, command, env, options, folder, deadline)
+    else:
+        child = subprocess.Popen(command, cwd=ctx.study_dir, env=env, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, **options)
+        ctx.state['child'] = child
+    while child.poll() is None or (ctx.state.get('worker_job') is not None
+                                   and ctx.state.get('worker_pid') in ctx.state['worker_job'].pids()):
+        _check_wait(ctx, deadline)
         time.sleep(0.02)
     response = _receive_response(ctx)
     if response['error'] is not None:
@@ -203,9 +257,10 @@ def compute(ctx: RunContext, budget: Budget) -> dict:
     return response['result']
 
 
-def close(ctx: RunContext) -> None:
+def _close(ctx: RunContext) -> None:
     """Stop only the owned child; unresolved descendants retain execution ownership."""
     child = ctx.state.get('child')
+    job = ctx.state.get('worker_job')
     if child is None:
         ctx.state['science_closed'] = False
         return
@@ -213,6 +268,12 @@ def close(ctx: RunContext) -> None:
     cleanup = [safe_error_record(item) for item in supplied] if isinstance(supplied, (list, tuple)) else [
         safe_error_record(AdmissionError('cleanup error records must be a sequence'))]
     ctx.state['cleanup_error_records'] = cleanup
+    if job is not None and child.stdin is not None and not child.stdin.closed:
+        try:
+            child.stdin.close()
+        except BaseException as error:
+            cleanup.append(safe_error_record(error))
+            ctx.state['unknown_resources'] = True
     started = time.monotonic()
     deadline = started + ctx.cleanup_seconds
     hard_deadline = ctx.state.get('worker_deadline')
@@ -239,6 +300,18 @@ def close(ctx: RunContext) -> None:
             child.poll()
         except BaseException as error:
             cleanup.append(safe_error_record(error))
+    tree_closed = False
+    if job is not None:
+        try:
+            if job.pids():
+                cleanup.append(safe_error_record(AdmissionError('owned worker descendants remained after root exit')))
+                job.terminate()
+            tree_closed = job.wait_empty(max(0.0, deadline - time.monotonic()))
+            if not tree_closed:
+                raise TimeoutError('owned Windows worker Job did not become empty')
+        except BaseException as error:
+            cleanup.append(safe_error_record(error))
+            ctx.state['unknown_resources'] = True
     folder = contained(ctx.spec.run_dir / 'attempts' / ctx.state['attempt'], ctx.spec.run_root)
     output = folder / 'worker-output.json'
     if (child.poll() is not None and output.is_file()
@@ -261,6 +334,9 @@ def close(ctx: RunContext) -> None:
             unknown = True
     else:
         response = ctx.state.get('worker_response', {})
+        if job is not None and (not tree_closed or not ctx.state.get('worker_pid')):
+            # A redirector may have spawned an actual interpreter before assignment.
+            unknown = True
         if ctx.state.get('worker_may_have_descendants') and (
                 not ctx.state.get('worker_response_verified') or not response.get('science_closed')):
             unknown = True
@@ -270,11 +346,32 @@ def close(ctx: RunContext) -> None:
                                       and ctx.state['worker_response']['science_closed'] and not unknown)
 
 
-@_worker_signals()
-def worker(request: Path, output: Path) -> int:
-    """Compute without ownership or formal publication, then reply after cleanup."""
-    from . import stages
+def close(ctx: RunContext) -> None:
+    """Always release the Job handle, including malformed-response/cleanup failures."""
+    try:
+        _close(ctx)
+    except BaseException:
+        ctx.state.update(unknown_resources=True, science_closed=False)
+        raise
+    finally:
+        job = ctx.state.get('worker_job')
+        if job is not None:
+            try:
+                job.close()
+            except BaseException as error:
+                supplied = ctx.state.get('cleanup_error_records', [])
+                ctx.state['cleanup_error_records'] = ([safe_error_record(item) for item in supplied]
+                    if isinstance(supplied, (list, tuple)) else
+                    [safe_error_record(AdmissionError('cleanup error records must be a sequence'))])
+                ctx.state['cleanup_error_records'].append(safe_error_record(error))
+                ctx.state.update(unknown_resources=True, science_closed=False)
 
+
+@_worker_signals()
+def worker(request: Path, output: Path, *, job_name: str | None = None) -> int:
+    """Compute without ownership or formal publication, then reply after cleanup."""
+    if job_name is not None:
+        join_windows_job(job_name)
     body = read_json(request)
     if type(body.get('schema')) is not int or body['schema'] != 1:
         raise AdmissionError('invalid worker request schema')
@@ -292,6 +389,15 @@ def worker(request: Path, output: Path) -> int:
     if (Path(request).resolve() != folder / 'worker-request.json'
             or Path(output).resolve() != folder / 'worker-output.json'):
         raise AdmissionError('worker request and response must belong to the selected attempt')
+    if job_name is not None:
+        ready = {'schema': 1, 'request': request_id, 'identity': identity(spec), 'attempt': attempt}
+        write_json(folder / 'worker-ready.json', {**ready, 'pid': os.getpid()})
+        grant = json.loads(sys.stdin.readline(65536))
+        if (not isinstance(grant, dict) or type(grant.get('schema')) is not int
+                or grant != {**ready, 'action': 'run'}):
+            raise AdmissionError('scientific worker grant belongs to a different launch')
+    from . import stages
+
     ctx = ScienceContext(spec=spec, cancel_check=_cancel_check(folder, spec, attempt, request_id),
                          layout=ArtifactLayout(spec))
     ctx.state['attempt'] = attempt

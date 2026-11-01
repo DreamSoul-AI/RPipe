@@ -45,7 +45,7 @@ def collect(ctx): return {'metrics': {'value': 3.0}}
 stages.prepare, stages.execute, stages.collect = prepare, execute, collect
 # START_GATE
 Path(sys.argv[4]).write_text(str(os.getpid()), encoding='utf-8')
-raise SystemExit(worker(Path(sys.argv[1]), Path(sys.argv[2])))
+raise SystemExit(worker(Path(sys.argv[1]), Path(sys.argv[2]), job_name=sys.argv[5] or None))
 '''
     if held_parent_log:
         script = script.replace('# START_GATE', '''import time
@@ -72,8 +72,8 @@ while not Path(sys.argv[3]).exists():
         def __init__(self, args, **kwargs):
             assert kwargs['stdout'] == subprocess.DEVNULL
             assert kwargs['stderr'] == subprocess.STDOUT
-            super().__init__([sys.executable, '-B', '-c', script, *args[-2:], str(gate),
-                              str(tmp_path / 'scientific-pid')], **kwargs)
+            super().__init__([sys.executable, '-B', '-c', script, *args[4:6], str(gate),
+                              str(tmp_path / 'scientific-pid'), args[7] if len(args) > 7 else ''], **kwargs)
             children.append(self)
     monkeypatch.setattr(module.subprocess, 'Popen', TinyWorker)
     spec = plan(source_study, run_root=run_root)[0]
@@ -215,11 +215,11 @@ def fail_before_system(ctx):
     assert 'logger' not in ctx.state
     raise ValueError('secret=PRIVATE_EARLY_FAILURE')
 stages.prepare = fail_before_system
-raise SystemExit(worker(Path(sys.argv[1]), Path(sys.argv[2])))
+raise SystemExit(worker(Path(sys.argv[1]), Path(sys.argv[2]), job_name=sys.argv[3] or None))
 '''
     class EarlyFailure(native_popen):
         def __init__(self, args, **kwargs):
-            super().__init__([sys.executable, '-B', '-c', script, *args[-2:]], **kwargs)
+            super().__init__([sys.executable, '-B', '-c', script, *args[4:6], args[7] if len(args) > 7 else ''], **kwargs)
     monkeypatch.setattr(module.subprocess, 'Popen', EarlyFailure)
     spec = plan(source_study, run_root=run_root)[0]
     outcome = run(spec)

@@ -79,9 +79,12 @@ def test_runtime_context_depends_only_on_standard_library_and_pure_control():
 
 def test_worker_delegates_scientific_construction_to_stages():
     forbidden = tuple('rpipe.structure.' + name for name in ('data', 'model', 'algorithm', 'system'))
+    # Ownership primitives belong to the runner; scientific System construction does not.
+    owned_resources = 'rpipe.structure.system.resources'
     for line, names in _imports(SOURCE / 'flow' / 'worker.py'):
         assert not any(name == prefix or name.startswith(prefix + '.')
-                       for prefix in forbidden for name in names), (line, names)
+                       for prefix in forbidden for name in names
+                       if name != owned_resources and not name.startswith(owned_resources + '.')), (line, names)
 
 
 def test_stages_write_is_the_only_formal_result_publisher():

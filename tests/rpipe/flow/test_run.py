@@ -11,6 +11,17 @@ pytestmark = [pytest.mark.content, pytest.mark.p1,
               pytest.mark.result_type('categorical', detail='summary')]
 
 
+def _response_transport(monkeypatch, module):
+    # These adversarial children exercise response acceptance, not OS bootstrap.
+    def start(ctx, command, env, options, folder, deadline):
+        child = module.subprocess.Popen(command, cwd=ctx.study_dir, env=env,
+                                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.STDOUT, **options)
+        ctx.state['child'] = child
+        return child
+    monkeypatch.setattr(module, '_start_windows_worker', start)
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize('parent_state', [
     'result_only', 'missing_outcome', 'busy', 'mismatched_attempt',
@@ -116,6 +127,7 @@ def test_silent_worker_cannot_reuse_previous_worker_response(
 
     module = importlib.import_module('rpipe.flow.worker')
     monkeypatch.setattr(module.subprocess, 'Popen', SilentWorker)
+    _response_transport(monkeypatch, module)
     outcome = run(spec)
     assert outcome.status == 'failed'
     assert not spec.result_path.exists()
@@ -153,6 +165,7 @@ def test_abrupt_worker_exit_keeps_unknown_owner_when_descendants_cannot_be_verif
     monkeypatch.setattr(module, 'os', SimpleNamespace(name='nt', environ=os.environ, pathsep=os.pathsep))
     monkeypatch.setattr(module.subprocess, 'CREATE_NEW_PROCESS_GROUP', 0x200, raising=False)
     monkeypatch.setattr(module.subprocess, 'Popen', AbruptWorker)
+    _response_transport(monkeypatch, module)
     spec = plan(source_study, run_root=run_root)[0]
     outcome = run(spec)
     unknown = extension != 'disabled-hook'
@@ -238,6 +251,7 @@ output.write_text('{' if fault == 'truncated' else json.dumps(response), encodin
         def __init__(self, args, **kwargs):
             super().__init__([sys.executable, '-B', '-c', script, *args[-2:], fault], **kwargs)
     monkeypatch.setattr(module.subprocess, 'Popen', ForeignWorker)
+    _response_transport(monkeypatch, module)
     spec = plan(source_study, run_root=run_root)[0]
     outcome = run(spec)
     assert outcome.status == 'failed'

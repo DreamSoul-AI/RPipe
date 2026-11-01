@@ -1,5 +1,6 @@
 """The scientific worker replies after cleanup and never publishes formal results."""
 import dataclasses
+import os
 
 import pytest
 
@@ -162,3 +163,138 @@ def test_worker_restores_process_signal_handler_on_success_and_scientific_failur
         assert signal.getsignal(signal.SIGINT) is old_handler
     finally:
         signal.signal(signal.SIGINT, previous)
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows worker Job closure')
+@pytest.mark.parametrize('registered', [False, True])
+@pytest.mark.parametrize('primary_failure', [False, True])
+def test_windows_run_closes_orphan_descendant_and_never_publishes_success(
+        tensor_study, run_root, registered, primary_failure):
+    """worker -> exited registered/unregistered root -> live grandchild -> close/write."""
+    import ctypes
+    import subprocess
+    import sys
+    import time
+    from rpipe.flow.run import run
+    from rpipe.structure.make import plan
+
+    with (tensor_study / 'study.yaml').open('a', encoding='utf-8') as stream:
+        stream.write('flow: {study_phases: true}\n')
+    (tensor_study / 'flow').mkdir()
+    script = '''import subprocess, sys
+def before(ctx):
+    code = "import subprocess,sys; from pathlib import Path; p=subprocess.Popen([sys.executable,'-B','-c','import time; time.sleep(30)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); Path(sys.argv[1]).write_text(str(p.pid))"
+    p = subprocess.Popen([sys.executable, '-B', '-c', code, str(ctx.layout.assets_dir/'orphan.pid')], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if REGISTERED: ctx.register_process(p)
+    p.wait(timeout=5)
+    if PRIMARY: raise ValueError('scientific primary after root exit')
+def run(ctx): pass
+'''.replace('REGISTERED', repr(registered)).replace('PRIMARY', repr(primary_failure))
+    (tensor_study / 'flow/prepare.py').write_text(script, encoding='utf-8')
+    spec = plan(tensor_study, run_root=run_root)[0]
+    peer = subprocess.Popen([sys.executable, '-B', '-c', 'import time; time.sleep(60)'])
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.OpenProcess.argtypes, kernel.OpenProcess.restype = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong], ctypes.c_void_p
+    kernel.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    def alive(pid):
+        handle, code = kernel.OpenProcess(0x1000, False, pid), ctypes.c_ulong()
+        try:
+            return bool(handle and kernel.GetExitCodeProcess(handle, ctypes.byref(code)) and code.value == 259)
+        finally:
+            if handle: kernel.CloseHandle(handle)
+    pid = None
+    try:
+        outcome = run(spec)
+        pid = int((spec.assets_dir / 'orphan.pid').read_text(encoding='utf-8'))
+        assert outcome.status == 'failed'
+        assert (outcome.error['type'] if outcome.error else None) == ('ValueError' if primary_failure else None)
+        assert any(error['type'] == 'AdmissionError' for error in outcome.cleanup_errors)
+        assert not alive(pid), 'Run returned with an owned grandchild still active'
+        assert not spec.result_path.exists() and not (spec.run_dir / '.execution').exists()
+        assert peer.poll() is None, 'Job cleanup touched an unrelated peer'
+    finally:
+        # A regression must not strand the deliberately finite counterexample.
+        deadline = time.monotonic() + 35
+        while pid is not None and alive(pid) and time.monotonic() < deadline:
+            time.sleep(.05)
+        peer.terminate()
+        peer.wait(timeout=5)
+
+
+@pytest.mark.parametrize('grant', ['', '[]', '{}', '{"schema":true}', '{"action":"cancel"}'])
+def test_worker_cannot_compute_before_exact_launch_grant(
+        source_study, run_root, monkeypatch, grant):
+    import io
+    from rpipe.flow import stages, worker
+    from rpipe.structure.make import plan
+    request, response = _request(plan(source_study, run_root=run_root)[0])
+    joined = []
+    monkeypatch.setattr(worker, 'join_windows_job', lambda name: joined.append(name))
+    monkeypatch.setattr(worker.sys, 'stdin', io.StringIO(grant))
+    monkeypatch.setattr(stages, 'compute', lambda ctx: pytest.fail('science entered before grant'))
+    with pytest.raises((ValueError, worker.AdmissionError)):
+        worker.worker(request, response, job_name='Local\\RPipe-test')
+    assert joined == ['Local\\RPipe-test'] and not response.exists()
+
+
+@pytest.mark.parametrize('fault', ['request', 'identity', 'attempt', 'schema', 'pid', 'not-member', 'cancel'])
+def test_parent_does_not_grant_an_unverified_actual_worker(
+        source_study, run_root, monkeypatch, fault):
+    import io
+    from types import SimpleNamespace
+    from rpipe.flow import worker
+    from rpipe.flow.context import Cancellation, RunContext
+    from rpipe.structure.artifact.io import identity, write_json
+    from rpipe.structure.make import plan
+    spec = plan(source_study, run_root=run_root)[0]
+    ctx = RunContext(spec, Cancellation(), None)
+    ctx.state.update(attempt='a' * 32, worker_request='b' * 32)
+    folder = spec.run_dir / 'attempts' / ctx.state['attempt']
+    ready = {'schema': 1, 'request': 'b' * 32, 'attempt': 'a' * 32,
+             'identity': identity(spec), 'pid': 123}
+    if fault in {'request', 'attempt'}: ready[fault] = 'c' * 32
+    elif fault == 'identity': ready[fault] = {'foreign': True}
+    elif fault in {'schema', 'pid'}: ready[fault] = True
+    write_json(folder / 'worker-ready.json', ready)
+    pipe = io.BytesIO()
+    ctx.state.update(child=SimpleNamespace(stdin=pipe, poll=lambda: None),
+                     worker_job=SimpleNamespace(pids=lambda: () if fault == 'not-member' else (123,)))
+    if fault == 'cancel': ctx.cancellation.request()
+    with pytest.raises((worker.AdmissionError, worker.Cancelled)):
+        worker._grant_windows_worker(ctx, folder, None)
+    assert pipe.getvalue() == b'' and not ctx.state.get('worker_gate_granted')
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows worker Job cleanup failures')
+@pytest.mark.parametrize('fault', ['query', 'terminate', 'wait', 'handle-close', 'path'])
+def test_windows_worker_cleanup_uncertainty_keeps_owner_and_attempts_handle_close(
+        source_study, run_root, monkeypatch, fault):
+    from types import SimpleNamespace
+    from rpipe.flow import worker
+    from rpipe.flow.context import Cancellation, RunContext
+    from rpipe.structure.make import plan
+    ctx = RunContext(plan(source_study, run_root=run_root)[0], Cancellation(), None)
+    calls = []
+    def fail():
+        raise OSError('bounded cleanup observation failure')
+    def pids():
+        if fault == 'query': fail()
+        return (123,) if fault == 'terminate' else ()
+    def handle_close():
+        calls.append('close')
+        if fault == 'handle-close': fail()
+    job = SimpleNamespace(pids=pids, terminate=fail, wait_empty=lambda timeout: fault != 'wait',
+                          close=handle_close)
+    ctx.state.update(attempt='a' * 32, worker_pid=123, worker_job=job,
+                     child=SimpleNamespace(poll=lambda: 0, stdin=None),
+                     worker_response_verified=True, worker_response={'science_closed': True},
+                     worker_response_attempted=True)
+    if fault == 'path':
+        monkeypatch.setattr(worker, 'contained', lambda *args: fail())
+        with pytest.raises(OSError): worker.close(ctx)
+    else:
+        worker.close(ctx)
+        assert ctx.state['unknown_resources'] and not ctx.state['science_closed']
+        assert ctx.state['cleanup_error_records']
+    assert calls == ['close']
