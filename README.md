@@ -277,7 +277,7 @@ python tests/run.py --core --results-root <external-test-root> --timeout-seconds
 
 现有工作流在 dev/main 的 PR 和 push 上运行 CPU 矩阵（Ubuntu/Windows × Python3.10/3.13）及两平台 Python3.10 打包安装，另在 PR 检查分支方向。CPU 作业归档统一测试回执和命令日志，打包作业归档构建/安装日志及已生成的 wheel/sdist smoke 工作区。上传在成功或失败后均尝试执行，缺少文件时明确失败；artifact 名包含矩阵、Actions run/attempt 和检出 SHA，保留7天。日志管道使用 Bash pipefail，不吞测试或构建失败。平台强制终止、runner 丢失或上传服务不可用时可能无完整归档，不能将未上传当作通过。工作流声明、远端实际结果与分支保护不是同一事实，不把配置存在记为当前 HEAD 已通过。
 
-当前已验收工程代码为56ea129，文档收尾为334bd24，两者自身9项CI均成功，实际范围见[模板使用验证](<docs/运行记录 Run Record/2026-11-02 模板使用走查.md#十三独立审查修复的跨平台收尾>)。c4eed0f的预算拒绝、历史只读边界、原生训练与恢复、配置规划、CLI及README原文复现保留原执行身份。Windows/Ubuntu两版Python的CPU、真实TensorBoard及两平台严格安装检查均通过，平台跳过与未执行范围分别保留。当前源码的完整科学矩阵、专门的长程性能评价、矩阵外环境及原始历史归档可恢复性未另行验收。
+当前已验收工程代码为f1f012bd6d8b2e601fbbd0ea30856c6b0f88e314，其自身9项CI均成功，实际使用、真实E0及600步范围见[模板使用验证第十八至二十一章](<docs/运行记录 Run Record/2026-11-02 模板使用走查.md#十八最终候选的完整使用与二次开发验收>)；后续文档收尾提交自身CI在交付时按真实HEAD另核。c4eed0f的预算拒绝、历史只读边界、原生训练与恢复、配置规划、CLI及README原文复现保留原执行身份。Windows/Ubuntu两版Python的CPU、真实TensorBoard及两平台严格安装检查均通过，平台跳过与未执行范围分别保留。当前源码的完整科学矩阵、专门的长程性能评价、矩阵外环境及原始历史归档可恢复性未另行验收。
 
 安装最小旅程使用显式Toy/Stub，README使用8个合成样本的两步CPU训练及自身best独立评测，均为工程验证。main_probe/main_exp既有CUDA配对及039c941完整E4按原SHA、环境和配方保留，不能据本轮工程通过回签。更早各批的命令、结果与失败从[运行记录](<docs/运行记录 Run Record/>)追溯，README不重复维护逐批通过数。
 
