@@ -286,7 +286,8 @@ RunReport 的 rejected 表示尚未取得执行权的请求拒绝，无 attempt 
 | artifact.io | 标准库和 control 中必要身份描述 | provenance/checkpoint/readout 的反向调用、阶段或科学建构 |
 | artifact 其它模块 | io、control、必要纯元信息；明确比较/编解码时按需数值库 | 部件构造器、run/worker 或研究目录发现 |
 | flow.context | 标准库、control/api 的轻量描述，以及 artifact.io 的纯记录结构 | 实际 I/O、具体科学对象构造、阶段或进程启动 |
-| flow.run/worker/stages | context、明确同柱职责、structure | 从底层回调另建生命周期或绕过 write |
+| flow.run/worker | context、明确同柱职责、control/artifact；run的基础日志及worker的system.resources所属进程原语 | 科学部件构造交stages，不从底层回调另建生命周期或绕过write |
+| flow.stages | context、control/artifact、四类明确部件构造入口及基础日志/运行环境 | 不另建执行权或第二份正式发布入口 |
 | flow.process/exports | 明确结果、artifact 读取及必要统计/绘图库 | 创建训练对象、继续执行训练或覆盖正式结果 |
 
 算法按注入对象的 DataPort/ModelPort/SystemPort 调用能力，不导入 data/model/system.factory。api 不汇总实现，因此不会形成 api → algorithm → api 的循环；延迟导入只控制成本，不能用来隐藏禁止的依赖。
@@ -302,6 +303,8 @@ flowchart TB
     CLI --> Read[artifact.readout]
     Run --> Worker[flow.worker]
     Worker --> Stages[flow.stages]
+    Worker --> Owned[system.resources 所属进程原语]
+    Run --> Owned
     Run --> Stages
     Stages --> Factories[四类部件构造入口]
     Factories --> Ports[structure.api / control]
