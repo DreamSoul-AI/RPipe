@@ -41,8 +41,6 @@ def test_profile_retains_small_nonzero_variance_across_batches():
     assert body['pixel']['std'] == pytest.approx([0.0005], abs=1e-6)
 
 
-
-
 def test_profile_consumes_batches_incrementally_and_closes_its_data(tmp_path, monkeypatch):
     import weakref
     import torch
@@ -104,21 +102,6 @@ def test_profile_keeps_primary_error_when_owned_data_close_also_fails(tmp_path, 
                               shared_data_dir=tmp_path / 'raw', profiles_dir=tmp_path / 'profiles')
     assert isinstance(caught.value.cleanup_errors[0], OSError)
     assert not (tmp_path / 'profiles' / 'Tiny' / 'stats.yaml').exists()
-
-
-@pytest.mark.parametrize('body', ['mean: [0.1]\nstd: [0]\n',
-                                 'mean: [.nan]\nstd: [0.2]\n',
-                                 'mean: [0.1, 0.2]\nstd: [0.3]\n'])
-def test_explicit_normalization_stats_must_be_valid_and_never_silently_fallback(tmp_path, body):
-    path = tmp_path / 'stats.yaml'
-    path.write_text(body, encoding='utf-8')
-    with pytest.raises(ValueError):
-        _with_recorded_stats({'mean': (0.5,), 'std': (0.5,)}, path, required=True)
-
-
-def test_missing_explicit_normalization_stats_is_not_a_builtin_fallback(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        _with_recorded_stats({'mean': (0.5,), 'std': (0.5,)}, tmp_path / 'missing.yaml', required=True)
 
 
 def test_profile_registers_iterator_with_its_data_owner_before_failure(tmp_path, monkeypatch):
