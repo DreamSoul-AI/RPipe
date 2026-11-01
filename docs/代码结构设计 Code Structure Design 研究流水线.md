@@ -157,7 +157,7 @@ make 内的展开函数与发布函数分开：纯展开便于审阅实验设计
 | hf_map.py | 算法条件到 HF 参数的明确映射 | 不能静默丢弃有效条件或接受语义不同的默认值 |
 | kwargs.py | 仅解析实际构造点的算法参数 | 未采用参数说明或拒绝，不扩展为全局工具包 |
 
-有效训练配置的num_epochs与num_steps同时非空时必须拒绝。检查面向合并后条件，不能让progress_unit决定隐式优先级，不能被恢复或后端映射绕过。仅epoch输入可在数据边界明确后内部推导更新数，仅step输入按实际optimizer更新计数。progress负责共同预算解释，调用方在实际训练前完成准入，真实已完成epoch与用户epoch预算分别记录。实现差距和验收见开发计划，不在目标设计中保留旧覆盖策略。
+有效训练配置的num_epochs与num_steps同时非空时必须拒绝。检查面向合并后条件，不能让progress_unit决定隐式优先级，不能被恢复或后端映射绕过。仅epoch输入可在数据边界明确后内部推导更新数，仅step输入按实际optimizer更新计数。control负责合并后预算互斥的纯校验，progress和算法构造复用该规则，调用方在实际训练前完成准入，真实已完成epoch与用户epoch预算分别记录。实现状态和验收见开发计划。
 
 AlgorithmHook 是算法循环中明确的评测、checkpoint、停止等协作点，与 Flow 六阶段分开。无实际需求的 hook 不添加空实现。共用纯计算或状态投影放在真正负责它的模块，不预设独立的“大而全训练状态层”。
 
@@ -222,6 +222,8 @@ supervision 的私有活进度除 request nonce、Run 身份、当前项与完�
 | make.publish | 同一研究及输出域的合法规格和来源记录 | 配置、index 和来源清单；显式受保护写入，不执行 |
 
 RunSpec 包含配置身份、因素归属、seed、来源引用、输出位置和明确训练依赖；不携带模型或进程句柄。experiment 由有效条件、来源和 version 派生，不接受被忽略的构造值；source_dir/run_root 在纯规格中要求绝对路径且不含父目录跳转，实际路径解析和源码/输入保护由 artifact 在读取/发布准入时执行。相同身份不能在同一清单重复，依赖必须存在且无环。control 定义的 RunRef 只是正式记录的身份、位置和明确训练依赖，不隐式取得写入许可。读取使用清单保存的身份，不要求当前源码仍与历史记录相同；生成新的派生物另核当前来源与计划。持久化 RunRecord/ExecutionRecord 的字段结构由 artifact.io 维护，readout 与写端共用，不从 flow.context 导入；flow.context 只定义请求、响应、内存报告和上下文，不能成为读端的反向依赖。
+
+CLI plan 默认保留Run身份、依赖与路径元数据。显式 --show-config 时，在每个元数据条目增加config，内容直接来自同一RunSpec.to_config()，包含实际合并条件和所选version。预览仍经只读make.plan，不执行recipe、不导入科学后端、不创建运行物，也不改变默认输出。
 
 ## （二）部件交接
 

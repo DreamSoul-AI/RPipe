@@ -176,3 +176,104 @@ def test_cli_data_profiles_only_the_selected_effective_input(source_study, run_r
     assert main(['data', str(source_study), '--run-root', str(run_root)]) == 1
     assert not calls
     assert 'conflicting profile inputs' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('command', ['plan', 'make', 'run', 'launch'])
+def test_cli_template_budget_conflict_rejects_without_execution_or_output(
+        source_study, run_root, file_bytes, command, monkeypatch, capsys):
+    import yaml
+    from rpipe.flow.cli import main
+    from rpipe.flow import supervision
+    base_path = source_study / 'experiment_config.yaml'
+    base = yaml.safe_load(base_path.read_text(encoding='utf-8'))
+    base['algorithm'] = {'mode': 'train', 'num_epochs': 20}
+    base_path.write_text(yaml.safe_dump(base), encoding='utf-8')
+    (source_study / 'study.yaml').write_text(
+        'study: conflict\nseeds: [0]\nfixed: {algorithm: {num_steps: 2, progress_unit: step}}\n',
+        encoding='utf-8')
+    before = file_bytes(source_study)
+    monkeypatch.setattr(supervision, 'launch', lambda *args, **kwargs: pytest.fail('executed conflict'))
+    assert main([command, str(source_study), '--run-root', str(run_root)]) == 1
+    assert 'num_epochs' in capsys.readouterr().err
+    assert file_bytes(source_study) == before and not run_root.exists()
+
+
+@pytest.mark.parametrize('selected', [False, True])
+def test_cli_plan_show_config_uses_effective_conditions_and_selected_identity(
+        source_study, run_root, selected, file_bytes, capsys):
+    import json
+    import yaml
+    from rpipe.flow.cli import main
+    path = source_study / 'experiment_config.yaml'
+    config = yaml.safe_load(path.read_text(encoding='utf-8'))
+    config['system']['device'] = 'cpu'
+    config['algorithm'] = {'mode': 'train', 'num_epochs': 20}
+    path.write_text(yaml.safe_dump(config), encoding='utf-8')
+    (source_study / 'study.yaml').write_text(
+        'study: preview\nseeds: [0]\nfixed: {version: declared, system: {device: cuda}, '
+        'algorithm: {num_epochs: null, num_steps: 2}}\n'
+        'axes: {data.config.batch_size: [4, 8]}\n', encoding='utf-8')
+    specs = planning.plan(source_study, run_root=run_root, version='requested')
+    before = file_bytes(source_study)
+    argv = ['plan', str(source_study), '--run-root', str(run_root), '--version', 'requested', '--show-config']
+    if selected:
+        argv += ['--id', specs[1].id]
+    assert main(argv) == 0
+    rows = json.loads(capsys.readouterr().out)
+    expected = [specs[1]] if selected else specs
+    assert [row['id'] for row in rows] == [spec.id for spec in expected]
+    for row, spec in zip(rows, expected):
+        assert row['config'] == spec.to_config()
+        assert row['version'] == row['config']['version'] == 'requested'
+        assert row['config']['system']['device'] == 'cuda'
+        assert row['config']['algorithm']['num_epochs'] is None
+        assert row['config']['algorithm']['num_steps'] == 2
+    assert file_bytes(source_study) == before and not run_root.exists()
+
+
+def test_cli_plan_without_show_config_keeps_default_metadata_contract(source_study, run_root, capsys):
+    import json
+    from rpipe.flow.cli import main
+    assert main(['plan', str(source_study), '--run-root', str(run_root)]) == 0
+    rows = json.loads(capsys.readouterr().out)
+    assert all(set(row) == {'id', 'experiment', 'seed', 'source_digest', 'run_dir', 'version', 'train_id'}
+               for row in rows)
+    assert not run_root.exists()
+
+
+def test_cli_plan_show_config_fresh_process_never_imports_backend_or_recipe(
+        source_study, run_root, tmp_path, file_bytes):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    (source_study / 'study.yaml').write_text('study: readonly\nseeds: [0]\nrecipe: recipe.py\n', encoding='utf-8')
+    (source_study / 'recipe.py').write_text("raise AssertionError('recipe executed')\n", encoding='utf-8')
+    script = tmp_path / 'preview.py'
+    script.write_text("""import importlib.abc,sys
+class Block(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'torch','torchvision','transformers','datasets','kornia'}:
+            raise AssertionError('backend imported: '+fullname)
+sys.meta_path.insert(0,Block())
+from rpipe.flow.cli import main
+raise SystemExit(main(['plan',sys.argv[1],'--run-root',sys.argv[2],'--show-config']))
+""", encoding='utf-8')
+    before = file_bytes(source_study)
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[3] / 'src'),
+               PYTHONDONTWRITEBYTECODE='1')
+    p = subprocess.run([sys.executable, '-B', str(script), str(source_study), str(run_root)],
+                       env=env, capture_output=True, text=True, timeout=20)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert file_bytes(source_study) == before and not run_root.exists()
+
+
+@pytest.mark.parametrize('command', ['make', 'run', 'status'])
+def test_cli_show_config_option_is_only_valid_for_plan(source_study, run_root, command, file_bytes, capsys):
+    from rpipe.flow.cli import main
+    before = file_bytes(source_study)
+    with pytest.raises(SystemExit) as caught:
+        main([command, str(source_study), '--run-root', str(run_root), '--show-config'])
+    assert caught.value.code == 2
+    assert capsys.readouterr().err
+    assert file_bytes(source_study) == before and not run_root.exists()

@@ -155,6 +155,12 @@ class AlgorithmConfig:
         return self.config[key] if key in self.config else self.extras.get(key, default)
 
 
+def validate_training_budget(config: AlgorithmConfig) -> None:
+    """Reject two effective training budgets, before deriving progress or executing."""
+    if config.setting('num_epochs') is not None and config.setting('num_steps') is not None:
+        raise ContractError('num_epochs and num_steps are mutually exclusive; specify only one training budget')
+
+
 @dataclass
 class SystemConfig:
     source: str | None = None
@@ -316,6 +322,7 @@ def validate_run_config(run: RunConfig, *, require_mode: bool = False) -> None:
         value = getattr(run, name)
         if value is not None and not isinstance(value, str):
             raise ContractError(f'{name} must be a string')
+    validate_training_budget(run.algorithm)
     if require_mode and not run.algorithm.mode:
         raise ContractError('algorithm.mode is required')
     if run.algorithm.mode is not None and run.algorithm.mode not in _VALID_MODES:

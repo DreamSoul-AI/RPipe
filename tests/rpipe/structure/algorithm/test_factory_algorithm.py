@@ -71,3 +71,14 @@ def test_cancel_check_original_exception_rejects_before_scientific_work(tmp_path
         algorithm.compute(None, None, None, object(), cancel_check=cancel)
     assert caught.value is primary
     assert list(tmp_path.iterdir()) == []
+
+
+def test_build_algorithm_budget_conflict_rejects_before_registry_lookup(tmp_path, monkeypatch):
+    from rpipe.structure.algorithm import factory
+    from rpipe.structure.control import AlgorithmConfig
+    monkeypatch.setattr(factory.AlgorithmRegistry, 'get',
+                        lambda *args: pytest.fail('conflicting budget reached registry'))
+    config = AlgorithmConfig.from_mapping({'num_epochs': 20, 'num_steps': 2})
+    with pytest.raises(ValueError, match='num_epochs.*num_steps'):
+        factory.build_algorithm(config, checkpoint_dir=tmp_path / 'checkpoints')
+    assert not (tmp_path / 'checkpoints').exists()

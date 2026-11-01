@@ -94,11 +94,116 @@ Study 至少有 `study.yaml` 和 `experiment_config.yaml`。因素轴展开为 E
 6. 链接和硬链接都不构成写保护。共享原始输入按来源和固定哈希核验，可写派生与其分开；变更或清理前核消费者和执行占用。移除链接入口不得递归删除真实目标，未知文件、旧Run、权重及无关项目产出继续按仓库清理授权处理。
 7. 本机已实测：plan/publish将symlink/junction访问别名解析为实体运行根；output_snapshot拒绝直接目录别名而接受实体根，文件引用按身份去重；无symlink权限时同卷硬链回退，实际C/D跨卷以明确跨卷错误拒绝，未静默复制；Git忽略真实入口，静态科学配置继续保留；手工unlink/rmdir入口后真实目标及peer保全。这些用例不等于完整supervise旅程或自动清理器验收，也不证明链接具有只读保护。模型后端的外部权重路径、其他系统及实际用户目录迁移未执行，后续按实际消费者验证；没有使用真实数据或旧Run作清理fixture。
 
+### 从模板开始一个小研究
+
+以下先完成一次无下载的原生 CPU 训练及自身 best 独立评测，再替换成自己的数据和方法。示例只验证模板使用，不构成研究精度结论。先在已有隔离环境确认当前 checkout 的导入位置，不需要安装另一份同版本包。
+
+1. 在仓库根复制模板，不手写 runs。PowerShell 示例：
+
+```powershell
+Copy-Item -Recurse studies/_template studies/my_study
+```
+
+2. 完整替换副本的两份声明，去掉模板原有 fixed、train_size 轴、20 epoch 和 CUDA 条件。配置合并顺序为 experiment_config.yaml → study.yaml.fixed → axes 当前取值，嵌套 algorithm.config 内同名内容条件优先于外层扩展字段。训练只能给出 num_epochs 或 num_steps 中的一种非空预算，progress_unit 表达计数单位，不负责消除另一预算。
+
+`studies/my_study/study.yaml`：
+
+```yaml
+study: my_study
+origin: foreign
+recipe: recipe.py
+experiment: {name: tiny_cpu}
+axes:
+  algorithm.mode: [train, eval]
+seeds: [0]
+run_description: "mode={mode} seed={seed}"
+```
+
+`studies/my_study/experiment_config.yaml`：
+
+```yaml
+version: first-cpu-v1
+experiment: tiny_cpu
+data:
+  name: TinyCPU
+  source: study
+  config: {batch_size: 4}
+model: {name: linear, source: custom_torch}
+algorithm:
+  source: custom_torch
+  num_steps: 2
+  progress_unit: step
+  eval_period: 1
+  checkpoint: latest
+  checkpoint_period: 1
+  save_best: true
+  lr: 0.05
+system: {device: cpu, deterministic: true, cudnn_benchmark: false}
+```
+
+3. 新建副本内的 recipe.py。这个例子只替换数据，模型和算法继续使用模板主体中的原生实现。builder 交付实际数据元信息，不能靠模型参数静默覆盖真实形状或类别。
+
+`studies/my_study/recipe.py`：
+
+```python
+from rpipe.structure.data.factory import Data, DataRegistry
+from rpipe.structure.system.runtime import make_generator
+
+def register(ctx):
+    def build(config, assets, seed=None):
+        import torch
+        from torch.utils.data import DataLoader, TensorDataset
+
+        x = torch.arange(16, dtype=torch.float32).reshape(8, 2) / 16
+        y = (torch.arange(8) % 2).long()
+        dataset = TensorDataset(x, y)
+        batch_size = config.config['batch_size']
+        return Data(name='TinyCPU', source='study', loaders={
+            'train': DataLoader(dataset, batch_size=batch_size, shuffle=True,
+                                generator=make_generator(seed)),
+            'test': DataLoader(dataset, batch_size=batch_size),
+        }, meta={'seed': seed, 'config': dict(config.config), 'data_size': [2],
+                 'target_size': 2, 'batch_size': batch_size, 'train_size': len(dataset)})
+
+    DataRegistry.register('TinyCPU', 'study', build)
+```
+
+自己的数据、模型、算法实现可分别落在 Study 的 structure/data、structure/model、structure/algorithm，再由 recipe 显式连接实际构造点。模型使用 model.factory.ModelRegistry，算法使用 algorithm.factory.AlgorithmRegistry，循环合同在 algorithm.base。可以直接修改本仓主体，无需先包装成插件或保留跨项目稳定接口。目录骨架本身不会自动注册实现。
+
+仅在需要阶段协作时，于 study.yaml 显式设置 flow: {study_phases: true}，再在 flow/<阶段>/__init__.py 提供 run(ctx)，或采用同名 flow/<阶段>.py。prepare 可另提供 before(ctx)，在科学部件装配前执行。不要为启用而填满六个空 hook，也不要在研究 hook 另开正式结果写端，具体边界见两份设计。
+
+4. 填入已确认、与源码和输入分离的真实绝对输出根。下面的占位符须替换，不能原样执行：
+
+```powershell
+$runRoot = '<已确认的外部绝对输出根>'
+python -m rpipe plan studies/my_study --run-root $runRoot --show-config
+python -m rpipe make studies/my_study --run-root $runRoot
+python -m rpipe launch studies/my_study --run-root $runRoot
+python -m rpipe process studies/my_study --run-root $runRoot
+python -m rpipe status studies/my_study --run-root $runRoot
+python -m rpipe report studies/my_study --run-root $runRoot
+python -m rpipe logs studies/my_study --run-root $runRoot
+```
+
+plan --show-config 是只读有效配置预览，先核两个 Run、train_id、first-cpu-v1、CPU、单一2步预算及数据/模型条件。它不运行 recipe 或训练，既有 plan 默认只显示身份和路径。配置预览不能代替实际数据、设备和精度准入。已有发布可用 run 合并 make 与 launch，例中分开执行便于核对各阶段。
+
+5. 运行物位于 `<runRoot>/my_study/first-cpu-v1/`，shared 缓存位于外部根的 shared。按实际 run_dir 查看下列文件：
+
+| **位置** | **查看什么** |
+| --- | --- |
+| index.json、runs/<id>/config.yaml | 正式清单、train_id 及保存的有效配置 |
+| runs/<id>/execution.json | 当前 attempt、执行与收尾事实，不用日志猜终态 |
+| runs/<id>/result.json | status、quality、evidence_complete、metrics 和 execute。train 的 execute.steps 应为2，eval 的 execute.resume_path 应指向对应训练的 best.pt |
+| runs/<id>/assets/checkpoints/、assets/tracker/scalars.jsonl | 实际 best/latest 快照及有效数字轨迹 |
+| runs/<id>/assets/logs/events.jsonl | 带 Run/attempt/PID 的结构化事件 |
+
+process 输出 Study 派生摘要，需要曲线时显式 process --figures。科学结果、执行成功与质量判断分别核对，进程退出0不能单独证明研究完成。修改数据、模型、算法或源码后使用明确的新 version，重新 plan/make/run，不给已成功的旧 Run 原地换来源。status/report/logs 可显式 --version first-cpu-v1 查看旧记录。扩大数据、步数或设备前先更新研究计划及实际准入条件。
+
 ### 计划发布与执行
 
 发布先写完整配置，最后以单次原子替换提交 schema 3 的 index，来源清单与运行索引在同一记录内，所有目标 Run 在提交前持续持权。重复发布不改已有配置字节；既有配置、结果、执行事实或计划来源不匹配时拒绝，不自动给旧记录换身份。需要新实测时选择明确新 version；不提供旧格式回退。
 
-先用只读计划核对 Run 数量、版本、依赖和输出身份。当前 CLI plan 不打印完整有效配置，设备、训练预算与部件参数须另核程序化 plan 返回的 RunSpec.to_config()，或 make 后的 config.yaml。基底配置先合并 study.yaml 的 fixed，再由 axes 取值覆盖相应条件。以下外部路径由调用方替换，不能将占位符作为实际路径：
+先用只读计划核对 Run 数量、版本、依赖和输出身份。CLI plan --show-config 可打印每个 Run 的完整有效配置，默认 plan 保持身份与路径输出。设备、训练预算与部件参数也可通过程序化 RunSpec.to_config()，或 make 后的 config.yaml 核对。基底配置先合并 study.yaml 的 fixed，再由 axes 取值覆盖相应条件。以下外部路径由调用方替换，不能将占位符作为实际路径：
 
 ```console
 python -m rpipe plan studies/_template --run-root <external-run-root>
@@ -106,13 +211,13 @@ python -m rpipe status studies/_template --run-root <external-run-root>
 python -m rpipe report studies/_template --run-root <external-run-root>
 ```
 
-复制模板后的常见调整和当前走查缺口见[开发计划](<docs/开发计划 Development Plan 研究流水线.md#四模板使用走查与下一批工作>)。当前实现中，基底遗留的 num_epochs 会参与步数推导，即使新增 num_steps 并选择 step 单位也不会自动清除它。切换成纯步数训练时须清除不再采用的 epoch 条件并核有效配置。目标规则已确认改为两种预算同时非空即拒绝，该修复尚未实施。
+复制模板后的完整短流程见下一节，当前整改与验收见[开发计划](<docs/开发计划 Development Plan 研究流水线.md#四模板使用走查与下一批工作>)。训练的有效 num_epochs 和 num_steps 同时非空时拒绝。切换成纯步数训练时，清除不再采用的 epoch 条件，或在实际覆盖位置显式设为 null，再核有效配置。合法 epoch 预算内部推导更新数不属于第二份输入。
 
 **`_template` 当前是 MNIST/CUDA、20 epoch 示例，不是离线 CPU smoke。** 复制后先在研究计划登记问题、条件和判据，再核有效声明、数据/模型来源、设备、精度与预算。plan 不下载或训练。模板配置注释指向本节。离线合成安装旅程由 tests/package_smoke.py 提供，不能外推到模板科学实验。
 
 | **命令** | **作用与边界** |
 | --- | --- |
-| `plan/shared` | 只读当前声明，不启动、清理或补写 |
+| `plan [--show-config]` / `shared` | 只读当前声明，可显式预览每个Run有效配置，不启动、清理或补写 |
 | `status/logs/report` | 按已发布清单和保存身份读取，不核当前源码；显式 --version 可在源码不在场时定位历史版本 |
 | `compare <left-run-dir> <right-run-dir>` | 两端须在各自正式 index 中；容差和 checkpoint 选择明确，--out 必须在输入 Study 域外 |
 | `make` | 经 structure.make.publish 发布配置与索引，不准备科学数据或生成旧 jobs/脚本 |

@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Iterable
 
+from rpipe.structure.control import validate_training_budget
+
 UNIT_EPOCH = 'epoch'
 UNIT_STEP = 'step'
 CHECKPOINT_LATEST = 'latest'
@@ -89,6 +91,7 @@ def infer_steps_per_epoch(data: Any) -> int | None:
 
 
 def resolve_budget(config: Any, *, steps_per_epoch: int | None = None) -> ProgressBudget:
+    validate_training_budget(config)
     raw_epochs = config.setting('num_epochs')
     raw_steps = config.setting('num_steps')
     raw_unit = config.setting('progress_unit')

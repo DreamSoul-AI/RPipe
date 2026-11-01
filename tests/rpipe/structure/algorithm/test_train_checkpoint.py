@@ -384,7 +384,8 @@ def test_training_rejects_empty_iterator_before_successful_checkpoint(tmp_path, 
         def iter_batches(self, split):
             return iter(())
 
-    config = AlgorithmConfig.from_mapping({'mode': 'train', 'num_steps': 2, 'num_epochs': 2,
+    config = AlgorithmConfig.from_mapping({'mode': 'train',
+                                          'num_steps' if unit == 'step' else 'num_epochs': 2,
                                           'progress_unit': unit, 'eval_period': 0})
     system = build_system(SystemConfig.from_mapping({'device': 'cpu'}), tmp_path)
     with pytest.raises(ValueError, match='empty train iterator'):

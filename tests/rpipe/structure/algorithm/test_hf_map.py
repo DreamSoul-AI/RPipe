@@ -115,3 +115,16 @@ def test_sgd_momentum_is_consumed_by_optimizer_and_not_training_arguments():
     kwargs = training_arguments_kwargs(cfg, output_dir='unused')
     assert 'momentum' not in kwargs
     assert make_optimizer(torch.nn.Linear(1, 1), cfg).param_groups[0]['momentum'] == 0.7
+
+
+def test_hf_mapping_budget_conflict_rejects_before_backend_import(monkeypatch):
+    import builtins
+    original = builtins.__import__
+    def guarded(name, *args, **kwargs):
+        if name == 'transformers' or name.startswith('transformers.'):
+            pytest.fail('conflicting budget reached backend import')
+        return original(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, '__import__', guarded)
+    config = AlgorithmConfig.from_mapping({'num_epochs': 20, 'num_steps': 2})
+    with pytest.raises(ValueError, match='num_epochs.*num_steps'):
+        training_arguments_kwargs(config, output_dir='not-created')

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from rpipe.structure.control import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig, validate_training_budget
 from rpipe.structure.algorithm import base
 
 def _table() -> dict[tuple[str, str], type[base.Algorithm]]:
@@ -42,6 +42,7 @@ class AlgorithmRegistry:
 
 def build_algorithm(algorithm_config: AlgorithmConfig, *, checkpoint_dir: Path,
                     train_checkpoint_dir: Path | None = None) -> base.Algorithm:
+    validate_training_budget(algorithm_config)
     mode = 'train' if algorithm_config.mode is None else algorithm_config.mode
     source = 'custom_torch' if algorithm_config.source is None else algorithm_config.source
     impl = AlgorithmRegistry.get(mode, source)

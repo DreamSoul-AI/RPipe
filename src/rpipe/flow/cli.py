@@ -40,6 +40,9 @@ def main(argv=None) -> int:
         command.add_argument('--run-root', type=Path)
         command.add_argument('--version', dest='study_version')
         command.add_argument('--id', dest='selected_id')
+        if name == 'plan':
+            command.add_argument('--show-config', action='store_true',
+                                 help='include each Run effective configuration without executing it')
         if name == 'tensorboard': command.add_argument('--out', type=Path, required=True)
         if name == 'data': command.add_argument('--download', action='store_true')
         if name == 'process': command.add_argument('--figures', action='store_true')
@@ -127,6 +130,9 @@ def main(argv=None) -> int:
         if args.command == 'plan':
             value = [{'id': s.id, 'experiment': s.experiment, 'seed': s.seed, 'source_digest': s.source_digest,
                       'run_dir': str(s.run_dir), 'version': s.version, 'train_id': s.train_id} for s in specs]
+            if args.show_config:
+                for row, spec in zip(value, specs):
+                    row['config'] = spec.to_config()
         elif args.command == 'make':
             value = planning.publish(specs)
         elif args.command == 'supervise':

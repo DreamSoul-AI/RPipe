@@ -134,3 +134,29 @@ def test_non_json_or_nonfinite_conditions_are_explicitly_rejected(value):
     config['algorithm']['config'] = {'custom': value}
     with pytest.raises(ContractError):
         resolve_control(config)
+
+
+@pytest.mark.parametrize('algorithm', [
+    {'num_epochs': 20, 'num_steps': 2},
+    {'num_epochs': 20, 'config': {'num_steps': 2}},
+    {'num_steps': 2, 'config': {'num_epochs': 20}},
+])
+def test_training_budget_conflict_is_rejected_after_effective_merge(algorithm):
+    base = _config()
+    base['algorithm'].update(algorithm)
+    before = copy.deepcopy(base)
+    with pytest.raises(ContractError, match='num_epochs.*num_steps'):
+        resolve_control(base)
+    assert base == before
+
+
+@pytest.mark.parametrize('algorithm', [
+    {'num_epochs': 20}, {'num_steps': 2},
+    {'num_epochs': 20, 'config': {'num_epochs': None, 'num_steps': 2}},
+    {'num_steps': 2, 'config': {'num_steps': None, 'num_epochs': 20}},
+])
+def test_training_budget_single_effective_input_survives_roundtrip(algorithm):
+    base = _config()
+    base['algorithm'].update(algorithm)
+    control = resolve_control(base)
+    assert RunConfig.from_mapping(control.to_dict()).to_mapping() == control.to_dict()
