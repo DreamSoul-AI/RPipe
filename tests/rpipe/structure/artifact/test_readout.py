@@ -226,3 +226,42 @@ def test_saved_dual_budget_config_remains_readable_without_reinterpretation(run_
     before = file_bytes(run_root)
     assert readout.read_config(ref) == config
     assert file_bytes(run_root) == before
+
+
+def test_report_connects_saved_conditions_seeds_and_metrics_after_source_changes(
+        source_study, run_root, science_factory, science_worker, file_bytes):
+    from rpipe.structure.make import plan, publish
+    from rpipe.structure.artifact.readout import report
+    from rpipe.flow.run import run
+    with (source_study / 'study.yaml').open('a', encoding='utf-8') as stream:
+        stream.write('axes: {algorithm.lr: [0.1, 0.2]}\n')
+    specs = plan(source_study, run_root=run_root)
+    publish(specs)
+    for spec in specs:
+        science_worker(science_factory())
+        assert run(spec).status == 'succeeded'
+    (source_study / 'study.yaml').write_text('current source is being rewritten', encoding='utf-8')
+    before = file_bytes(run_root)
+    rendered = report(spec.ref for spec in specs)
+    assert 'algorithm.lr=0.1' in rendered and 'algorithm.lr=0.2' in rendered
+    assert 'model.name=linear' in rendered and '**Seed**' in rendered
+    assert 'value=3' in rendered and 'Std (sample)' in rendered
+    assert '| value | 3 | 0 | 2 | True |' in rendered
+    assert all(spec.id in rendered for spec in specs)
+    assert file_bytes(run_root) == before
+
+
+def test_report_keeps_unstarted_seed_and_incomplete_statistics_visible(
+        source_study, run_root, science_factory, science_worker, file_bytes):
+    from rpipe.structure.make import plan, publish
+    from rpipe.structure.artifact.readout import report
+    from rpipe.flow.run import run
+    specs = plan(source_study, run_root=run_root)
+    publish(specs)
+    science_worker(science_factory())
+    assert run(specs[0]).status == 'succeeded'
+    before = file_bytes(run_root)
+    rendered = report(spec.ref for spec in specs)
+    assert '| missing |' in rendered and specs[1].id in rendered
+    assert '| value | 3 | 0 | 1 | False |' in rendered
+    assert file_bytes(run_root) == before

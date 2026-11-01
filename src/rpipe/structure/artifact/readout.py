@@ -217,12 +217,68 @@ def logs(ref: RunRef) -> str:
 
 
 def report(refs) -> str:
+    refs = tuple(refs)
     body = aggregate(refs)
-    lines = ['| Run | Execution | Scientific | Derived | Quality | Evidence complete |',
-             '| --- | --- | --- | --- | --- | --- |']
-    lines += [f"| {row['id']} | {row['status']} | {row.get('scientific_status','missing')} | "
-              f"{row.get('derived_status','not_run')} | {row.get('quality')} | {row.get('evidence_complete',False)} |"
-              for row in body['runs']]
+    groups = {name: f'E{i + 1}' for i, name in enumerate(body['experiments'])}
+    conditions = {}
+
+    def flatten(value, prefix=''):
+        result = {}
+        for key, item in value.items():
+            name = f'{prefix}.{key}' if prefix else key
+            result.update(flatten(item, name) if isinstance(item, dict) else {name: item})
+        return result
+
+    for ref in refs:
+        if ref.experiment in conditions:
+            continue
+        try:
+            config = read_config(ref)
+        except (OSError, ValueError):
+            continue
+        saved = {key: value for key, value in config.items()
+                 if key not in {'id', 'seed', 'description', 'tags', 'experiment'}}
+        conditions[ref.experiment] = {**flatten(saved), 'version': ref.version,
+                                      'source_digest': ref.source_digest}
+    keys = set().union(*(row.keys() for row in conditions.values())) if conditions else set()
+    selected = {'data.name', 'model.name', 'algorithm.source', 'algorithm.mode'}
+    selected.update(key for key in keys if len({json.dumps(row.get(key), sort_keys=True)
+                                               for row in conditions.values()}) > 1)
+
+    def display(value):
+        return format(value, '.6g') if isinstance(value, float) else str(value)
+
+    def cell(value):
+        return display(value).replace('|', '\\|').replace('\r', ' ').replace('\n', '<br>')
+
+    lines = ['| **Run** | **Execution** | **Scientific** | **Derived** | **Quality** | **Evidence complete** | **Seed** | **Experiment** | **Metrics** |',
+             '| --- | --- | --- | --- | --- | --- | --- | --- | --- |']
+    for ref, row in zip(refs, body['runs']):
+        metrics = ', '.join(f'{name}={display(value)}' for name, value in sorted(row.get('metrics', {}).items())
+                            if _finite(value)) or 'unavailable'
+        values = (row['id'], row['status'], row.get('scientific_status', 'missing'),
+                  row.get('derived_status', 'not_run'), row.get('quality'), row.get('evidence_complete', False),
+                  ref.seed, groups[ref.experiment], metrics)
+        lines.append('| ' + ' | '.join(cell(value) for value in values) + ' |')
+    lines += ['', '## Experiments', '',
+              '| **Experiment** | **Saved identity** | **Version** | **Conditions** | **Seeds** | **Complete** |',
+              '| --- | --- | --- | --- | --- | --- |']
+    for group, summary in body['experiments'].items():
+        members = [ref for ref in refs if ref.experiment == group]
+        values = conditions.get(group)
+        label = (', '.join(f'{key}={display(values[key])}' for key in sorted(selected) if key in values)
+                 if values is not None else 'unavailable')
+        lines.append('| ' + ' | '.join(cell(value) for value in (
+            groups[group], group, members[0].version, label, ', '.join(str(ref.seed) for ref in members),
+            summary['complete'])) + ' |')
+    lines += ['', '## Experiment metrics', '',
+              'Std uses the existing sample definition (ddof=1 for n>=2). A missing quality judgement is not a scientific pass.', '',
+              '| **Experiment** | **Metric** | **Mean** | **Std (sample)** | **n** | **Complete** |',
+              '| --- | --- | --- | --- | --- | --- |']
+    for group, summary in body['experiments'].items():
+        for name, values in sorted(summary['metrics'].items()):
+            lines.append('| ' + ' | '.join(cell(value) for value in (
+                groups[group], name, values['mean'], values['std'], values['n'], values['complete'])) + ' |')
     return '\n'.join(lines)+'\n'
 
 

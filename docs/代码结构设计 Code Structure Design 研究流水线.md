@@ -187,6 +187,8 @@ AlgorithmHook 是算法循环中明确的评测、checkpoint、停止等协作�
 
 provenance 和 checkpoint 可使用 io，io 不反向导入它们。readout 使用已保存的身份与记录，不依赖 run、worker 或科学对象。comparison 对受信状态作数值比较，不通过反序列化加载任意研究类路径。compare 接两份正式 RunRef 和明确比较条件；compare_state 比较调用方明确提供的内存状态树，研究转换须保留原始来源与规则，不伪造正式 Run。
 
+readout.report接明确RunRef集合，复用aggregate的状态及统计，并从已保存配置解释条件。Markdown包含Run状态/seed/指标、Experiment条件映射及跨seed指标摘要，不另存一份结果正本。条件展示突出实际变化字段及数据/模型/算法模式，统计沿已有样本标准差定义，明确n和完整性。当前源码修改后仍可读取旧版本，缺配置时显示不可取得，不丢健康peer或补造指标。
+
 # 四、Flow 模块职责
 
 | **模块** | **职责** | **拥有的状态与边界** |

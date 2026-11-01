@@ -201,6 +201,10 @@ plan --show-config 是只读有效配置预览，先核两个 Run、train_id、f
 
 process 输出 Study 派生摘要，需要曲线时显式 process --figures。科学结果、执行成功与质量判断分别核对，进程退出0不能单独证明研究完成。修改数据、模型、算法或源码后使用明确的新 version，重新 plan/make/run，不给已成功的旧 Run 原地换来源。status/report/logs 可显式 --version first-cpu-v1 查看旧记录。扩大数据、步数或设备前先更新研究计划及实际准入条件。
 
+需要比较条件和复测时，可在该例的axes中增加`algorithm.lr: [0.01, 0.05]`，将seeds改为`[0, 1]`，得到4个train与4个eval。`report`在同一份Markdown中提供Run状态、seed、单次指标、Experiment条件映射及跨seed均值/标准差/n/完整性。表内E1等是临时展示标签，Saved identity列保留正式Experiment身份，不能用展示标签代替Run ID。条件摘要突出实际变化字段及数据/模型/算法模式，完整配置仍以`plan --show-config`或保存的config.yaml为准。
+
+报告浮点值按6位有效数字呈现，原始JSON与轨迹不改。通用跨seed汇总沿现有样本标准差定义，n≥2时ddof=1，缺项和未提供质量判定保持可见；main_exp固定科学验收的ddof=0由其研究协议和正式比较报告承接，二者用途不同。研究代码修改后的新版本应重新执行并保留旧源码/配置快照，使用显式`--version`回看旧结果。跨版本比较先看条件和来源差异，改了模型后比较不通过不等于运行失败。
+
 ### 计划发布与执行
 
 发布先写完整配置，最后以单次原子替换提交 schema 3 的 index，来源清单与运行索引在同一记录内，所有目标 Run 在提交前持续持权。重复发布不改已有配置字节；既有配置、结果、执行事实或计划来源不匹配时拒绝，不自动给旧记录换身份。需要新实测时选择明确新 version；不提供旧格式回退。
