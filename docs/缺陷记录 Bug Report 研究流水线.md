@@ -2,7 +2,7 @@
 
 # 一、活动事项
 
-本轮新增活动问题：模板切换为step预算时，基底num_epochs可覆盖显式num_steps，导致超出使用者预期的更新数。源码位于algorithm/progress.py的resolve_budget，旧test_budget_epochs_overwrite_steps_when_inferred认可该行为。1def3fa外部微型Study设num_steps=2、progress_unit=step，继承num_epochs=20后实际40次更新。用户已确认双预算同时非空即拒绝，两份目标设计已更新，本轮已在共同准入及直接算法入口实现拒绝，原20项反例/保护集全部通过，扩大受影响回归563项通过，提交自身CI待核。关闭条件是回归本轮原反例并在训练前拒绝，同时保持单一epoch/step、恢复及后端合法路径，实际更新数与有效条件一致。见[开发计划第四章](<开发计划 Development Plan 研究流水线.md#四模板使用走查与下一批工作>)及[走查记录](<运行记录 Run Record/2026-11-02 模板使用走查.md>)。
+本轮新增活动问题：模板切换为step预算时，基底num_epochs可覆盖显式num_steps，导致超出使用者预期的更新数。源码位于algorithm/progress.py的resolve_budget，旧test_budget_epochs_overwrite_steps_when_inferred认可该行为。1def3fa外部微型Study设num_steps=2、progress_unit=step，继承num_epochs=20后实际40次更新。用户已确认双预算同时非空即拒绝，两份目标设计已更新，本轮已在共同准入及直接算法入口实现拒绝，原20项反例/保护集全部通过。5ca52a7自检发现互斥校验误用于历史配置反序列化，已将其限定在Control/RunSpec执行准入，读端仍核原结构与哈希，原2失败/1保护通过变为3通过，旧40步记录读取不改字节。读取边界修正后616项受影响回归全通过、0跳过，修正提交自身CI继续核验。关闭条件是回归本轮原反例并在训练前拒绝，同时保持单一epoch/step、恢复及后端合法路径，实际更新数与有效条件一致。见[开发计划第四章](<开发计划 Development Plan 研究流水线.md#四模板使用走查与下一批工作>)及[走查记录](<运行记录 Run Record/2026-11-02 模板使用走查.md>)。
 
 以下属于已关闭批次。测试重构提交ba3613c在四格CPU CI暴露统计消费用例导入遗漏（4项NameError），现已将两函数完整迁至test_factory_stats，data目录68项通过；修复提交ad2df8b自身四格CPU及全部9项CI成功，该问题已关闭，原失败保留在本轮运行记录。父训练执行未闭合仍放行eval的问题已在768e57b38c979d3200bdfa51a3edb678a7adf839修复，原反例及独立复审通过，该SHA自身9项CI全部成功，关闭经过见[开发记录](<开发记录 Development Record/2026-10-31 独立审查与交付收尾.md>)及[运行记录](<运行记录 Run Record/2026-10-31 独立审查与交付验证.md>)。
 

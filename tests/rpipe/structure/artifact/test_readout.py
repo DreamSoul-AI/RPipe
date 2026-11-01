@@ -205,3 +205,24 @@ def test_active_execution_record_requires_matching_bounded_attempt_evidence(sour
     assert row['status'] == 'unknown' and (not row['evidence_complete'])
     assert row['scientific_status'] == 'succeeded'
     assert file_bytes(run_root) == before
+
+
+def test_saved_dual_budget_config_remains_readable_without_reinterpretation(run_root, file_bytes):
+    import hashlib
+    import json
+    from rpipe.structure.control import RunRef, compute_run_id
+    from rpipe.structure.artifact import io, readout
+    config = {'seed': 0, 'experiment': 'saved',
+              'algorithm': {'mode': 'train', 'num_epochs': 20, 'num_steps': 2}}
+    config.update(data={}, model={}, system={})
+    config['id'] = compute_run_id(config)
+    conditions = {key: value for key, value in config.items() if key not in {'id', 'seed'}}
+    group = compute_run_id({'conditions': conditions, 'source_digest': 'a' * 64, 'version': 'saved-v1'})
+    encoded = json.dumps(config, sort_keys=True, separators=(',', ':'), allow_nan=False)
+    ref = RunRef(config['id'], 0, 'saved:' + group, run_root / 'saved' / 'saved-v1', run_root,
+                 'a' * 64, hashlib.sha256(encoded.encode()).hexdigest(), 'saved-v1')
+    ref.run_dir.mkdir(parents=True)
+    io.write_config(ref.run_dir / 'config.yaml', config)
+    before = file_bytes(run_root)
+    assert readout.read_config(ref) == config
+    assert file_bytes(run_root) == before

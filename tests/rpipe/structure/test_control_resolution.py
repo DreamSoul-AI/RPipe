@@ -160,3 +160,12 @@ def test_training_budget_single_effective_input_survives_roundtrip(algorithm):
     base['algorithm'].update(algorithm)
     control = resolve_control(base)
     assert RunConfig.from_mapping(control.to_dict()).to_mapping() == control.to_dict()
+
+
+def test_saved_budget_configuration_can_be_parsed_without_execution_admission():
+    saved = _config()
+    saved['algorithm'].update(num_epochs=20, num_steps=2)
+    saved['id'] = compute_run_id(saved)
+    assert RunConfig.from_mapping(saved).to_mapping() == saved
+    with pytest.raises(ContractError, match='num_epochs.*num_steps'):
+        resolve_control(saved)

@@ -322,7 +322,6 @@ def validate_run_config(run: RunConfig, *, require_mode: bool = False) -> None:
         value = getattr(run, name)
         if value is not None and not isinstance(value, str):
             raise ContractError(f'{name} must be a string')
-    validate_training_budget(run.algorithm)
     if require_mode and not run.algorithm.mode:
         raise ContractError('algorithm.mode is required')
     if run.algorithm.mode is not None and run.algorithm.mode not in _VALID_MODES:
@@ -331,6 +330,7 @@ def validate_run_config(run: RunConfig, *, require_mode: bool = False) -> None:
 
 def validate_control(control: Control, *, require_mode: bool = False) -> None:
     validate_run_config(control.run, require_mode=require_mode)
+    validate_training_budget(control.run.algorithm)
 
 
 def thaw(value: Any) -> Any:
@@ -427,6 +427,7 @@ class RunSpec:
     def __post_init__(self) -> None:
         configuration = _json_value(_mapping(self.config, 'Run configuration'))
         validated = RunConfig.from_mapping(configuration)
+        validate_training_budget(validated.algorithm)
         if (validated.id != self.id or configuration.get('id') != self.id
                 or configuration.get('seed') != self.seed):
             raise AdmissionError('Run identity/seed must match the effective configuration')

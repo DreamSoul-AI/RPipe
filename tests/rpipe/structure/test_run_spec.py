@@ -106,3 +106,14 @@ def test_run_root_alias_into_library_source_is_rejected(source_study, tmp_path):
     alias.symlink_to(library, target_is_directory=True)
     with pytest.raises(AdmissionError, match='source'):
         plan(source_study, run_root=alias / 'never-written')
+
+
+def test_executable_run_spec_rejects_two_budgets_even_without_resolve_control(tmp_path):
+    from rpipe.structure.control import RunSpec, ContractError, compute_run_id
+    config = {'seed': 0, 'algorithm': {'mode': 'train', 'num_epochs': 20, 'num_steps': 2}}
+    config.update(data={}, model={}, system={})
+    config['id'] = compute_run_id(config)
+    with pytest.raises(ContractError, match='num_epochs.*num_steps'):
+        RunSpec(id=config['id'], seed=0, config=config, source_dir=tmp_path / 'source',
+                run_root=tmp_path / 'output', source_digest='a' * 64)
+    assert not (tmp_path / 'output').exists()
