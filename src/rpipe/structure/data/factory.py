@@ -339,7 +339,7 @@ _VISION_TORCH: dict[str, dict[str, Any]] = {
 
 def _with_recorded_stats(spec: dict[str, Any], path: Path, *, required: bool = False) -> dict[str, Any]:
     """Prefer mean / std from ``stats.yaml`` when a profile has been written."""
-    from rpipe.structure.data.profile import load_stats
+    from rpipe.structure.data.stats import load_stats
 
     recorded = load_stats(path, required=required)
     if recorded is None:

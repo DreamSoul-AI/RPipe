@@ -18,7 +18,7 @@ pytestmark = [
     pytest.mark.result_type('categorical', detail='summary'),
 ]
 
-_spec = importlib.util.spec_from_file_location('rpipe_protocol_entry', Path(__file__).with_name('run.py'))
+_spec = importlib.util.spec_from_file_location('rpipe_protocol_entry', (Path(__file__).resolve().parents[1] / 'run.py'))
 entry = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(entry)
 
@@ -42,7 +42,7 @@ def test_captured_launcher_keeps_child_environment_output_and_exit(tmp_path, exi
     env = dict(os.environ)
     env['PYTHONPATH'] = str(tmp_path)
     env['RPIPE_ENTRY_PROBE'] = 'known-test-value'
-    launcher = Path(__file__).resolve().parent / 'run.py'
+    launcher = Path(__file__).resolve().parents[1] / 'run.py'
     result = subprocess.run([sys.executable, str(launcher), '--core', '--', '--tb=no'],
                             cwd=tmp_path, env=env, capture_output=True, text=True, timeout=15)
     assert result.returncode == exit_code

@@ -81,7 +81,7 @@ with cache_lock(root, timeout=20):
         time.sleep(.15)
         target.write_bytes(b'complete')
 '''
-    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[3] / 'src'))
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[4] / 'src'))
     processes = [subprocess.Popen([sys.executable, '-c', script, str(tmp_path)], env=env,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE) for _ in range(2)]
     for process in processes:
@@ -100,7 +100,7 @@ with cache_lock(sys.argv[1]):
     print('locked', flush=True)
     time.sleep(30)
 '''
-    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[3] / 'src'))
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[4] / 'src'))
     process = subprocess.Popen([sys.executable, '-c', script, str(tmp_path)], env=env,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:

@@ -3,7 +3,7 @@ from . import paired
 
 
 def register(ctx, pair):
-    from rpipe.structure.algorithm.factory import Algorithm
+    from rpipe.structure.algorithm.base import Algorithm
     from rpipe.structure.algorithm.factory import AlgorithmRegistry
     from rpipe.structure.data.factory import DataRegistry
 

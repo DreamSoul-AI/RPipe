@@ -7,7 +7,7 @@ from pathlib import Path
 
 from rpipe.structure.api import CancelCheck, ComputationObservation, DataPort, ModelPort, SystemPort, TrackerPort
 
-from rpipe.structure.algorithm.factory import Algorithm
+from rpipe.structure.algorithm.base import Algorithm
 from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.batch import prepare_tensors
 from rpipe.structure.algorithm.evaluation_support import (

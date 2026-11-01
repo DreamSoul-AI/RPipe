@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-_spec = importlib.util.spec_from_file_location('rpipe_test_recorder', Path(__file__).with_name('conftest.py'))
+_spec = importlib.util.spec_from_file_location('rpipe_test_recorder', (Path(__file__).resolve().parents[1] / 'conftest.py'))
 records = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(records)
 pytest_runtest_makereport = records.pytest_runtest_makereport

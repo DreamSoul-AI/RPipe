@@ -6,8 +6,8 @@ import shutil
 import pytest
 
 pytestmark = [pytest.mark.e2e, pytest.mark.content, pytest.mark.p2, pytest.mark.slow,
-              pytest.mark.external, pytest.mark.cost(cost_class='c3'),
-              pytest.mark.result_type('categorical', detail='summary'), pytest.mark.gpu]
+              pytest.mark.external, pytest.mark.cost(cost_class='c2'),
+              pytest.mark.result_type('categorical', detail='summary')]
 
 def test_real_mnist_public_cli_preserves_sources_and_completes_expected_runs(tmp_path):
     prepared = os.environ.get('RPIPE_TEST_MNIST_ROOT')
@@ -17,16 +17,14 @@ def test_real_mnist_public_cli_preserves_sources_and_completes_expected_runs(tmp
     from rpipe.structure.make import plan
     from rpipe.structure.artifact.readout import read_run
     from rpipe.flow.cli import main
-    import torch
-    if not torch.cuda.is_available():
-        pytest.skip('requires explicitly selected CUDA resource')
-    repo = Path(__file__).resolve().parents[3]
-    study = tmp_path / 'source' / 'mnist_train_size'
-    shutil.copytree(repo / 'tests' / '_data' / 'studies' / 'mnist_train_size', study)
+    pytest.importorskip('transformers')
+    repo = Path(__file__).resolve().parents[2]
+    study = tmp_path / 'source' / 'mnist_native_vs_hf'
+    shutil.copytree(repo / 'tests' / '_data' / 'studies' / 'mnist_native_vs_hf', study)
     declaration = yaml.safe_load((study / 'study.yaml').read_text())
     declaration['seeds'] = [0]
     declaration['axes']['data.config.train_size'] = [500]
-    declaration['fixed']['algorithm']['num_epochs'] = 2
+    declaration['fixed']['algorithm']['num_epochs'] = 1
     (study / 'study.yaml').write_text(yaml.safe_dump(declaration), encoding='utf-8')
     config = yaml.safe_load((study / 'experiment_config.yaml').read_text())
     config['data']['path'] = str(Path(prepared).resolve())
@@ -36,12 +34,11 @@ def test_real_mnist_public_cli_preserves_sources_and_completes_expected_runs(tmp
     root = tmp_path / 'artifacts'
     specs = plan(study, run_root=root)
     assert len(specs) == 2
-    assert [s.config['algorithm']['mode'] for s in specs] == ['train', 'eval']
+    assert {s.config['algorithm']['source'] for s in specs} == {'custom_torch', 'transformers_trainer'}
     for command in ('make', 'launch', 'process'):
         assert main([command, str(study), '--run-root', str(root)]) == 0
     results = [read_run(spec.ref) for spec in specs]
     assert all(row['status'] == 'succeeded' for row in results)
-    assert results[1]['execute']['step'] is not None
     assert all('accuracy' in row['metrics'] for row in results)
     derived = json.loads((specs[0].study_root / 'summary/process.json').read_text())
     assert derived['complete'] and len(derived['experiments']) == 2

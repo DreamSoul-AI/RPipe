@@ -24,7 +24,7 @@ def test_historical_batches_keep_original_loader_and_partial_resume_semantics(
 
     name = '_historical_data_port_' + uuid.uuid4().hex
     package = ModuleType(name)
-    package.__path__ = [str(Path(__file__).resolve().parents[4] / 'studies/main_exp/structure')]
+    package.__path__ = [str(Path(__file__).resolve().parents[5] / 'studies/main_exp/structure')]
     monkeypatch.setitem(sys.modules, name, package)
     module = importlib.import_module(name + '.data')
     monkeypatch.setattr(DataRegistry, '_items', {})

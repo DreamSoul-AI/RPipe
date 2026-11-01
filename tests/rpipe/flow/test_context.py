@@ -60,3 +60,11 @@ assert not Cancellation().is_set()
     child = subprocess.run([sys.executable, '-B', '-c', code], cwd=tmp_path,
                            env=env, capture_output=True, text=True, timeout=15)
     assert child.returncode == 0, child.stdout + child.stderr
+
+
+def test_cancellation_request_transitions_the_token_to_set():
+    from rpipe.flow.context import Cancellation
+    token = Cancellation()
+    assert not token.is_set()
+    token.request()
+    assert token.is_set()

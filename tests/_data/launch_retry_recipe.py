@@ -1,5 +1,5 @@
 """Synthetic single-use Algorithm for native CLI retry-policy tests."""
-from rpipe.structure.algorithm.factory import Algorithm
+from rpipe.structure.algorithm.base import Algorithm
 from rpipe.structure.algorithm.factory import AlgorithmRegistry
 from rpipe.structure.model.factory import Model, ModelRegistry
 

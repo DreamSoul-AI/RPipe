@@ -13,7 +13,7 @@ from typing import Any, Iterable
 
 import yaml
 
-from rpipe.structure.artifact.io import _read_text, atomic_write_text, contained
+from rpipe.structure.artifact.io import atomic_write_text, contained
 from rpipe.structure.control import AdmissionError, DataConfig
 from rpipe.structure.artifact.io import validate_run_root
 from rpipe.structure.data.factory import build_data, vision_root
@@ -87,19 +87,6 @@ def summarize_batches(batches: Iterable[tuple[Any, Any]]) -> dict[str, Any]:
     }
 
 
-def load_stats(path: Path | str, *, required: bool = False) -> dict[str, Any] | None:
-    file = Path(path)
-    if not file.is_file():
-        if required:
-            raise FileNotFoundError('declared normalization statistics are missing')
-        return None
-    body = yaml.safe_load(_read_text(file)) or {}
-    if (not isinstance(body, dict) or any(not isinstance(body.get(key), (list, tuple))
-                                        or not body[key] for key in ('mean', 'std'))):
-        if required:
-            raise ValueError('declared statistics require nonempty mean and std arrays')
-        return None
-    return body
 
 
 def profile_study(study_dir: Path | str, *, configs: Iterable[dict[str, Any]], shared_data_dir: Path | str,

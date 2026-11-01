@@ -18,7 +18,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
 
 @pytest.fixture
 def installed(tmp_path, monkeypatch):
-    source = Path(__file__).with_name('package_smoke.py')
+    source = (Path(__file__).resolve().parents[1] / 'package_smoke.py')
     spec = importlib.util.spec_from_file_location('_installed_smoke_test', source)
     smoke = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(smoke)

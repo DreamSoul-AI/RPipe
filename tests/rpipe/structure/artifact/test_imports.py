@@ -26,7 +26,7 @@ from rpipe.structure.artifact.readout import read_run, refs_from_index, load_cur
 from rpipe.structure.artifact.comparison import compare, compare_state
 '''
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
-    env['PYTHONPATH'] = str(Path(__file__).resolve().parents[3] / 'src')
+    env['PYTHONPATH'] = str(Path(__file__).resolve().parents[4] / 'src')
     child = subprocess.run([sys.executable, '-B', '-c', code], cwd=tmp_path, env=env,
                            capture_output=True, text=True, timeout=15)
     assert child.returncode == 0, child.stdout + child.stderr

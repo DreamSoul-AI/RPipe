@@ -6,7 +6,7 @@ from typing import Any
 
 from rpipe.structure.api import CancelCheck, ComputationObservation, DataPort, ModelPort, SystemPort, TrackerPort
 
-from rpipe.structure.algorithm.factory import Algorithm
+from rpipe.structure.algorithm.base import Algorithm
 from rpipe.structure.algorithm.evaluation_support import eval_batch_limit, eval_test_split
 from rpipe.structure.algorithm.progress import format_hms
 from rpipe.structure.algorithm.resume import admit_resume, apply_resume, load_resume

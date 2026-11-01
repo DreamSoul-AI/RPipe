@@ -35,13 +35,13 @@ def _imports(path):
             yield node.lineno, names
 
 
-def test_structure_never_imports_flow_or_the_public_assembly_api():
+@pytest.mark.parametrize('path', (SOURCE / 'structure').rglob('*.py'), ids=lambda path: path.relative_to(SOURCE).as_posix())
+def test_structure_never_imports_flow_or_the_public_assembly_api(path):
     violations = []
-    for path in (SOURCE / 'structure').rglob('*.py'):
-        for line, names in _imports(path):
-            if any(name == 'rpipe.api' or name == 'rpipe.flow' or name.startswith('rpipe.flow.')
-                   for name in names):
-                violations.append(f'{path.relative_to(SOURCE)}:{line}: {names}')
+    for line, names in _imports(path):
+        if any(name == 'rpipe.api' or name == 'rpipe.flow' or name.startswith('rpipe.flow.')
+               for name in names):
+            violations.append(f'{path.relative_to(SOURCE)}:{line}: {names}')
     assert not violations, '\n'.join(violations)
 
 
@@ -50,21 +50,18 @@ def test_control_depends_only_on_the_standard_library():
         assert all(name.split('.')[0] in sys.stdlib_module_names for name in names), (line, names)
 
 
-def test_planning_and_publication_cannot_reach_execution_or_science():
+@pytest.mark.parametrize('path', [SOURCE / 'structure/make.py', SOURCE / 'structure/artifact/io.py', SOURCE / 'structure/artifact/provenance.py'], ids=lambda path: path.relative_to(SOURCE).as_posix())
+def test_planning_and_publication_cannot_reach_execution_or_science(path):
     allowed = {'rpipe.structure.control',
                'rpipe.structure.artifact.io', 'rpipe.structure.artifact.provenance',
                'rpipe.__version__'}
-    paths = [SOURCE / 'structure' / 'make.py',
-             SOURCE / 'structure' / 'artifact' / 'io.py',
-             SOURCE / 'structure' / 'artifact' / 'provenance.py']
-    for path in paths:
-        for line, names in _imports(path):
-            for name in names:
-                if name.startswith('rpipe.'):
-                    assert name in {'rpipe.structure', 'rpipe.structure.artifact'} or any(
-                        name == target or name.startswith(target + '.') for target in allowed), (path, line, name)
-                elif name != 'rpipe':
-                    assert name.split('.')[0] in sys.stdlib_module_names | {'yaml'}, (path, line, name)
+    for line, names in _imports(path):
+        for name in names:
+            if name.startswith('rpipe.'):
+                assert name in {'rpipe.structure', 'rpipe.structure.artifact'} or any(
+                    name == target or name.startswith(target + '.') for target in allowed), (path, line, name)
+            elif name != 'rpipe':
+                assert name.split('.')[0] in sys.stdlib_module_names | {'yaml'}, (path, line, name)
 
 
 def test_artifact_io_does_not_depend_on_provenance():
@@ -117,41 +114,74 @@ def test_retired_prepare_and_empty_alias_surfaces_are_absent():
     assert not (SOURCE / 'structure/data/prepare.py').exists()
     assert not hasattr(io, 'kinds')
     token = Cancellation()
-    assert not hasattr(token, 'requested') and not token.is_set()
-    token.request()
-    assert token.is_set()
+    assert not hasattr(token, 'requested')
 
 
-def test_component_builders_replace_static_factory_classes():
-    for name in ('data', 'model', 'algorithm', 'system'):
-        tree = ast.parse((SOURCE / 'structure' / name / 'factory.py').read_text(encoding='utf-8'))
-        assert any(isinstance(node, ast.FunctionDef) and node.name == 'build_' + name
-                   for node in tree.body)
-        assert not any(isinstance(node, (ast.ClassDef, ast.FunctionDef))
-                       and node.name == name.title() + 'Factory' for node in tree.body)
+@pytest.mark.parametrize('name', ('data', 'model', 'algorithm', 'system'), ids=str)
+def test_component_builders_replace_static_factory_classes(name):
+    tree = ast.parse((SOURCE / 'structure' / name / 'factory.py').read_text(encoding='utf-8'))
+    assert any(isinstance(node, ast.FunctionDef) and node.name == 'build_' + name
+               for node in tree.body)
+    assert not any(isinstance(node, (ast.ClassDef, ast.FunctionDef))
+                   and node.name == name.title() + 'Factory' for node in tree.body)
 
 
-def test_algorithms_consume_ports_without_constructing_other_components():
+@pytest.mark.parametrize('path', (SOURCE / 'structure' / 'algorithm').glob('*.py'), ids=lambda path: path.relative_to(SOURCE).as_posix())
+def test_algorithms_consume_ports_without_constructing_other_components(path):
     forbidden = {'rpipe.structure.data.factory', 'rpipe.structure.model.factory',
                  'rpipe.structure.system.factory'}
-    for path in (SOURCE / 'structure' / 'algorithm').glob('*.py'):
-        for line, names in _imports(path):
-            assert not any(name == target or name.startswith(target + '.')
-                           for name in names for target in forbidden), (path, line, names)
+    for line, names in _imports(path):
+        assert not any(name == target or name.startswith(target + '.')
+                       for name in names for target in forbidden), (path, line, names)
 
 
-def test_artifact_storage_readout_and_comparison_do_not_reach_factories_or_flow():
+@pytest.mark.parametrize('path', (SOURCE / 'structure' / 'artifact').glob('*.py'), ids=lambda path: path.relative_to(SOURCE).as_posix())
+def test_artifact_storage_readout_and_comparison_do_not_reach_factories_or_flow(path):
     forbidden = {'rpipe.flow', 'rpipe.structure.data.factory', 'rpipe.structure.model.factory',
                  'rpipe.structure.algorithm.factory', 'rpipe.structure.system.factory'}
-    for path in (SOURCE / 'structure' / 'artifact').glob('*.py'):
-        for line, names in _imports(path):
-            assert not any(name == target or name.startswith(target + '.')
-                           for name in names for target in forbidden), (path, line, names)
+    for line, names in _imports(path):
+        assert not any(name == target or name.startswith(target + '.')
+                       for name in names for target in forbidden), (path, line, names)
 
 
-def test_system_primitives_do_not_reach_checkpoint_policy_or_algorithm():
-    for path in (SOURCE / 'structure' / 'system').glob('*.py'):
-        for line, names in _imports(path):
-            assert not any(name.startswith('rpipe.structure.algorithm')
-                           or name.startswith('rpipe.structure.artifact.checkpoint')
-                           for name in names), (path, line, names)
+@pytest.mark.parametrize('path', (SOURCE / 'structure' / 'system').glob('*.py'), ids=lambda path: path.relative_to(SOURCE).as_posix())
+def test_system_primitives_do_not_reach_checkpoint_policy_or_algorithm(path):
+    for line, names in _imports(path):
+        assert not any(name.startswith('rpipe.structure.algorithm')
+                       or name.startswith('rpipe.structure.artifact.checkpoint')
+                       for name in names), (path, line, names)
+
+
+@pytest.fixture(scope='module')
+def module_dependency_graph():
+    modules = {}
+    for path in SOURCE.rglob('*.py'):
+        relative = path.relative_to(SOURCE).with_suffix('')
+        parts = relative.parts[:-1] if path.name == '__init__.py' else relative.parts
+        modules['.'.join(('rpipe', *parts))] = path
+    graph = {name: set() for name in modules}
+    for name, path in modules.items():
+        for _, targets in _imports(path):
+            for target in targets:
+                while target and target not in modules:
+                    target = target.rpartition('.')[0]
+                if target and target != name:
+                    graph[name].add(target)
+    return graph
+
+
+@pytest.mark.parametrize('path', sorted(SOURCE.rglob('*.py')),
+                         ids=lambda path: path.relative_to(SOURCE).as_posix())
+def test_module_dependency_has_no_cycle(path, module_dependency_graph):
+    parts = path.relative_to(SOURCE).with_suffix('').parts
+    if path.name == '__init__.py':
+        parts = parts[:-1]
+    start = '.'.join(('rpipe', *parts))
+    pending = [(target, [start, target]) for target in module_dependency_graph[start]]
+    visited = set()
+    while pending:
+        target, chain = pending.pop()
+        assert target != start, ' -> '.join(chain)
+        if target not in visited:
+            visited.add(target)
+            pending.extend((child, [*chain, child]) for child in module_dependency_graph[target])

@@ -232,12 +232,12 @@ __marimo__/
 
 # Agent scratch, test result folders, and local caches
 /.tmp/
-/shared/
+/shared
 /.test-*/
 
 # Study artifacts: regenerate from the tracked declarations and docs
 studies/**/runs/
-studies/**/shared/
+studies/**/shared
 studies/**/scripts/
 studies/**/index.json
 studies/**/process.json
@@ -248,10 +248,10 @@ studies/**/provenance.json
 studies/**/docs/*.tmp
 studies/**/docs/*.claim
 
-# Root output folders from the original RPipe layout (do not recreate)
-/data/
-/model/
-/output/
+# Local input/model/output aliases and runtime folders (including symlink entries)
+/data
+/model
+/output
 /tmp/
 /res/
 

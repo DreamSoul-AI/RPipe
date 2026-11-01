@@ -108,15 +108,11 @@ def test_mlp_cnn_resnet_forward_cifar_shape(tmp_path: Path, model_system):
 
 @pytest.mark.parametrize('config,meta,expected', [
     ({}, None, ((1, 28, 28), 10)),
-    ({'data_size': [2, 3], 'target_size': 5}, {'data_size': [4], 'target_size': 7}, ((2, 3), 5)),
-    ({'out_features': 0}, {'target_size': 7}, ((1, 28, 28), 7)),
-    ({'data_size': []}, None, ((), 10)),
-    ({'in_features': 0}, None, ((0,), 10)),
-    ({'in_features': '6'}, None, ((6,), 10)),
+    ({'data_size': [2, 3], 'target_size': 5}, {'data_size': [2, 3], 'target_size': 5}, ((2, 3), 5)),
+    ({'in_features': 6}, None, ((6,), 10)),
     ({'in_features': 4}, {'data_size': [4]}, ((4,), 10)),
-    ({'in_features': 1}, {'data_size': []}, ((), 10)),
 ])
-def test_factory_shape_resolution_preserves_precedence_and_empty_dimensions(config, meta, expected):
+def test_factory_shape_resolution_uses_consistent_explicit_dimensions(config, meta, expected):
     from copy import deepcopy
     from rpipe.structure.model.factory import resolve_shape
     before = deepcopy((config, meta))

@@ -30,22 +30,39 @@ def init_param(m: Any) -> Any:
     return m
 
 
+def _positive_dimension(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f'{name} must be a positive integer')
+    return value
+
+
+def _input_shape(value: Any) -> tuple[int, ...]:
+    if not isinstance(value, (list, tuple)) or not value:
+        raise ValueError('data_size must contain positive integer dimensions')
+    return tuple(_positive_dimension(dimension, 'data_size') for dimension in value)
+
+
 def resolve_shape(cfg: dict[str, Any], data_meta: dict[str, Any] | None) -> tuple[tuple[int, ...], int]:
-    meta = dict(data_meta or {})
-    target_size = int(cfg.get('target_size') or cfg.get('out_features') or meta.get('target_size') or 10)
-    if cfg.get('data_size') is not None:
-        data_size = tuple(int(x) for x in cfg['data_size'])
-    elif meta.get('data_size') is not None:
-        data_size = tuple(int(x) for x in meta['data_size'])
-    elif cfg.get('in_features') is not None:
-        data_size = (int(cfg['in_features']),)
-    else:
-        data_size = (1, 28, 28)
-    features = cfg.get('in_features')
-    if features is not None:
-        if math.prod(data_size) != int(features):
-            raise ValueError('in_features must match the flattened input size')
-    return data_size, target_size
+    if data_meta is not None and not isinstance(data_meta, dict):
+        raise ValueError('data_meta must be a mapping')
+    meta = data_meta or {}
+    explicit = _input_shape(cfg['data_size']) if cfg.get('data_size') is not None else None
+    observed = _input_shape(meta['data_size']) if meta.get('data_size') is not None else None
+    if explicit is not None and observed is not None and explicit != observed:
+        raise ValueError('data_size conflicts with actual data metadata; transform the data explicitly')
+    features = (_positive_dimension(cfg['in_features'], 'in_features')
+                if cfg.get('in_features') is not None else None)
+    data_size = explicit if explicit is not None else observed
+    if data_size is None:
+        data_size = (features,) if features is not None else (1, 28, 28)
+    if features is not None and math.prod(data_size) != features:
+        raise ValueError('in_features must match the flattened input size')
+    targets = [_positive_dimension(body[name], name)
+               for body, name in ((cfg, 'target_size'), (cfg, 'out_features'), (meta, 'target_size'))
+               if body.get(name) is not None]
+    if len(set(targets)) > 1:
+        raise ValueError('target_size/out_features conflicts with actual target metadata')
+    return data_size, targets[0] if targets else 10
 
 
 class Model:
@@ -99,6 +116,7 @@ def build_model(
     builder = ModelRegistry.get(name, source)
     if builder is None:
         raise ValueError(f'unknown model name/source: {name!r}/{source!r}')
+    resolve_shape(model_config.config, data_meta)
     if origin not in (None, ''):
         apply_model_origin(origin)
     with cache_lock(assets_dir):

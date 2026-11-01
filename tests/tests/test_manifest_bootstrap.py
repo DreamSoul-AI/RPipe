@@ -14,7 +14,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
 
 
 def _native_protocol(tmp_path, code, *args):
-    source = Path(__file__).resolve().parent.parent
+    source = Path(__file__).resolve().parents[2]
     (tmp_path / 'tests').mkdir()
     for name in ['tests/run.py', 'tests/conftest.py', 'pyproject.toml']:
         shutil.copy2(source / name, tmp_path / name)
@@ -170,7 +170,7 @@ def test_native_threshold_failure_keeps_numerical_evidence(tmp_path):
 @pytest.mark.parametrize('head,ci_sha', [(b'\xff', None), (b'ref:', None), (b'\xff', 'a' * 40)])
 def test_native_test_entry_keeps_optional_corrupt_metadata(tmp_path, head, ci_sha):
     """Copied native tests/run.py → real pytest session → executed fixture and null/explicit SHA manifest."""
-    source = Path(__file__).resolve().parent.parent
+    source = Path(__file__).resolve().parents[2]
     (tmp_path / 'tests').mkdir()
     for name in ['tests/run.py', 'tests/conftest.py', 'pyproject.toml']:
         shutil.copy2(source / name, tmp_path / name)
@@ -206,7 +206,7 @@ def test_native_test_entry_keeps_optional_corrupt_metadata(tmp_path, head, ci_sh
 @pytest.mark.parametrize('kind', ['valid', 'high', 'low', 'mixed'])
 @pytest.mark.parametrize('when', ['call', 'setup'])
 def test_native_failure_evidence_preserves_unicode_and_peer(tmp_path, kind, when):
-    source = Path(__file__).resolve().parent.parent
+    source = Path(__file__).resolve().parents[2]
     (tmp_path / 'tests').mkdir()
     for name in ['tests/run.py', 'tests/conftest.py', 'pyproject.toml']:
         shutil.copy2(source / name, tmp_path / name)

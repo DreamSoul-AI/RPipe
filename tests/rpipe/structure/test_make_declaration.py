@@ -31,7 +31,7 @@ assert not any(name == prefix or name.startswith(prefix + '.')
                for name in sys.modules for prefix in scientific)
 ''', encoding='utf-8')
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
-    env['PYTHONPATH'] = str(Path(__file__).resolve().parents[2] / 'src')
+    env['PYTHONPATH'] = str(Path(__file__).resolve().parents[3] / 'src')
     child = subprocess.run([sys.executable, '-B', str(script), str(source_study), str(run_root)],
                            env=env, capture_output=True, text=True, timeout=15)
     assert child.returncode == 0, child.stdout + child.stderr

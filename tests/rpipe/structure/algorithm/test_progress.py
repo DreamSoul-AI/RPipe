@@ -174,3 +174,11 @@ def test_percent_crossing_keeps_original_iterator_failure():
     with pytest.raises(OSError) as raised:
         crossed_percents(2, 4, broken(), set())
     assert raised.value is failure
+
+from rpipe.structure.algorithm.progress import due_period
+
+def test_due_eval_period_cadence():
+    assert due_period(1, 1) is True
+    assert due_period(2, 1) is False
+    assert due_period(2, 2) is True
+    assert due_period(0, 1) is False

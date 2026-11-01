@@ -13,8 +13,7 @@ pytestmark = [
 
 from pathlib import Path
 
-from rpipe.structure.data.factory import _with_recorded_stats
-from rpipe.structure.data.profile import load_stats, summarize_batches
+from rpipe.structure.data.profile import summarize_batches
 
 
 def test_summarize_batches_reports_shape_classes_and_mean():
@@ -42,17 +41,6 @@ def test_profile_retains_small_nonzero_variance_across_batches():
     assert body['pixel']['std'] == pytest.approx([0.0005], abs=1e-6)
 
 
-def test_recorded_stats_replace_the_builtin_table(tmp_path: Path):
-    path = tmp_path / 'stats.yaml'
-    path.write_text('name: MNIST\nmean: [0.1]\nstd: [0.2]\n', encoding='utf-8')
-    recorded = load_stats(path)
-    assert recorded is not None
-    spec = {'mean': (0.5,), 'std': (0.5,), 'root': 'mnist'}
-    out = _with_recorded_stats(spec, path)
-    assert out['mean'] == (0.1,)
-    assert out['std'] == (0.2,)
-    assert spec['mean'] == (0.5,)
-    assert _with_recorded_stats(spec, tmp_path / 'missing.yaml') is spec
 
 
 def test_profile_consumes_batches_incrementally_and_closes_its_data(tmp_path, monkeypatch):
