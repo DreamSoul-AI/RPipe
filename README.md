@@ -8,9 +8,9 @@ RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他�
 
 ## 文档与阅读顺序
 
-最新候选独立审查确认的Windows普通Run后代闭合问题已补：实际worker入所属Job、身份与成员核验后才放行，正式收尾由父端核树空，残留清理不能发布成功，未知继续保owner。实际venv、嵌套Job及失败窗口的独立复测见[本轮记录](<docs/运行记录 Run Record/2026-11-02 模板使用走查.md#十一所属job修复与受影响验证>)。最新科学补验与旧来源清单原件缺口归[开发计划第五章](<docs/开发计划 Development Plan 研究流水线.md#五最新候选独立审查与科学补验范围>)；工程修复不继承旧完整E4，当前仍保持Draft。
+下一阶段围绕研究者使用模板的完整过程推进：复制与修改条件、小批训练和自身best评测、结果阅读、修改研究代码后用新version继续实验。工作顺序、依赖和完成标准见[开发计划第六章](<docs/开发计划 Development Plan 研究流水线.md#六研究者使用主流程与下一阶段开发计划>)，先走查再修实际阻断。已有独立审查与Windows收尾修复的验收见[运行记录第十三章](<docs/运行记录 Run Record/2026-11-02 模板使用走查.md#十三独立审查修复的跨平台收尾>)，科学补验与旧来源原件缺口见开发计划第五章。当前保持Draft。
 
-2026年10月31日已安全同步交接候选c5b12d6并保留本地草稿，当前审查覆盖#236相对dev的完整差异。待办与停止点见[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)；规范复核依据见[复核记录](<docs/运行记录 Run Record/2026-10-31 规范复核与计划重排.md>)。原科学证据保持其SHA，新工程修复不继承旧E4验收。
+2026年10月31日已安全同步交接候选c5b12d6并保留本地草稿，独立审查已覆盖#236相对dev的完整差异。待办与停止点见[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)；规范复核依据见[复核记录](<docs/运行记录 Run Record/2026-10-31 规范复核与计划重排.md>)。原科学证据保持其SHA，新工程修复不继承旧E4验收。
 
 研发协作的共用依据为 [研发用 AGENTS.md](https://dreamsoul.feishu.cn/docx/QICWdeEokobO9RxYR9zcjE6Pnyg)。采用其适用正文，并结合本仓 [AGENTS.md](AGENTS.md) 的项目约定执行。共用《研发用 AGENTS.md》与资料库根 AGENTS.md 是不同文档，不得相互替代。本地源与飞书正文需核对版本，不能以本仓规则已更新推定共用正文已同步。
 
@@ -213,7 +213,7 @@ python -m rpipe status studies/_template --run-root <external-run-root>
 python -m rpipe report studies/_template --run-root <external-run-root>
 ```
 
-复制模板后的完整短流程见下一节，当前整改与验收见[开发计划](<docs/开发计划 Development Plan 研究流水线.md#四模板使用走查与下一批工作>)。训练的有效 num_epochs 和 num_steps 同时非空时拒绝。切换成纯步数训练时，清除不再采用的 epoch 条件，或在实际覆盖位置显式设为 null，再核有效配置。合法 epoch 预算内部推导更新数不属于第二份输入。
+复制模板后的完整短流程见[从模板开始一个小研究](#从模板开始一个小研究)，已完成整改与验收见[开发计划](<docs/开发计划 Development Plan 研究流水线.md#四模板使用走查与下一批工作>)。训练的有效 num_epochs 和 num_steps 同时非空时拒绝。切换成纯步数训练时，清除不再采用的 epoch 条件，或在实际覆盖位置显式设为 null，再核有效配置。合法 epoch 预算内部推导更新数不属于第二份输入。
 
 **`_template` 当前是 MNIST/CUDA、20 epoch 示例，不是离线 CPU smoke。** 复制后先在研究计划登记问题、条件和判据，再核有效声明、数据/模型来源、设备、精度与预算。plan 不下载或训练。模板配置注释指向本节。离线合成安装旅程由 tests/package_smoke.py 提供，不能外推到模板科学实验。
 
@@ -271,7 +271,7 @@ python tests/run.py --core --results-root <external-test-root> --timeout-seconds
 
 现有工作流在 dev/main 的 PR 和 push 上运行 CPU 矩阵（Ubuntu/Windows × Python3.10/3.13）及两平台 Python3.10 打包安装，另在 PR 检查分支方向。CPU 作业归档统一测试回执和命令日志，打包作业归档构建/安装日志及已生成的 wheel/sdist smoke 工作区。上传在成功或失败后均尝试执行，缺少文件时明确失败；artifact 名包含矩阵、Actions run/attempt 和检出 SHA，保留7天。日志管道使用 Bash pipefail，不吞测试或构建失败。平台强制终止、runner 丢失或上传服务不可用时可能无完整归档，不能将未上传当作通过。工作流声明、远端实际结果与分支保护不是同一事实，不把配置存在记为当前 HEAD 已通过。
 
-当前工程验收绑定[模板使用验证](<docs/运行记录 Run Record/2026-11-02 模板使用走查.md>)中的固定代码候选c4eed0f，包含预算拒绝、历史只读边界、原生训练与恢复、配置规划、CLI及README原文复现。Windows/Ubuntu两版Python的CPU、真实TensorBoard及两平台严格安装检查均通过，平台跳过与未执行范围分别保留。当前源码的完整科学矩阵、专门的长程性能评价、矩阵外环境及原始历史归档可恢复性未另行验收。
+当前已验收工程代码为56ea129，文档收尾为334bd24，两者自身9项CI均成功，实际范围见[模板使用验证](<docs/运行记录 Run Record/2026-11-02 模板使用走查.md#十三独立审查修复的跨平台收尾>)。c4eed0f的预算拒绝、历史只读边界、原生训练与恢复、配置规划、CLI及README原文复现保留原执行身份。Windows/Ubuntu两版Python的CPU、真实TensorBoard及两平台严格安装检查均通过，平台跳过与未执行范围分别保留。当前源码的完整科学矩阵、专门的长程性能评价、矩阵外环境及原始历史归档可恢复性未另行验收。
 
 安装最小旅程使用显式Toy/Stub，README使用8个合成样本的两步CPU训练及自身best独立评测，均为工程验证。main_probe/main_exp既有CUDA配对及039c941完整E4按原SHA、环境和配方保留，不能据本轮工程通过回签。更早各批的命令、结果与失败从[运行记录](<docs/运行记录 Run Record/>)追溯，README不重复维护逐批通过数。
 
