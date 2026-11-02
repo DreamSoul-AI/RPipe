@@ -14,7 +14,7 @@ def run(ctx):
     expected = (ctx.control.data['name'], ctx.control.model['name'])
     rows = []
     for record in report['runs']:
-        raw = torch.load(Path(record['observations']), map_location='cpu', weights_only=False)
+        raw = torch.load(Path(record['observations']), map_location='cpu', weights_only=True)
         row = compare_observations(raw, record['data'], record['model'])
         row['observations'] = record['observations']
         rows.append(row)
@@ -30,4 +30,4 @@ def run(ctx):
     report['selected_complete'] = len(rows) == 1 and (rows[0]['data'], rows[0]['model']) == expected
     report['selected_passed'] = report['selected_complete'] and all(row['passed'] for row in rows)
     ctx.state['probe'] = report
-    ctx.state['collected']['metrics']['probe_passed'] = report['selected_passed']
+    ctx.state['collected']['quality'] = report['selected_passed']

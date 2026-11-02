@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from typing import Any, Mapping
 
-from rpipe.structure.algorithm.config import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 
 
 SKIP_CTOR_KEYS = frozenset(
@@ -29,11 +29,9 @@ def filter_args(func: Any, arg_dict: Mapping[str, Any]) -> dict[str, Any]:
         if key in SKIP_CTOR_KEYS:
             continue
         param = sig.parameters.get(key)
-        if param is None:
-            continue
-        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-            continue
-        valid[key] = value
+        if (param is not None
+                and param.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)):
+            valid[key] = value
     return valid
 
 

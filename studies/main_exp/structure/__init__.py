@@ -10,7 +10,7 @@ from .data import register as register_data
 from .model import register as register_model
 
 
-def install(data_root: Path | str, seed: int = 0, sampler_steps: int = HORIZON) -> Archive:
+def install(data_root: Path | str, seed: int = 0, sampler_steps: int = HORIZON, *, archive_root: Path | str) -> Archive:
     """Register the immutable archive as source ``historical_4ccb28d``.
 
     Builders accept each Run's seed; the argument is a fallback for manual
@@ -19,7 +19,7 @@ def install(data_root: Path | str, seed: int = 0, sampler_steps: int = HORIZON) 
     validated against RPipe's native RNG/cursor restoration contract.
     """
     bootstrap()
-    archive = load_archive()
+    archive = load_archive(archive_root)
     data_root = Path(data_root).resolve()
     if sampler_steps != HORIZON:
         raise ValueError('historical sampler horizon must remain 80000')

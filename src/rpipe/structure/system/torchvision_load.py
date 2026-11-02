@@ -18,7 +18,6 @@ from types import ModuleType
 
 def import_torchvision(*, attempts: int = 3, pause: float = 0.25) -> ModuleType:
     os.environ.setdefault('TORCHVISION_WARN_WHEN_EXTENSION_LOADING_FAILS', '1')
-    last: BaseException | None = None
     tries = max(1, int(attempts))
     for attempt in range(tries):
         try:
@@ -26,12 +25,8 @@ def import_torchvision(*, attempts: int = 3, pause: float = 0.25) -> ModuleType:
         except RuntimeError as exc:
             if 'torchvision::nms' not in str(exc) or attempt + 1 == tries:
                 raise
-            last = exc
             _drop_torchvision_modules()
             time.sleep(pause * (attempt + 1))
-    if last is not None:
-        raise last
-    raise RuntimeError('import torchvision failed')
 
 
 def _drop_torchvision_modules() -> None:

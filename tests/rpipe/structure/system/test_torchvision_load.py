@@ -5,6 +5,19 @@ import pytest
 
 from rpipe.structure.system.torchvision_load import import_torchvision
 
+
+@pytest.fixture(autouse=True)
+def preserve_torchvision_modules():
+    saved = {name: module for name, module in sys.modules.items()
+             if name == 'torchvision' or name.startswith('torchvision.')}
+    try:
+        yield
+    finally:
+        for name in list(sys.modules):
+            if name == 'torchvision' or name.startswith('torchvision.'):
+                del sys.modules[name]
+        sys.modules.update(saved)
+
 pytestmark = [
     pytest.mark.unit,
     pytest.mark.content,
@@ -44,3 +57,26 @@ def test_import_torchvision_does_not_retry_other_runtime_errors(monkeypatch):
     monkeypatch.setattr('rpipe.structure.system.torchvision_load.importlib.import_module', fake)
     with pytest.raises(RuntimeError, match='unrelated'):
         import_torchvision()
+
+
+@pytest.mark.parametrize('attempts', [-2, 0, 1, 2, 3])
+def test_retry_exhaustion_preserves_original_error_and_budget(monkeypatch, attempts):
+    from rpipe.structure.system import torchvision_load
+
+    calls, sleeps, drops = [], [], []
+    error = RuntimeError('operator torchvision::nms does not exist')
+
+    def fail(name):
+        calls.append(name)
+        raise error
+
+    monkeypatch.setattr(torchvision_load.importlib, 'import_module', fail)
+    monkeypatch.setattr(torchvision_load.time, 'sleep', sleeps.append)
+    monkeypatch.setattr(torchvision_load, '_drop_torchvision_modules', lambda: drops.append(True))
+    with pytest.raises(RuntimeError) as caught:
+        import_torchvision(attempts=attempts, pause=0.5)
+    tries = max(1, attempts)
+    assert caught.value is error
+    assert calls == ['torchvision'] * tries
+    assert sleeps == [0.5 * i for i in range(1, tries)]
+    assert len(drops) == tries - 1

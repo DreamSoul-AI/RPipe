@@ -14,7 +14,7 @@ def test_prepare_tensors_keeps_spatial_for_cnn():
     import torch
 
     from rpipe.structure.algorithm.batch import prepare_tensors
-    from rpipe.structure.model.custom_torch import CNN
+    from rpipe.structure.model.architectures import CNN
 
     module = CNN((3, 32, 32), [64, 128, 256, 512], 10)
     images = torch.randn(2, 3, 32, 32)

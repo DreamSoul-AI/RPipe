@@ -9,10 +9,11 @@ def before(ctx):
     pair = validate(ctx.config, ctx.control.seed, paired)
     workspace = ctx.layout.assets_dir / 'probe'
     source = ctx.layout.shared_data_dir
-    raw = source / pair[0] / 'raw'
-    if not raw.is_dir() or not any(path.is_file() for path in raw.rglob('*')):
-        raise FileNotFoundError(f'prepare the raw dataset before launch: {raw}')
-    prepared = prepare(workspace, source, pair)
+    try:
+        prepared = prepare(workspace, source, pair)
+    except BaseException as error:
+        ctx.state.setdefault('payload_cleanup_errors', []).extend(getattr(error, 'cleanup_errors', ()))
+        raise
     if prepared.get('passed') is not True:
         raise RuntimeError(f'CPU preparation failed; evidence: {workspace}')
     ctx.state['probe_prepared'] = prepared

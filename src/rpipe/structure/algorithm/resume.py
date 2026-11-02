@@ -1,212 +1,169 @@
-"""Resume target resolution (algorithm-layer; system only loads files)."""
-
+"""Explicit checkpoint selection and admission before scientific state changes."""
 from __future__ import annotations
 
+import json
+import math
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
-from rpipe.structure.algorithm.config import AlgorithmConfig
+from rpipe.structure.artifact import checkpoint
+from rpipe.structure.api import TrackerPort
+from rpipe.structure.control import AlgorithmConfig
+from rpipe.structure.system.runtime import validate_rng
 
 
-def capture_rng() -> dict[str, Any]:
-    import random
-    import numpy as np
-    import torch
-
-    return {'python': random.getstate(), 'numpy': np.random.get_state(),
-            'torch': torch.get_rng_state(),
-            'cuda': torch.cuda.get_rng_state_all() if torch.cuda.is_initialized() else None}
-
-
-def restore_rng(state: dict[str, Any]) -> None:
-    import random
-    import numpy as np
-    import torch
-
-    cuda = state['cuda']
-    if cuda is not None and (not torch.cuda.is_available() or len(cuda) != torch.cuda.device_count()):
-        raise ValueError('checkpoint CUDA RNG devices do not match current runtime')
-    random.setstate(state['python'])
-    np.random.set_state(state['numpy'])
-    torch.set_rng_state(state['torch'].cpu())
-    if cuda is not None:
-        torch.cuda.set_rng_state_all([value.cpu() for value in cuda])
+def checkpoint_directory(value: Path | str) -> Path:
+    path = Path(value)
+    if not path.is_absolute() or '..' in path.parts:
+        raise ValueError('checkpoint directories must be explicit absolute paths')
+    return path
 
 
 def partial_resume_warning(logger=None) -> None:
     import warnings
-
     message = ('checkpoint resume is partial: RNG/data iterator equivalence is not guaranteed '
-               'for legacy checkpoints or unsupported data/Trainer runtimes')
+               'for unsupported data or Trainer runtimes')
     if logger is not None:
         logger.warning(message)
     warnings.warn(message, RuntimeWarning, stacklevel=2)
 
 
-def resume_stem(config: AlgorithmConfig, *, mode: str) -> str | None:
-    """Return checkpoint stem/path to load, or None to skip resume."""
+def resume_reference(config: AlgorithmConfig, *, checkpoint_dir: Path,
+                     train_checkpoint_dir: Path | None) -> tuple[Path | None, bool, str | None]:
     explicit = config.setting('resume_from')
-    if explicit:
-        return str(explicit)
+    if explicit is not None:
+        return checkpoint.checkpoint_path(explicit), False, str(explicit)
     raw = config.setting('resume')
-    if raw is None:
-        return 'latest' if mode == 'train' else 'best'
     if raw is False:
-        return None
-    text = str(raw).strip().lower()
-    if text in ('', 'false', '0', 'none', 'off'):
-        return None
-    return str(raw)
+        return None, False, None
+    mode = config.mode if config.mode is not None else 'train'
+    name = ('latest' if mode == 'train' else 'best') if raw is None else raw
+    if not isinstance(name, str) or not name or name in {'.', '..'}:
+        raise ValueError('resume must be False, a checkpoint name or an absolute .pt reference')
+    path = Path(name)
+    if path.is_absolute():
+        return checkpoint.checkpoint_path(path), False, name
+    if path.name != name or '/' in name or '\\' in name:
+        raise ValueError('relative checkpoint paths are not supported')
+    root = checkpoint_dir if mode == 'train' else train_checkpoint_dir
+    if root is None:
+        raise ValueError('evaluation requires an explicit training checkpoint directory or resume_from')
+    filename = name if path.suffix.lower() == '.pt' else f'{name}.pt'
+    return checkpoint.checkpoint_path(root / filename), mode == 'train' and filename == 'latest.pt', name
 
 
-def study_dir_from_assets(assets_dir: Path | str | None) -> Path | None:
-    if assets_dir is None:
+def load_resume(config: AlgorithmConfig, *, checkpoint_dir: Path,
+                train_checkpoint_dir: Path | None, observation: dict[str, Any]) -> dict | None:
+    reference, optional, name = resume_reference(config, checkpoint_dir=checkpoint_dir,
+                                                train_checkpoint_dir=train_checkpoint_dir)
+    observation.update(resume_count=0, resume_stem=name,
+                       resume_path=str(reference) if reference is not None else None)
+    if reference is None:
         return None
-    assets = Path(assets_dir).resolve()
-    if assets.name != 'assets':
-        return None
-    # studies/<name>/runs/<id>/assets
     try:
-        return assets.parent.parent.parent
-    except Exception:
+        payload = checkpoint.load_snapshot(reference)
+    except FileNotFoundError:
+        if not optional:
+            raise
+        observation['resume_skipped'] = name
         return None
+    observation['resume_count'] = 1
+    return payload
 
 
-def sibling_train_checkpoint(
-    system: Any,
-    *,
-    stem: str,
-    current_id: str | None = None,
-) -> Path | None:
-    """Eval Run: ``best.pt`` lives on the matching train Run, not this assets dir."""
-    assets_dir = getattr(system, 'assets_dir', None)
-    study_dir = study_dir_from_assets(assets_dir)
-    if study_dir is None:
-        return None
-    run_id = current_id or Path(assets_dir).resolve().parent.name
-    name = stem if stem.endswith('.pt') else f'{stem}.pt'
-    folder_name = stem[:-3] if stem.endswith('.pt') else stem
-    for rid in sibling_train_ids(study_dir, run_id):
-        base = study_dir / 'runs' / rid / 'assets' / 'checkpoints'
-        path = base / name
-        if path.is_file():
-            return path
-        folder = base / folder_name
-        if folder.is_dir() and ((folder / 'model.pt').is_file() or (folder / 'meta.json').is_file()):
-            return folder
-    return None
-
-
-def sibling_train_ids(study_dir: Path, run_id: str) -> list[str]:
-    """Match the current index's factors and seed, even before checkpoints exist."""
-    from rpipe.structure.artifact.index import load_index
-
-    try:
-        index = load_index(study_dir)
-    except (OSError, TypeError, ValueError):
-        return []
-    current_factors: dict[str, Any] | None = None
-    current_seed: Any = None
-    for exp in index.get('experiments') or []:
-        for run in exp.get('runs') or []:
-            rid = str(run.get('run_dir') or run.get('id') or '')
-            if rid == run_id:
-                current_factors = dict(exp.get('factors') or {})
-                current_seed = run.get('seed')
-                break
-        if current_factors is not None:
-            break
-    if current_factors is None:
-        return []
-    want = dict(current_factors)
-    want['algorithm.mode'] = 'train'
-    matched: list[str] = []
-    for exp in index.get('experiments') or []:
-        if dict(exp.get('factors') or {}) != want:
-            continue
-        for run in exp.get('runs') or []:
-            if run.get('seed') != current_seed:
-                continue
-            rid = str(run.get('run_dir') or run.get('id') or '')
-            if rid:
-                matched.append(rid)
-    return matched
-
-
-def resolve_checkpoint_ref(
-    ref: str,
-    system: Any,
-    *,
-    mode: str,
-) -> str:
-    """Turn stem / relative path / ``sibling`` into a path or stem system can load."""
-    text = str(ref).strip()
-    if text.lower() in ('sibling', 'train'):
-        stem = 'best' if mode == 'eval' else 'latest'
-        found = sibling_train_checkpoint(system, stem=stem)
-        return str(found) if found is not None else stem
-    path = Path(text)
-    if path.is_file() or path.is_dir():
-        return str(path)
-    assets_dir = getattr(system, 'assets_dir', None)
-    study_dir = study_dir_from_assets(assets_dir)
-    if study_dir is not None:
-        relative = study_dir / text
-        if relative.is_file():
-            return str(relative)
-        if not text.endswith('.pt'):
-            alt = study_dir / f'{text}.pt'
-            if alt.is_file():
-                return str(alt)
-    return text
-
-
-def _has_checkpoint_material(path: Path) -> bool:
-    """Recognize weight-bearing paths without loading tensors during planning."""
-    if path.is_file():
-        return True
-    folder = path if path.is_dir() or path.suffix.lower() != '.pt' else path.with_suffix('')
-    return folder.with_name(f'{folder.name}.pt').is_file() or any(
-        (folder / name).is_file() for name in ('payload.pt', 'model.pt')
-    )
-
-
-def sibling_train_dependency(study_dir: Path, run_id: str) -> str | None:
-    """Identify the train that launch must finish before this eval can run."""
-    from rpipe.structure.artifact import load_config
-
-    root = Path(study_dir) / 'runs' / run_id
-    try:
-        cfg = AlgorithmConfig.from_mapping(load_config(root / 'config.yaml').get('algorithm'))
-    except (OSError, ValueError):
-        return None
-    if cfg.mode != 'eval':
-        return None
-    ref = resume_stem(cfg, mode='eval')
-    if ref is None:
-        return None
-    parents = sibling_train_ids(study_dir, run_id)
-    if not parents:
-        return None
-    target = Path(resolve_checkpoint_ref(ref, SimpleNamespace(assets_dir=root / 'assets'), mode='eval'))
-    if target.exists() or target.suffix.lower() == '.pt' or '/' in str(target) or '\\' in str(target):
-        if _has_checkpoint_material(target):
-            # Explicit external/local weights do not depend on a sibling train.
-            return next((rid for rid in parents if
-                         (Path(study_dir) / 'runs' / rid / 'assets' / 'checkpoints').resolve()
-                         in target.resolve().parents), None)
-    else:
-        own = root / 'assets' / 'checkpoints' / target
-        if _has_checkpoint_material(own):
-            return None
-    return parents[0]
-
-
-def apply_module_state(module: Any, payload: dict[str, Any] | None) -> None:
-    if module is None or not payload:
-        return
+def validate_model_state(model, payload: dict) -> None:
+    import torch
     state = payload.get('model')
+    module = getattr(model, 'module', None)
+    if not isinstance(state, dict) or module is None:
+        raise ValueError('checkpoint requires model state for the selected model')
+    expected = module.state_dict()
+    if set(state) != set(expected):
+        raise ValueError('checkpoint model state keys differ')
+    for name, value in state.items():
+        current = expected[name]
+        if (type(value) is not torch.Tensor or type(current) is not torch.Tensor
+                or value.shape != current.shape or value.dtype != current.dtype):
+            raise ValueError(f'checkpoint model state is incompatible: {name}')
+
+
+def admit_resume(payload: dict | None, *, model, tracker=None, data=None, contract=None,
+                 num_steps: int | None = None, step_period: int = 1) -> None:
+    if payload is None:
+        return
+    validate_model_state(model, payload)
+    for field in ('step', 'epoch'):
+        value = payload.get(field)
+        if field == 'step' and value is not None and type(value) is not int:
+            raise ValueError('checkpoint optimizer step must be a nonnegative integer')
+        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))
+                                  or not math.isfinite(value) or value < 0):
+            raise ValueError(f'invalid checkpoint {field}')
+    for field in ('best_value', 'best_accuracy'):
+        value = payload.get(field)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))
+                                  or not math.isfinite(value)):
+            raise ValueError(f'invalid checkpoint {field}')
+    if tracker is not None and payload.get('tracker') is not None:
+        tracker.validate_state_dict(payload['tracker'])
+    if contract is None:
+        return
+    state = payload.get('training_state')
     if state is None:
         return
-    module.load_state_dict(state)
+    if (not isinstance(state, dict) or type(state.get('version')) is not int or state['version'] != 1):
+        raise ValueError('unsupported checkpoint training_state version')
+    if state.get('data') is not None:
+        if json.dumps(state.get('contract'), sort_keys=True, allow_nan=False) != json.dumps(contract, sort_keys=True, allow_nan=False):
+            raise ValueError('checkpoint training contract differs; keep budget/settings/runtime unchanged')
+        validate = getattr(data, 'validate_training_state', None)
+        if not callable(validate):
+            raise ValueError('data does not support checkpoint iterator admission')
+        validate(state['data'], num_steps=num_steps, step_period=step_period)
+    validate_rng(state['rng'])
+    if type(state.get('stall', 0)) is not int or state.get('stall', 0) < 0:
+        raise ValueError('invalid checkpoint early-stop state')
+    if type(state.get('stopped', False)) is not bool:
+        raise ValueError('invalid checkpoint stop state')
+    percents = state.get('already_percent', [])
+    if (not isinstance(percents, list) or any(isinstance(v, bool) or not isinstance(v, (int, float))
+            or not math.isfinite(v) or not 0 <= v <= 100 for v in percents)):
+        raise ValueError('invalid checkpoint save progress')
+
+
+def apply_resume(payload: dict | None, *, model, tracker=None) -> None:
+    if payload is None:
+        return
+    model.module.load_state_dict(payload['model'])
+    if tracker is not None and payload.get('tracker') is not None:
+        tracker.load_state_dict(payload['tracker'])
+
+
+def build_training_snapshot(
+    module: Any,
+    optimizer: Any,
+    scheduler: Any,
+    extra: dict[str, Any],
+    tracker: TrackerPort | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        'epoch': extra.get('epoch'),
+        'step': extra.get('step'),
+        'model': module.state_dict(),
+        'optimizer': optimizer.state_dict() if optimizer is not None else None,
+        'scheduler': scheduler.state_dict() if scheduler is not None else None,
+    }
+    if extra.get('test_accuracy') is not None:
+        payload['test_accuracy'] = extra['test_accuracy']
+    if extra.get('best_accuracy') is not None:
+        payload['best_accuracy'] = extra['best_accuracy']
+    if extra.get('best_value') is not None:
+        payload['best_value'] = extra['best_value']
+        payload['best_metric'] = extra.get('best_metric')
+    if tracker is not None:
+        payload['tracker'] = tracker.state_dict()
+        progress = extra.get('progress') or extra
+        payload['tracker']['progress'] = {
+            key: progress[key] for key in ('step', 'epoch') if key in progress
+        }
+    return payload

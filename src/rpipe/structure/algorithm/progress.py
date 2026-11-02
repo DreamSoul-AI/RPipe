@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Iterable
 
+from rpipe.structure.control import validate_training_budget
+
 UNIT_EPOCH = 'epoch'
 UNIT_STEP = 'step'
 CHECKPOINT_LATEST = 'latest'
@@ -29,11 +31,8 @@ class ProgressBudget:
     def scheduler_t_max(self) -> int:
         if self.unit == UNIT_STEP:
             return max(int(self.num_steps), 1)
-        if self.num_epochs is not None:
-            return max(int(self.num_epochs), 1)
-        if self.num_steps is not None:
-            return max(int(self.num_steps), 1)
-        return 1
+        horizon = self.num_epochs if self.num_epochs is not None else self.num_steps
+        return max(int(horizon), 1) if horizon is not None else 1
 
 
 def format_hms(seconds: float) -> str:
@@ -71,7 +70,7 @@ class EtaClock:
 
 
 def infer_steps_per_epoch(data: Any) -> int | None:
-    """Infer train steps/epoch from Data.steps_per_epoch, loader length, or metadata."""
+    """Infer train steps/epoch from Data's declared capability or metadata."""
     method = getattr(data, 'steps_per_epoch', None)
     if callable(method):
         try:
@@ -80,16 +79,6 @@ def infer_steps_per_epoch(data: Any) -> int | None:
             value = None
         if value:
             return int(value)
-    loaders = getattr(data, '_loaders', None)
-    if isinstance(loaders, dict):
-        train_loader = loaders.get('train')
-        if train_loader is not None:
-            try:
-                value = int(len(train_loader))
-                if value > 0:
-                    return value
-            except (TypeError, ValueError):
-                pass
     meta = getattr(data, 'meta', None)
     if isinstance(meta, dict):
         train_size = meta.get('train_size')
@@ -102,6 +91,7 @@ def infer_steps_per_epoch(data: Any) -> int | None:
 
 
 def resolve_budget(config: Any, *, steps_per_epoch: int | None = None) -> ProgressBudget:
+    validate_training_budget(config)
     raw_epochs = config.setting('num_epochs')
     raw_steps = config.setting('num_steps')
     raw_unit = config.setting('progress_unit')
@@ -151,9 +141,6 @@ def due_period(period: int, current: int) -> bool:
     return period > 0 and current > 0 and current % period == 0
 
 
-due_eval_period = due_period
-
-
 def parse_checkpoint_mode(raw: Any) -> str:
     mode = CHECKPOINT_LATEST if raw is None else str(raw).lower().replace('-', '_')
     if mode not in (CHECKPOINT_LATEST, CHECKPOINT_PERCENT):
@@ -188,13 +175,7 @@ def crossed_percents(
     if total <= 0 or current <= 0:
         return []
     ratio = current / total
-    hit: list[float] = []
-    for percent in percents:
-        if percent in already:
-            continue
-        if ratio + 1e-12 >= percent:
-            hit.append(percent)
-    return hit
+    return [percent for percent in percents if percent not in already and ratio + 1e-12 >= percent]
 
 
 def checkpoint_names(
@@ -225,3 +206,10 @@ def checkpoint_names(
     if save_best and improved:
         names.append('best')
     return list(dict.fromkeys(names))
+
+
+def hook_observation(*, epoch: int, lr: float, step: int | None = None) -> dict[str, Any]:
+    extra: dict[str, Any] = {'epoch': epoch, 'lr': lr}
+    if step is not None:
+        extra['step'] = step
+    return extra

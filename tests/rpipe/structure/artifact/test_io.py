@@ -1,130 +1,116 @@
-from pathlib import Path
+"""Source admission protects stored success and reading cannot repair artifacts."""
 
 import pytest
 
-from rpipe.structure.artifact import (
-    artifact_layout,
-    build_index,
-    experiment_entries,
-    load_config,
-    load_index,
-    validate_result,
-    write_config,
-    write_index,
-    write_result,
-)
+pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
+              pytest.mark.cost(cost_class='c1'),
+              pytest.mark.result_type('categorical', detail='summary')]
 
-pytestmark = [
-    pytest.mark.unit,
-    pytest.mark.content,
-    pytest.mark.p1,
-    pytest.mark.structure_layer,
-    pytest.mark.module_artifact,
-    pytest.mark.cost(cost_class='c1'),
-    pytest.mark.result_type('categorical', detail='summary'),
-]
+def test_partial_ownership_write_and_cleanup_failure_keep_primary_and_busy(
+        source_study, run_root, monkeypatch):
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact import io as artifacts
+    from rpipe.structure.control import BusyError
 
+    spec = plan(source_study, run_root=run_root)[0]
+    write_json = artifacts.write_json
 
-def test_artifact_layout_creates_assets_dir(tmp_path: Path):
-    layout = artifact_layout(tmp_path, 'seed_0')
-    assert layout.assets_dir.is_dir()
+    def fail_owner(path, value):
+        if path.name == 'owner.json':
+            path.write_bytes(b'{"partial":')
+            raise OSError('primary disk failure')
+        return write_json(path, value)
 
-
-@pytest.mark.parametrize('run_id', ['', '.', '..', '../outside', '..\\outside', 'nested/run', 'C:\\outside',
-                                    'C:alias', ' name', 'name ', 'name.', 'CON', 'NUL.txt'])
-def test_artifact_layout_rejects_unsafe_run_directory_before_writes(tmp_path, monkeypatch, run_id):
-    import rpipe.structure.artifact.layout as module
-
-    def no_write(*args):
-        raise AssertionError('invalid Run must be rejected before creating any directory')
-
-    monkeypatch.setattr(module, 'ensure_study_layout', no_write)
-    study = tmp_path / 'study'
-    with pytest.raises(ValueError, match='Run directory'):
-        artifact_layout(study, run_id)
-    assert not study.exists()
+    monkeypatch.setattr(artifacts, 'write_json', fail_owner)
+    owner = artifacts.Ownership(spec)
+    with pytest.raises(OSError, match='primary disk failure'):
+        owner.acquire()
+    with pytest.raises(BusyError):
+        artifacts.Ownership(spec).acquire()
+    assert (owner.path / 'owner.json').read_bytes() == b'{"partial":'
 
 
-def test_index_rejects_unsafe_run_directory_before_readout(tmp_path):
-    write_index(tmp_path, {'experiments': [{'runs': [{'id': 'safe', 'run_dir': '../outside'}]}]})
-    with pytest.raises(ValueError, match='Run directory'):
-        load_index(tmp_path)
+@pytest.mark.parametrize('replacement', ['directory', 'owner-record'])
+def test_release_recovery_never_overwrites_a_replacement_owner(
+        source_study, run_root, monkeypatch, replacement):
+    from pathlib import Path
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact.io import Ownership
+    from rpipe.structure.control import BusyError
+
+    spec = plan(source_study, run_root=run_root)[0]
+    owner = Ownership(spec, attempt='a' * 32)
+    owner.acquire()
+    original_rmdir = Path.rmdir
+    peer = b'{"token":"peer-owner","attempt":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
+    def replace_owner(path, *args, **kwargs):
+        if path == owner.path:
+            if replacement == 'directory':
+                original_rmdir(path)
+                path.mkdir()
+            (path / 'owner.json').write_bytes(peer)
+            raise OSError('release interrupted by peer replacement')
+        return original_rmdir(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'rmdir', replace_owner)
+    with pytest.raises(OSError, match='release interrupted'):
+        owner.release()
+    assert (owner.path / 'owner.json').read_bytes() == peer
+    with pytest.raises(BusyError):
+        owner.verify()
 
 
-def test_write_config_roundtrip_preserves_slug(tmp_path: Path):
-    layout = artifact_layout(tmp_path, 'seed_0')
-    write_config(layout.config_path, {'slug': 'seed_0', 'seed': 0})
-    loaded = load_config(layout.config_path)
-    assert loaded['slug'] == 'seed_0'
+@pytest.mark.parametrize('entry', ['run', 'publish'])
+def test_existing_configuration_cannot_substitute_boolean_for_integer(
+        source_study, run_root, file_bytes, monkeypatch, entry):
+    from rpipe.flow import worker
+    from rpipe.flow.run import run
+    from rpipe.structure.artifact.io import load_config, write_config
+    from rpipe.structure.control import SourceMismatch
+    from rpipe.structure.make import plan, publish
+
+    source_config = source_study / 'experiment_config.yaml'
+    config = load_config(source_config)
+    config['algorithm']['num_steps'] = 1
+    write_config(source_config, config)
+    spec = plan(source_study, run_root=run_root)[0]
+    publish([spec])
+    config_path = spec.run_dir / 'config.yaml'
+    tampered = load_config(config_path)
+    tampered['algorithm']['num_steps'] = True
+    write_config(config_path, tampered)
+    before = file_bytes(run_root)
+    monkeypatch.setattr(worker, 'compute', lambda *args: pytest.fail('rejected config started science'))
+    if entry == 'run':
+        rejected = run(spec)
+        assert rejected.status == 'rejected'
+        assert rejected.error['type'] == 'SourceMismatch'
+    else:
+        with pytest.raises(SourceMismatch):
+            publish([spec])
+    assert file_bytes(run_root) == before
 
 
-def test_validate_result_empty_mapping_returns_errors():
-    errors = validate_result({})
-    assert errors
+@pytest.mark.parametrize('component', ['assets', 'attempts'])
+def test_existing_output_link_cannot_write_outside_run_root(
+        source_study, run_root, science_factory, file_bytes, component, science_worker):
+    from rpipe.structure.make import plan
+    from rpipe.flow.run import run
+    from rpipe.structure.control import AdmissionError
 
-
-def test_write_result_valid_payload_creates_file(tmp_path: Path):
-    layout = artifact_layout(tmp_path, 'seed_0')
-    data = {
-        'status': 'succeeded',
-        'control': {'slug': 'seed_0'},
-        'metrics': {},
-        'paths': {},
-    }
-    assert validate_result(data) == []
-    path = write_result(layout.result_path, data)
-    assert path.is_file()
-
-
-def test_write_result_missing_status_raises_value_error(tmp_path: Path):
-    layout = artifact_layout(tmp_path, 'x')
-    with pytest.raises(ValueError, match='status'):
-        write_result(layout.result_path, {'control': {}, 'metrics': {}, 'paths': {}})
-
-
-def test_index_groups_runs_by_experiment_factors(tmp_path: Path):
-    study_dir = tmp_path / 'studies' / 'demo'
-    study_dir.mkdir(parents=True)
-    cfgs: list[tuple[Path, dict]] = []
-    for size, seed, run_id in ((500, 0, 'a'), (500, 1, 'b'), (2000, 0, 'c')):
-        layout = artifact_layout(study_dir, run_id)
-        cfg = {
-            'id': run_id,
-            'description': f'size={size} seed={seed}',
-            'seed': seed,
-            'data': {'config': {'train_size': size}},
-        }
-        write_config(layout.config_path, cfg)
-        cfgs.append((layout.config_path, cfg))
-
-    experiments = experiment_entries(
-        configs=cfgs,
-        axis_keys=['data.config.train_size'],
-        study_dir=study_dir,
-    )
-    assert experiments[0]['runs'][0]['config'] == 'runs/a/config.yaml'
-    assert experiments[0]['runs'][0]['log'] == 'runs/a/assets/logs/run.log'
-    assert len(experiments) == 2
-    assert experiments[0]['factors'] == {'data.config.train_size': 500}
-    assert [r['seed'] for r in experiments[0]['runs']] == [0, 1]
-    assert experiments[1]['factors'] == {'data.config.train_size': 2000}
-    assert [r['id'] for r in experiments[1]['runs']] == ['c']
-
-    index = build_index(
-        study='demo',
-        description='demo study',
-        experiments=experiments,
-    )
-    assert index['id']
-    path = write_index(study_dir, index)
-    assert path == study_dir / 'index.json'
-    loaded = load_index(study_dir)
-    assert loaded['experiments'][0]['runs'][0]['id'] == 'a'
-    assert not artifact_layout(study_dir, 'a').result_path.exists()
-
-
-@pytest.mark.parametrize('entry', [{'id': '../outside', 'run_dir': 'safe'}, {'id': 'safe', 'run_dir': '../outside'}])
-def test_index_rejects_unsafe_id_even_with_safe_directory(tmp_path, entry):
-    write_index(tmp_path, {'experiments': [{'runs': [entry]}]})
-    with pytest.raises(ValueError):
-        load_index(tmp_path)
+    spec = plan(source_study, run_root=run_root)[0]
+    peer = run_root.parent / 'external-peer'
+    peer.mkdir()
+    (peer / 'evidence').write_bytes(b'other owner bytes')
+    spec.run_dir.mkdir(parents=True)
+    try:
+        (spec.run_dir / component).symlink_to(peer, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f'directory symlink unavailable: {error}')
+    before = file_bytes(peer)
+    payload = science_factory()
+    science_worker(payload)
+    _rejected = run(spec)
+    assert _rejected.status == 'rejected'
+    assert _rejected.error['type'] == 'AdmissionError'
+    assert payload.calls == []
+    assert file_bytes(peer) == before

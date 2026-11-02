@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rpipe.structure.algorithm.config import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.kwargs import algorithm_blob, filter_args
 from rpipe.structure.algorithm.progress import infer_steps_per_epoch, resolve_budget
 
@@ -83,17 +83,11 @@ def training_arguments_kwargs(
     if period > 1:
         kwargs['gradient_accumulation_steps'] = period
     blob = algorithm_blob(config)
-    aliases = {
-        'weight_decay': blob.get('weight_decay'),
-        'warmup_ratio': blob.get('warmup_ratio'),
-        'warmup_steps': blob.get('warmup_steps'),
-        'adam_beta1': blob.get('adam_beta1'),
-        'adam_beta2': blob.get('adam_beta2'),
-        'adam_epsilon': blob.get('eps', blob.get('adam_epsilon')),
-        'max_grad_norm': blob.get('max_grad_norm'),
-        'momentum': blob.get('momentum'),
-    }
-    for key, value in aliases.items():
+    for key in ('weight_decay', 'warmup_ratio', 'warmup_steps', 'adam_beta1',
+                'adam_beta2', 'adam_epsilon', 'max_grad_norm'):
+        value = blob.get(key)
+        if key == 'adam_epsilon':
+            value = blob.get('eps', value)
         if value is not None:
             kwargs[key] = value
     if resume_from_checkpoint:
@@ -103,6 +97,5 @@ def training_arguments_kwargs(
     except ImportError:
         return kwargs
     overlay = filter_args(getattr(TrainingArguments, '__init__', TrainingArguments), blob)
-    for key, value in overlay.items():
-        kwargs[key] = value
+    kwargs.update(overlay)
     return kwargs

@@ -13,7 +13,6 @@ import hashlib
 import json
 import math
 from pathlib import Path
-import re
 import sys
 
 # Import NumPy before lazy Torch imports for this Windows runtime.
@@ -87,15 +86,13 @@ def read_tracker(root):
 
 
 def checkpoint_summary(root, stem):
-    """Read committed bundle; the split JSON mirror is not authoritative."""
-    import torch
+    """Read the explicitly selected committed snapshot."""
+    from rpipe.structure.artifact.checkpoint import load_snapshot
 
     path = root / 'assets' / 'checkpoints' / f'{stem}.pt'
     if not path.is_file():
         return None
-    body = torch.load(path, map_location='cpu', weights_only=False)
-    if not isinstance(body, dict):
-        raise ValueError(f'{path}: expected checkpoint object')
+    body = load_snapshot(path)
     tracker = body.get('tracker') or {}
     return {
         'path': str(path), 'step': body.get('step'),
@@ -110,34 +107,91 @@ def close(left, right):
     return finite(left) and finite(right) and abs(left - right) <= TOLERANCE
 
 
-def inspect_run(study, entry, data, model, mode, seed):
-    root = study / 'runs' / str(entry['run_dir'])
-    result_path = root / 'result.json'
-    result = read_json(result_path) if result_path.is_file() else {}
+def read_diagnostics(root, run_id, attempt):
+    folder = root / 'assets' / 'logs'
+    paths, errors = [], []
+    for name in ('events.jsonl', 'events.1.jsonl', 'events.2.jsonl', 'events.3.jsonl'):
+        path = folder / name
+        try:
+            if path.is_file():
+                paths.append(path)
+        except OSError as exc:
+            errors.append(f'diagnostic {name} unavailable: {type(exc).__name__}')
+    if paths or errors:
+        events = []
+        for path in paths:
+            try:
+                lines = path.read_text(encoding='utf-8').splitlines()
+            except (OSError, UnicodeError) as exc:
+                errors.append(f'diagnostic {path.name} unreadable: {type(exc).__name__}')
+                continue
+            for number, line in enumerate(lines, 1):
+                try:
+                    row = json.loads(line)
+                except (ValueError, RecursionError):
+                    errors.append(f'diagnostic {path.name} line {number} is invalid JSON')
+                    continue
+                if not isinstance(row, dict):
+                    errors.append(f'diagnostic {path.name} line {number} is not an object')
+                    continue
+                if row.get('task_id') == run_id and (attempt is None or row.get('attempt_id') == attempt):
+                    events.append(row)
+        return {'format': 'jsonl', 'present': bool(events),
+                'resume_count': sum(row.get('event') == 'checkpoint.restored' for row in events), 'errors': errors}
+    return {'format': 'missing', 'present': False, 'resume_count': 0, 'errors': errors}
+
+
+def inspect_run(ref, data, model, mode, *, expected_source=None):
+    from rpipe.structure.artifact.readout import read_run
+
+    root, seed = ref.run_dir, ref.seed
+    result_path = ref.result_path
+    result = read_run(ref)
     trajectory = read_tracker(root)
     errors = list(trajectory['errors'])
-    log_path = root / 'assets' / 'logs' / 'run.log'
-    log = log_path.read_text(encoding='utf-8') if log_path.is_file() else ''
-    resume_lines = [line for line in log.splitlines() if '[resume]' in line]
+    if result.get('metadata_status'):
+        errors.append(f"formal Run metadata is {result['metadata_status']}")
+    diagnostics = read_diagnostics(root, ref.id, result.get('attempt'))
+    errors.extend(diagnostics['errors'])
+    execution = result
+    if result.get('scientific_status') == 'succeeded' and not execution['evidence_complete']:
+        errors.append('scientific result lacks complete closed execution evidence')
+    if result.get('quality') is False:
+        errors.append('scientific quality gate failed')
+    execute = result.get('execute') if isinstance(result.get('execute'), dict) else {}
     metrics = result.get('metrics') or {}
-    row = {'id': entry['id'], 'seed': seed, 'data': data, 'model': model, 'mode': mode,
-           'status': result.get('status', 'started' if log else 'pending'),
+    row = {'id': ref.id, 'seed': seed, 'data': data, 'model': model, 'mode': mode,
+           'status': (execution['status'] if execution['status'] != 'missing'
+                      else 'started' if diagnostics['present'] else 'pending'),
+           'scientific_status': result.get('scientific_status', 'missing'),
+           'derived_status': execution.get('derived_status', 'not_run'), 'execution_status': execution.get('metadata_status', execution['status']),
+           'evidence_complete': execution['evidence_complete'], 'busy': execution['busy'],
+           'identity': result.get('identity') or {}, 'execute': execute,
            'result_path': str(result_path), 'points': len(trajectory['x']),
            'last_optimizer_step': trajectory['x'][-1] if trajectory['x'] else None,
            'optimizer_steps': trajectory['x'], 'accuracy_pct': trajectory['values'],
            'tracker_history_count': len(trajectory['history']),
-           'resume_event_count': len(resume_lines), 'metrics': metrics,
+           'resume_event_count': diagnostics['resume_count'], 'diagnostic_format': diagnostics['format'],
+           'metrics': metrics,
            'errors': errors, 'audit': {}}
     if mode == 'train':
         if trajectory['x'] != STEPS[:len(trajectory['x'])]:
             errors.append('train test curve is not an uninterrupted step200..80000 prefix')
-        if resume_lines:
-            errors.append('train log contains resume event')
         if any(r.get('step') != (index + 1) * 240 for index, r in enumerate(trajectory['rows'])):
             errors.append('train/test internal batch counts differ from 200+40 per evaluation')
-    if row['status'] == 'succeeded':
-        if not log:
-            errors.append('succeeded result has no run.log')
+    if row['scientific_status'] == 'succeeded':
+        if expected_source is not None:
+            identity = result.get('identity') or {}
+            if (identity.get('id') != ref.id or identity.get('source_digest') != expected_source
+                    or identity.get('version') != ref.version):
+                errors.append('result does not match the current source and research version identity')
+        if not diagnostics['present']:
+            errors.append('succeeded result has no matching Run diagnostics')
+        count = execute.get('resume_count')
+        if type(count) is not int or count < 0:
+            errors.append('succeeded result lacks a valid scientific resume_count')
+        if mode == 'train' and (count != 0 or 'resume_path' not in execute or execute['resume_path'] is not None):
+            errors.append('continuous training requires an explicit zero restores and no resume_path')
         if len(trajectory['start_markers']) != 1:
             errors.append('succeeded run requires one continuous tracker start marker')
         data_snapshot = ((result.get('structure') or {}).get('data') or {})
@@ -176,6 +230,7 @@ def inspect_run(study, entry, data, model, mode, seed):
                 errors.append('independent eval requires exactly 40 test batches')
             if not close(metrics.get('eval_accuracy'), trajectory['values'][0] if trajectory['values'] else None):
                 errors.append('independent eval result accuracy differs from tracker')
+    row['evidence_complete'] = row['evidence_complete'] and not errors
     return row
 
 
@@ -186,6 +241,8 @@ def threshold_gate(observed, expected, limit):
 
 
 def compare(study, reference, *, partial=False):
+    from rpipe.structure.artifact.provenance import source_digest
+    expected_source = source_digest(STUDY)
     contract = reference['acceptance_contract']
     report = {'schema': 'rpipe.historical_curve_comparison.v1',
               'recorded_at_utc': datetime.now(timezone.utc).isoformat(),
@@ -200,6 +257,8 @@ def compare(study, reference, *, partial=False):
     index = read_json(index_path) if index_path.is_file() else {'experiments': []}
     if not index_path.is_file():
         report['missing_index'] = True
+    from rpipe.structure.artifact.readout import refs_from_index
+    refs = {ref.id: ref for ref in refs_from_index(study, index)} if index_path.is_file() else {}
     table = {}
     for experiment in index.get('experiments', []):
         factors = experiment['factors']
@@ -214,7 +273,7 @@ def compare(study, reference, *, partial=False):
                 report['errors'].append(f'duplicate/unsupported run factors: {key}')
                 continue
             try:
-                row = inspect_run(study, entry, data, model, mode, seed)
+                row = inspect_run(refs[entry['id']], data, model, mode, expected_source=expected_source)
             except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
                 row = {'id': entry.get('id'), 'data': data, 'model': model, 'mode': mode, 'seed': seed,
                        'status': 'unreadable', 'points': 0, 'optimizer_steps': [], 'accuracy_pct': [],
@@ -227,7 +286,8 @@ def compare(study, reference, *, partial=False):
     report['missing_runs'] = [dict(zip(('data', 'model', 'mode', 'seed'), key)) for key in expected if key not in table]
     report['run_counts'] = {mode: dict(Counter(row['status'] for row in report['runs'] if row['mode'] == mode))
                             for mode in ('train', 'eval')}
-    complete = not report['missing_runs'] and len(table) == 64 and all(row['status'] == 'succeeded' for row in table.values())
+    complete = (not report['missing_runs'] and len(table) == 64
+                and all(row['status'] == 'succeeded' and row.get('evidence_complete') for row in table.values()))
     for data in DATA_NAMES:
         for model in MODEL_NAMES:
             seeds = {seed: table[(data, model, 'train', seed)] for seed in SEEDS if (data, model, 'train', seed) in table}
@@ -235,37 +295,40 @@ def compare(study, reference, *, partial=False):
             x = sorted(set().union(*(set(value) for value in points.values()))) if points else []
             values = [[curve[step] for curve in points.values() if step in curve] for step in x]
             body = {'data': data, 'model': model, 'seeds_with_observations': sorted(seed for seed, curve in points.items() if curve),
-                    'completed_train_seeds': sorted(seed for seed, row in seeds.items() if row['status'] == 'succeeded' and not row['errors']),
+                    'completed_train_seeds': sorted(seed for seed, row in seeds.items()
+                                                    if row['status'] == 'succeeded' and row.get('evidence_complete') and not row['errors']),
                     'optimizer_steps': x, 'seed_count_by_step': [len(value) for value in values],
                     'mean_accuracy_pct': [float(np.mean(value)) for value in values],
                     'population_std_accuracy_pp': [float(np.std(value, ddof=0)) for value in values],
                     'gates_applied': False, 'gates': {}, 'passed': None}
             for seed in SEEDS:
                 train, evaluation = table.get((data, model, 'train', seed)), table.get((data, model, 'eval', seed))
-                if train and evaluation and train['status'] == evaluation['status'] == 'succeeded':
+                if train and evaluation and train.get('scientific_status') == evaluation.get('scientific_status') == 'succeeded':
                     best = train.get('best_checkpoint') or {}
                     actual = evaluation['accuracy_pct'][0] if evaluation['accuracy_pct'] else None
                     eval_step = evaluation['optimizer_steps'][0] if evaluation['optimizer_steps'] else None
-                    resume_pattern = r'\[resume\].*target=(.+?)\s+epoch=.*?\s+step=(\d+)'
-                    actual_path_pattern = r'\[split\] test.*?resume_path=(.+?)\s+step=(\d+)'
-                    log_path = study / 'runs' / str(evaluation['id']) / 'assets' / 'logs' / 'run.log'
-                    log = log_path.read_text(encoding='utf-8') if log_path.is_file() else ''
-                    matches = re.findall(resume_pattern, log)
-                    actual_paths = re.findall(actual_path_pattern, log)
-                    # Algorithm.resume logs its initial stem even when sibling
-                    # fallback succeeds. EvalAlgorithm's report extra records
-                    # the actual fallback path; use that authoritative field.
-                    source_match = (len(actual_paths) == 1 and
-                                    Path(actual_paths[0][0]).resolve() == Path(best.get('path', '')).resolve() and
-                                    int(actual_paths[0][1]) == best.get('step'))
+                    execute = evaluation.get('execute') or {}
+                    resume_path, resume_count = execute.get('resume_path'), execute.get('resume_count')
+                    resume_step = execute.get('step')
+                    train_identity, eval_identity = train.get('identity') or {}, evaluation.get('identity') or {}
+                    identities_match = (train_identity.get('id') == train['id']
+                        and eval_identity.get('id') == evaluation['id']
+                        and train_identity.get('source_digest') == eval_identity.get('source_digest') == expected_source
+                        and train_identity.get('version') == eval_identity.get('version') == study.name
+                        and train['seed'] == evaluation['seed'])
+                    single_restore = (type(resume_count) is int and resume_count == 1
+                        and type(resume_step) is int and resume_step == best.get('step'))
+                    source_match = (identities_match and isinstance(resume_path, str) and bool(resume_path)
+                        and Path(resume_path).resolve() == Path(best.get('path', '')).resolve())
                     audit = {'train_id': train['id'], 'best_step': best.get('step'), 'eval_step': eval_step,
                              'best_accuracy_pct': best.get('best_accuracy'), 'eval_accuracy_pct': actual,
                              'correct_samples': round(actual * 100) if finite(actual) else None,
                              'eval_equals_best': close(actual, best.get('best_accuracy')),
-                             'eval_step_equals_best': eval_step == best.get('step'),
-                             'logged_initial_resume_target': matches[0][0] if len(matches) == 1 else None,
-                             'reported_actual_resume_path': actual_paths[0][0] if len(actual_paths) == 1 else None,
-                             'single_resume_event_at_best_step': len(matches) == 1 and int(matches[0][1]) == best.get('step'),
+                             'eval_step_equals_best': type(eval_step) is int and eval_step == best.get('step') == resume_step,
+                             'resume_evidence_source': 'result.execute', 'scientific_resume_count': resume_count,
+                             'source_identity_matches': identities_match,
+                             'reported_actual_resume_path': resume_path,
+                             'single_resume_event_at_best_step': single_restore,
                              'eval_loads_matching_train_best': source_match}
                     audit['passed'] = bool(audit['eval_equals_best'] and audit['eval_step_equals_best'] and source_match and audit['single_resume_event_at_best_step'])
                     evaluation['best_source_audit'] = audit
@@ -324,47 +387,89 @@ def plot_report(report, reference, destination):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
+    import uuid
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5), dpi=160)
-    for ax, data in zip(axes, DATA_NAMES):
-        for model in MODEL_NAMES:
-            source = reference['datasets'][data]['models'][model]['sparse_points']
-            ax.scatter([point['step'] for point in source], [point['accuracy_pct_estimate'] for point in source],
-                       s=24, marker='x', color=COLORS[model], alpha=0.65)
-            body = next(row for row in report['experiments'] if row['data'] == data and row['model'] == model)
-            if body['optimizer_steps']:
-                x, mean, std = map(np.array, (body['optimizer_steps'], body['mean_accuracy_pct'], body['population_std_accuracy_pp']))
-                counts = body['seed_count_by_step']
-                ax.plot(x, mean, color=COLORS[model], label=f'{model}: n={min(counts)}..{max(counts)}')
-                ax.fill_between(x, mean - std, mean + std, color=COLORS[model], alpha=0.12)
-            else:
-                ax.plot([], [], color=COLORS[model], label=f'{model}: no current points')
-        ax.set_title(data)
-        ax.set_xlabel('Optimizer step (reference slot j maps to (j+1)*200)')
-        ax.set_ylabel('Full test Accuracy (%)')
-        ax.set_xlim(0, 80000)
-        ax.grid(alpha=0.3)
-        ax.legend(fontsize=8)
-    label = 'FINAL' if report['final_gates_applied'] else 'INCOMPLETE / PROVISIONAL'
-    fig.suptitle(f'{label}: current seed mean +/- population std; crosses = PNG estimates\n'
-                 'Reference image values are not recovered original training metrics', fontsize=11)
-    fig.tight_layout()
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(destination)
-    plt.close(fig)
+    from rpipe.structure.artifact.io import atomic_replace
+
+    tmp = destination.with_name(f'{uuid.uuid4().hex}.tmp')
+    owned = False
+    fig = plt.figure(figsize=(14, 5), dpi=160)
+    try:
+        axes = fig.subplots(1, 2)
+        for ax, data in zip(axes, DATA_NAMES):
+            for model in MODEL_NAMES:
+                source = reference['datasets'][data]['models'][model]['sparse_points']
+                ax.scatter([point['step'] for point in source], [point['accuracy_pct_estimate'] for point in source],
+                           s=24, marker='x', color=COLORS[model], alpha=0.65)
+                body = next(row for row in report['experiments'] if row['data'] == data and row['model'] == model)
+                if body['optimizer_steps']:
+                    x, mean, std = map(np.array, (body['optimizer_steps'], body['mean_accuracy_pct'], body['population_std_accuracy_pp']))
+                    counts = body['seed_count_by_step']
+                    ax.plot(x, mean, color=COLORS[model], label=f'{model}: n={min(counts)}..{max(counts)}')
+                    ax.fill_between(x, mean - std, mean + std, color=COLORS[model], alpha=0.12)
+                else:
+                    ax.plot([], [], color=COLORS[model], label=f'{model}: no current points')
+            ax.set_title(data)
+            ax.set_xlabel('Optimizer step (reference slot j maps to (j+1)*200)')
+            ax.set_ylabel('Full test Accuracy (%)')
+            ax.set_xlim(0, 80000)
+            ax.grid(alpha=0.3)
+            ax.legend(fontsize=8)
+        label = 'FINAL' if report['final_gates_applied'] else 'INCOMPLETE / PROVISIONAL'
+        fig.suptitle(f'{label}: current seed mean +/- population std; crosses = PNG estimates\n'
+                     'Reference image values are not recovered original training metrics', fontsize=11)
+        fig.tight_layout()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            mode = destination.stat().st_mode
+        except FileNotFoundError:
+            mode = None
+        stream = tmp.open('xb')
+        owned = True
+        try:
+            fig.savefig(stream, format='png')
+        except BaseException:
+            try:
+                stream.close()
+            except OSError:
+                pass
+            raise
+        else:
+            stream.close()
+        if mode is not None:
+            tmp.chmod(mode)
+        atomic_replace(tmp, destination)
+    finally:
+        try:
+            if owned:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except PermissionError:
+                    try:
+                        tmp.chmod(0o600)
+                        tmp.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                except OSError:
+                    pass
+        finally:
+            plt.close(fig)
 
 
 def main(argv=None):
-    from rpipe.structure.artifact._atomic import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--study', type=Path, default=STUDY)
+    parser.add_argument('--study-root', type=Path, required=True, help='Explicit research version output root')
     parser.add_argument('--reference', type=Path, default=STUDY / 'docs' / 'REFERENCE_CURVES.json')
-    parser.add_argument('--output', type=Path, help='Output directory (default: <study>/docs)')
+    parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--partial', action='store_true')
     args = parser.parse_args(argv)
-    study = args.study.resolve()
-    output = args.output.resolve() if args.output else study / 'docs'
+    study = args.study_root.resolve()
+    output = args.output.resolve()
+    checkout = STUDY.parents[1]
+    if output.is_relative_to(checkout) or checkout.is_relative_to(output):
+        parser.error('output must be separate from the source checkout')
     reference = read_json(args.reference)
     report = compare(study, reference, partial=args.partial)
     report['reference_file_sha256'] = sha256(args.reference)

@@ -1,9 +1,0 @@
-{
-  "baseline": "804b3823ab6d2af46cbda1a65688ca8b76c60b22",
-  "version": "main-exp-v030-20261013-final",
-  "complete": true,
-  "passed": true,
-  "source_frozen": true,
-  "wall_seconds": 438.47960780002177,
-  "preflight_report": "PREFLIGHT.json"
-}

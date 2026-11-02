@@ -1,56 +1,51 @@
-"""Algorithm factory: mode + source → implementation."""
-
+"""Explicit algorithm registry and construction; implementations depend on base."""
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from rpipe.structure.control import AlgorithmConfig, validate_training_budget
+from rpipe.structure.algorithm import base
 
-from rpipe.structure.algorithm.base import Algorithm
-from rpipe.structure.algorithm.config import AlgorithmConfig
-
-
-def _table() -> dict[tuple[str, str], type[Algorithm]]:
-    from rpipe.structure.algorithm.eval import EvalAlgorithm
+def _table() -> dict[tuple[str, str], type[base.Algorithm]]:
+    from rpipe.structure.algorithm.evaluation import EvalAlgorithm
     from rpipe.structure.algorithm.train import TrainAlgorithm
-    from rpipe.structure.algorithm.transformers_trainer import HfEvalAlgorithm, HfTrainAlgorithm
 
     return {
         ('train', 'custom_torch'): TrainAlgorithm,
         ('eval', 'custom_torch'): EvalAlgorithm,
-        ('train', 'transformers_trainer'): HfTrainAlgorithm,
-        ('eval', 'transformers_trainer'): HfEvalAlgorithm,
     }
-
 
 class AlgorithmRegistry:
     """Lookup table filled on first build. Extra sources call ``register``."""
 
-    _items: dict[tuple[str, str], type[Algorithm]] | None = None
+    _items: dict[tuple[str, str], type[base.Algorithm]] | None = None
 
     @classmethod
-    def _store(cls) -> dict[tuple[str, str], type[Algorithm]]:
+    def _store(cls) -> dict[tuple[str, str], type[base.Algorithm]]:
         if cls._items is None:
             cls._items = dict(_table())
         return cls._items
 
     @classmethod
-    def register(cls, mode: str, source: str, impl: type[Algorithm]) -> None:
+    def register(cls, mode: str, source: str, impl: type[base.Algorithm]) -> None:
         cls._store()[(mode, source)] = impl
 
     @classmethod
-    def get(cls, mode: str, source: str) -> type[Algorithm] | None:
+    def get(cls, mode: str, source: str) -> type[base.Algorithm] | None:
+        if source == 'transformers_trainer' and (mode, source) not in cls._store():
+            from rpipe.structure.algorithm.transformers_trainer import HfEvalAlgorithm, HfTrainAlgorithm
+            cls._store().update({('train', source): HfTrainAlgorithm, ('eval', source): HfEvalAlgorithm})
         return cls._store().get((mode, source))
 
     @classmethod
     def list(cls) -> list[tuple[str, str]]:
-        return sorted(cls._store())
+        return sorted(set(cls._store()) | {('train', 'transformers_trainer'), ('eval', 'transformers_trainer')})
 
-
-class AlgorithmFactory:
-    @staticmethod
-    def build(algorithm_config: AlgorithmConfig, **_: Any) -> Algorithm:
-        mode = algorithm_config.mode or 'train'
-        source = algorithm_config.source or 'custom_torch'
-        impl = AlgorithmRegistry.get(mode, source)
-        if impl is None:
-            raise ValueError(f'unknown algorithm mode/source: {mode}/{source}')
-        return impl(algorithm_config)
+def build_algorithm(algorithm_config: AlgorithmConfig, *, checkpoint_dir: Path,
+                    train_checkpoint_dir: Path | None = None) -> base.Algorithm:
+    validate_training_budget(algorithm_config)
+    mode = 'train' if algorithm_config.mode is None else algorithm_config.mode
+    source = 'custom_torch' if algorithm_config.source is None else algorithm_config.source
+    impl = AlgorithmRegistry.get(mode, source)
+    if impl is None:
+        raise ValueError(f'unknown algorithm mode/source: {mode}/{source}')
+    return impl(algorithm_config, checkpoint_dir=checkpoint_dir, train_checkpoint_dir=train_checkpoint_dir)

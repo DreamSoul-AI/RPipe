@@ -1,5 +1,5 @@
 """Share one processed / fixed-Stats input for each pinned definition."""
-from rpipe.structure.artifact.shared import cache_lock, prepared_resource, reference_tree
+from rpipe.structure.artifact.io import cache_lock, prepared_resource, link_input
 from ...structure.algorithm.paired import MAIN, cwd, sha
 
 
@@ -12,9 +12,11 @@ def prepared_inputs(archive, source_data, name, raw_files):
                   'torch': torch.__version__, 'numpy': np.__version__,
                   'stats': {'dim': 1, 'batch': 250, 'threads': 2, 'device': 'cpu'}}
     def build(staging):
-        from rpipe.structure.artifact._atomic import atomic_write_text
+        from rpipe.structure.artifact.io import atomic_write_text
 
-        reference_tree(source_data / name / 'raw', staging / 'data' / name / 'raw')
+        for row in raw_files:
+            link_input(source_data / name / 'raw' / row['relative'],
+                       staging / 'data' / name / 'raw' / row['relative'])
         with archive.aliases(), cwd(staging):
             datasets = archive.dataset.make_dataset(name, verbose=False)
             loaders = archive.dataset.make_data_loader(datasets, {'train': 250, 'test': 1000}, shuffle=False)

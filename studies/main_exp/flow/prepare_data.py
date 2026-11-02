@@ -5,13 +5,15 @@ Run with the same Python executable as the study, for example::
     python -B studies/main_exp/flow/prepare_data.py
     python -B studies/main_exp/flow/prepare_data.py --verify-only
 
-Only upstream dataset URLs from torchvision and pinned main 4ccb28d are used.
+Registered domestic mirrors serve the unchanged archives from pinned main 4ccb28d.
+Foreign redirects are refused; unavailable mirrors require verified local raw files.
 The legacy datasets create their own pickle-format ``processed`` caches later.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 from datetime import datetime, timezone
 import gzip
 import hashlib
@@ -22,24 +24,27 @@ import shutil
 import struct
 import tarfile
 import urllib.request
+from urllib.parse import urlsplit
+
+from rpipe.structure.system.origin import domestic_endpoint
 
 
 STUDY = Path(__file__).resolve().parents[1]
 HISTORICAL_REF = '4ccb28d0496110253e9f8e3f3df658853f07996b'
-MNIST_URL = 'https://ossci-datasets.s3.amazonaws.com/mnist/'
+MNIST_URL = domestic_endpoint('MNIST').mirrors[0]
 MNIST_RESOURCES = (
     ('train-images-idx3-ubyte.gz', 'f68b3c2dcbeaaa9fbdd348bbdeb94873'),
     ('train-labels-idx1-ubyte.gz', 'd53e105ee54ea40749a09fcbcd1e9432'),
     ('t10k-images-idx3-ubyte.gz', '9fb629c4189551a2d022fa330f9573f3'),
     ('t10k-labels-idx1-ubyte.gz', 'ec29112dd5afa0611ce80d1b7f02629c'),
 )
-CIFAR_URL = 'https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz'
+CIFAR_URL = domestic_endpoint('CIFAR10').url
 CIFAR_MD5 = 'c58f30108f718f92721af3b95e74349a'
 
 
 def digest(path: Path, algorithm: str = 'sha256') -> str:
     hasher = hashlib.new(algorithm)
-    with path.open('rb') as handle:
+    with _owned_stream(path.open('rb')) as handle:
         for block in iter(lambda: handle.read(1024 * 1024), b''):
             hasher.update(block)
     return hasher.hexdigest()
@@ -60,17 +65,48 @@ def verify_file(path: Path, expected: str, algorithm: str = 'sha256') -> bool:
     return path.is_file() and digest(path, algorithm) == expected
 
 
+def _require_domestic_url(url: str) -> None:
+    target = urlsplit(url)
+    hosts = {urlsplit(source).hostname for source in (MNIST_URL, CIFAR_URL)}
+    if (target.scheme != 'https' or target.hostname not in hosts
+            or target.port not in (None, 443) or target.username is not None or target.password is not None):
+        raise ValueError('domestic raw mirror required; no overseas fallback; prepare verified raw files locally if unavailable')
+
+
+class _DomesticRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, newurl):
+        _require_domestic_url(newurl)
+        return super().redirect_request(request, response, code, message, headers, newurl)
+
+
+@contextlib.contextmanager
+def _owned_stream(stream):
+    """Preserve a body failure when an owned stream exits with an I/O error."""
+    with contextlib.ExitStack() as stack:
+        value = stream.__enter__()
+        def finish(exc_type, exc, tb):
+            try:
+                return stream.__exit__(exc_type, exc, tb)
+            except OSError:
+                if exc_type is None:
+                    raise
+        stack.push(finish)
+        yield value
+
+
 def download(url: str, destination: Path, md5: str) -> dict[str, str]:
     if verify_file(destination, md5, 'md5'):
         print(f'cached archive: {destination}', flush=True)
         return {'url': url, 'source': 'existing archive', 'md5': md5}
     if destination.exists():
         raise ValueError(f'existing archive checksum mismatch: {destination}')
+    _require_domestic_url(url)
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.with_name(destination.name + '.part')
     print(f'download: {url}', flush=True)
     request = urllib.request.Request(url, headers={'User-Agent': 'RPipe historical data preparation'})
-    with urllib.request.urlopen(request, timeout=60) as response, partial.open('wb') as handle:
+    opener = urllib.request.build_opener(_DomesticRedirect())
+    with _owned_stream(opener.open(request, timeout=60)) as response, _owned_stream(partial.open('wb')) as handle:
         actual_url = response.geturl()
         expected_size = response.headers.get('Content-Length')
         total = 0
@@ -90,7 +126,7 @@ def download(url: str, destination: Path, md5: str) -> dict[str, str]:
 
 
 def reuse_caches(data_root: Path, expected: dict[str, str], cache_roots: list[Path]) -> dict[str, str]:
-    from rpipe.structure.artifact.shared import link_input
+    from rpipe.structure.artifact.io import link_input
     copied = {}
     for relative, expected_hash in expected.items():
         destination = data_root / relative
@@ -125,7 +161,7 @@ def prepare_mnist(data_root: Path, expected: dict[str, str]) -> list[dict[str, s
         if extracted.exists():
             raise ValueError(f'existing IDX checksum mismatch: {extracted}')
         partial = extracted.with_name(extracted.name + '.part')
-        with gzip.open(archive, 'rb') as source, partial.open('wb') as destination:
+        with _owned_stream(gzip.open(archive, 'rb')) as source, _owned_stream(partial.open('wb')) as destination:
             shutil.copyfileobj(source, destination)
         if not verify_file(partial, expected[relative]):
             raise ValueError(f'extracted IDX checksum mismatch: {partial}')
@@ -140,7 +176,7 @@ def prepare_cifar(data_root: Path, expected: dict[str, str]) -> list[dict[str, s
     folder = data_root / 'CIFAR10' / 'raw'
     archive = folder / 'cifar-10-python.tar.gz'
     record = download(CIFAR_URL, archive, CIFAR_MD5)
-    with tarfile.open(archive, 'r:gz') as handle:
+    with _owned_stream(tarfile.open(archive, 'r:gz')) as handle:
         for relative, expected_hash in required.items():
             destination = data_root / relative
             if verify_file(destination, expected_hash):
@@ -156,7 +192,7 @@ def prepare_cifar(data_root: Path, expected: dict[str, str]) -> list[dict[str, s
                 raise ValueError(f'cannot read dataset member: {member_name}')
             destination.parent.mkdir(parents=True, exist_ok=True)
             partial = destination.with_name(destination.name + '.part')
-            with source, partial.open('wb') as target:
+            with _owned_stream(source), _owned_stream(partial.open('wb')) as target:
                 shutil.copyfileobj(source, target)
             if not verify_file(partial, expected_hash):
                 raise ValueError(f'extracted CIFAR checksum mismatch: {partial}')
@@ -170,9 +206,9 @@ def split_counts(data_root: Path) -> dict[str, dict[str, int]]:
     for split, prefix, expected in [('train', 'train', 60000), ('test', 't10k', 10000)]:
         images = mnist / f'{prefix}-images-idx3-ubyte'
         labels = mnist / f'{prefix}-labels-idx1-ubyte'
-        with images.open('rb') as handle:
+        with _owned_stream(images.open('rb')) as handle:
             magic, n, rows, cols = struct.unpack('>IIII', handle.read(16))
-        with labels.open('rb') as handle:
+        with _owned_stream(labels.open('rb')) as handle:
             label_magic, label_n = struct.unpack('>II', handle.read(8))
         if (magic, n, rows, cols, label_magic, label_n) != (2051, expected, 28, 28, 2049, expected):
             raise ValueError(f'invalid MNIST {split} IDX header')
@@ -181,13 +217,13 @@ def split_counts(data_root: Path) -> dict[str, dict[str, int]]:
     counts['MNIST'] = {'train': 60000, 'test': 10000, 'classes': 10}
     cifar = data_root / 'CIFAR10' / 'raw' / 'cifar-10-batches-py'
     for name in [*(f'data_batch_{i}' for i in range(1, 6)), 'test_batch']:
-        with (cifar / name).open('rb') as handle:
+        with _owned_stream((cifar / name).open('rb')) as handle:
             batch = pickle.load(handle, encoding='latin1')
         if batch['data'].shape != (10000, 3072) or len(batch['labels']) != 10000:
             raise ValueError(f'invalid CIFAR10 batch dimensions: {name}')
         if min(batch['labels']) < 0 or max(batch['labels']) > 9:
             raise ValueError(f'invalid CIFAR10 labels: {name}')
-    with (cifar / 'batches.meta').open('rb') as handle:
+    with _owned_stream((cifar / 'batches.meta').open('rb')) as handle:
         if len(pickle.load(handle, encoding='latin1')['label_names']) != 10:
             raise ValueError('invalid CIFAR10 metadata')
     counts['CIFAR10'] = {'train': 50000, 'test': 10000, 'classes': 10}
@@ -195,21 +231,26 @@ def split_counts(data_root: Path) -> dict[str, dict[str, int]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from rpipe.structure.artifact._atomic import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
 
-    from rpipe.structure.artifact.shared import cache_lock, shared_paths
+    from rpipe.structure.artifact.io import cache_lock
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--data-root', type=Path, default=shared_paths(STUDY)['data'])
-    parser.add_argument('--manifest', type=Path, default=STUDY / 'docs' / 'DATA_MANIFEST.json')
+    parser.add_argument('--data-root', type=Path, required=True)
+    parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--expected-manifest', type=Path,
                         default=STUDY / 'docs' / 'EXPECTED_DATA.json')
     parser.add_argument('--cache-root', type=Path, action='append', default=[])
     parser.add_argument('--verify-only', action='store_true', help='validate complete raw files without downloads')
+    parser.add_argument('--download', action='store_true', help='explicitly allow missing raw files to be downloaded')
     args = parser.parse_args(argv)
     data_root = args.data_root.resolve()
+    checkout = STUDY.parents[1]
+    if any(path.is_relative_to(checkout) or checkout.is_relative_to(path)
+           for path in (data_root, args.manifest.resolve())):
+        parser.error('data and manifest output roots must be separate from the source checkout')
     expected = expected_files(args.expected_manifest)
     reused, downloads = {}, []
-    if not args.verify_only:
+    if args.download and not args.verify_only:
         with cache_lock(data_root):
             reused = reuse_caches(data_root, expected, args.cache_root)
             downloads = prepare_mnist(data_root, expected) + prepare_cifar(data_root, expected)

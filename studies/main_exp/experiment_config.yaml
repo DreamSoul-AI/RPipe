@@ -1,7 +1,6 @@
 experiment: main_exp
 description: README historical candidate recipe pinned to 4ccb28d
-version: main-exp-v030-20261013-final
-historical_ref: 4ccb28d0496110253e9f8e3f3df658853f07996b
+version: main-exp-rpipe-refactor-20261021
 data:
   name: MNIST
   source: historical_4ccb28d

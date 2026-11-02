@@ -6,3 +6,6 @@ studies/main_probe/** -text whitespace=blank-at-eol,blank-at-eof,space-before-ta
 
 # Published and historical raster figures are binary artifacts.
 *.png binary
+"docs/research/standards/研究计划规范 Research Plan Standard.md" -text
+"docs/research/standards/研究计划模板 Research Plan Template.md" -text
+"docs/research/standards/文献调研规范 Literature Review Standard.md" -text

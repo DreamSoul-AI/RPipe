@@ -1,13 +1,14 @@
-"""Runtime Data object, registry, and factory."""
-
+"""Scientific construction and runtime support; no orchestration imports."""
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Iterator, Callable
+from rpipe.structure.control import DataConfig
+from rpipe.structure.api import DataPort
 
-from rpipe.structure.data.config import DataConfig
-from rpipe.structure.artifact.shared import cache_lock, reference_tree
-from rpipe.structure.origin import bind_endpoint, discard_bad_archive, endpoint_for
+from rpipe.structure.artifact.io import cache_lock, reference_tree, contained
+
+from rpipe.structure.system.origin import apply_model_origin, bind_endpoint, discard_bad_archive, endpoint_for
 
 
 class Data:
@@ -26,12 +27,24 @@ class Data:
         self._train_set = None
         self._train_start = None
         self._resume_data = None
+        self._iterators = {}
 
-    def iter_batches(self, split: str) -> Iterator[Any]:
+    def has_split(self, split: str) -> bool:
+        return self._loaders.get(split) is not None
+
+    def dataset(self, split: str) -> Any | None:
+        return getattr(self._loaders.get(split), 'dataset', None)
+
+    def batch_size(self, split: str = 'train') -> int | None:
+        return getattr(self._loaders.get(split), 'batch_size', None)
+
+    def iter_batches(self, split: str, *, resumable: bool = True) -> Iterator[Any]:
+        if type(resumable) is not bool:
+            raise ValueError('resumable must be a boolean')
         loader = self._loaders.get(split)
         if loader is None:
             return iter(())
-        if split == 'train':
+        if split == 'train' and resumable:
             from rpipe.structure.data.resume import (
                 BatchCursor, cursor_loader, generator_states, loader_spec, restore_generators,
             )
@@ -55,8 +68,28 @@ class Data:
                 iterator = iter(loader)
                 if rng is not None:
                     torch.set_rng_state(rng)
+                self._iterators[split] = iterator
                 return iterator
-        return iter(loader)
+        iterator = iter(loader)
+        self._iterators[split] = iterator
+        return iterator
+
+    def close(self) -> None:
+        errors = []
+        for iterator in self._iterators.values():
+            close = getattr(iterator, 'close', None) or getattr(iterator, '_shutdown_workers', None)
+            if callable(close):
+                try:
+                    close()
+                except Exception as error:
+                    errors.append(error)
+        self._iterators.clear()
+        self._loaders.clear()
+        self._train_set = None
+        if errors:
+            error = RuntimeError('data iterator cleanup failed: ' + '; '.join(str(item) for item in errors))
+            error.errors = tuple(errors)
+            raise error from errors[0]
 
     def training_state(self) -> dict[str, Any] | None:
         from rpipe.structure.data.resume import BatchCursor, generator_states, loader_spec
@@ -71,17 +104,53 @@ class Data:
                 'consumed': cursor.consumed, 'exhausted': cursor.exhausted,
                 'start': self._train_start, 'after': generator_states(loader)}
 
-    def restore_training_state(self, state: dict[str, Any]) -> bool:
-        from rpipe.structure.data.resume import loader_spec
+    def validate_training_state(self, state: dict[str, Any], *, num_steps: int | None = None,
+                                step_period: int = 1) -> None:
+        import json
+        import math
+        import torch
+        from rpipe.structure.data.resume import generators, loader_spec
 
         loader = self._loaders.get('train')
-        if state.get('version') != 1 or state.get('spec') != loader_spec(loader) or state.get('seed') != self.meta.get('seed'):
+        expected = loader_spec(loader)
+        if expected is not None and num_steps is not None and self._train_set is not None:
+            expected = dict(expected)
+            size = int(self.meta.get('batch_size') or getattr(loader, 'batch_size', 1) or 1)
+            expected.update(dataset_size=len(self._train_set), batch_size=size,
+                            num_samples=size * int(num_steps) * max(int(step_period), 1),
+                            sampler='RandomSampler', replacement=False, drop_last=False)
+        if (not isinstance(state, dict) or expected is None
+                or type(state.get('version')) is not int or state['version'] != 1):
+            raise ValueError('unsupported checkpoint data state')
+        if (json.dumps(state.get('spec'), sort_keys=True) != json.dumps(expected, sort_keys=True)
+                or json.dumps(state.get('seed')) != json.dumps(self.meta.get('seed'))):
             raise ValueError('checkpoint data sampler/batch/seed does not match current data')
-        if state.get('identity') != {'name': self.name, 'source': self.source, 'config': self.meta.get('config')}:
+        identity = {'name': self.name, 'source': self.source, 'config': self.meta.get('config')}
+        if json.dumps(state.get('identity'), sort_keys=True, allow_nan=False) != json.dumps(identity, sort_keys=True, allow_nan=False):
             raise ValueError('checkpoint data identity/config does not match current data')
         consumed = state.get('consumed')
-        if type(consumed) is not int or not 0 <= consumed <= len(loader.batch_sampler) or type(state.get('exhausted')) is not bool:
+        batches = (expected['num_samples'] // expected['batch_size'] if expected['drop_last']
+                   else math.ceil(expected['num_samples'] / expected['batch_size']))
+        if type(consumed) is not int or not 0 <= consumed <= batches or type(state.get('exhausted')) is not bool:
             raise ValueError('invalid checkpoint data cursor')
+        for field in ('start', 'after'):
+            values = state.get(field)
+            if not isinstance(values, dict) or set(values) != {'sampler', 'loader'}:
+                raise ValueError('invalid checkpoint data generators')
+            actual = generators(loader)
+            for name, value in values.items():
+                present = (name == 'sampler' and self.meta.get('seed') is not None
+                           if num_steps is not None and self._train_set is not None
+                           else actual[name] is not None)
+                if (value is not None) != present:
+                    raise ValueError('checkpoint loader generator does not match current data')
+                if value is not None:
+                    if type(value) is not torch.Tensor:
+                        raise ValueError('invalid checkpoint generator state')
+                    torch.Generator().set_state(value.cpu())
+
+    def restore_training_state(self, state: dict[str, Any]) -> bool:
+        self.validate_training_state(state)
         self._resume_data = state
         return not state['exhausted']
 
@@ -142,45 +211,6 @@ class Data:
         out.pop('test_loader', None)
         return out
 
-
-class DataRegistry:
-    _items: dict[tuple[str, str], Callable[..., Data]] = {}
-
-    @classmethod
-    def register(cls, name: str, source: str, builder: Callable[..., Data]) -> None:
-        cls._items[(name, source)] = builder
-
-    @classmethod
-    def get(cls, name: str, source: str) -> Callable[..., Data] | None:
-        return cls._items.get((name, source))
-
-    @classmethod
-    def list(cls) -> list[tuple[str, str]]:
-        return sorted(cls._items)
-
-
-class DataFactory:
-    @staticmethod
-    def build(
-        data_config: DataConfig,
-        assets_dir: Path | str,
-        seed: int | None = None,
-        origin: str | None = None,
-        *,
-        profile_path: Path | str | None = None,
-    ) -> Data:
-        name = data_config.name
-        source = data_config.source if data_config.source is not None else 'torch'
-        builder = DataRegistry.get(name, source)
-        if builder is None:
-            raise ValueError(f'unknown data name/source: {name!r}/{source!r}')
-        with cache_lock(assets_dir):
-            if builder is _build_torch_vision:
-                return _build_torch_vision(data_config, Path(assets_dir), seed=seed, origin=origin,
-                                           profile_path=profile_path)
-            return builder(data_config, Path(assets_dir), seed=seed)
-
-
 def _loader_options(cfg: dict[str, Any]) -> dict[str, Any]:
     pin = cfg.get('pin_memory')
     workers = cfg.get('num_workers', 0)
@@ -188,7 +218,6 @@ def _loader_options(cfg: dict[str, Any]) -> dict[str, Any]:
         'pin_memory': bool(pin) if pin is not None else False,
         'num_workers': int(workers or 0),
     }
-
 
 def _empty_train_loader(dataset: Any, batch_size: int) -> Any:
     class _Empty:
@@ -202,7 +231,6 @@ def _empty_train_loader(dataset: Any, batch_size: int) -> Any:
     loader.dataset = dataset
     loader.batch_size = batch_size
     return loader
-
 
 def _train_loader_for_samples(
     dataset: Any,
@@ -235,6 +263,41 @@ def _train_loader_for_samples(
         worker_init_fn=worker_init_fn if seed is not None else None,
     )
 
+class DataRegistry:
+    _items: dict[tuple[str, str], Callable[..., Data]] = {}
+
+    @classmethod
+    def register(cls, name: str, source: str, builder: Callable[..., Data]) -> None:
+        cls._items[(name, source)] = builder
+
+    @classmethod
+    def get(cls, name: str, source: str) -> Callable[..., Data] | None:
+        return cls._items.get((name, source))
+
+    @classmethod
+    def list(cls) -> list[tuple[str, str]]:
+        return sorted(cls._items)
+
+def build_data(
+    data_config: DataConfig,
+    assets_dir: Path | str,
+    seed: int | None = None,
+    origin: str | None = None,
+    *,
+    profile_path: Path | str | None = None,
+) -> DataPort:
+    name = data_config.name
+    source = data_config.source if data_config.source is not None else 'torch'
+    builder = DataRegistry.get(name, source)
+    if builder is None:
+        raise ValueError(f'unknown data name/source: {name!r}/{source!r}')
+    if origin not in (None, ''):
+        apply_model_origin(origin)
+    with cache_lock(assets_dir):
+        if builder is _build_torch_vision:
+            return _build_torch_vision(data_config, Path(assets_dir), seed=seed, origin=origin,
+                                       profile_path=profile_path)
+        return builder(data_config, Path(assets_dir), seed=seed)
 
 def _build_stub(data_config: DataConfig, assets_dir: Path, seed: int | None = None) -> Data:
     name = data_config.name or 'unknown'
@@ -253,99 +316,50 @@ def _build_stub(data_config: DataConfig, assets_dir: Path, seed: int | None = No
         },
     )
 
-
 _VISION_TORCH: dict[str, dict[str, Any]] = {
-    'MNIST': {
-        'root': 'mnist',
-        'ctor': 'MNIST',
-        'train_kw': {'train': True},
-        'test_kw': {'train': False},
-        'data_size': (1, 28, 28),
-        'target_size': 10,
-        'mean': (0.1307,),
-        'std': (0.3081,),
-        'train_aug': None,
-    },
-    'FashionMNIST': {
-        'root': 'fashionmnist',
-        'ctor': 'FashionMNIST',
-        'train_kw': {'train': True},
-        'test_kw': {'train': False},
-        'data_size': (1, 28, 28),
-        'target_size': 10,
-        'mean': (0.2860,),
-        'std': (0.3530,),
-        'train_aug': None,
-    },
-    'CIFAR10': {
-        'root': 'cifar10',
-        'ctor': 'CIFAR10',
-        'train_kw': {'train': True},
-        'test_kw': {'train': False},
-        'data_size': (3, 32, 32),
-        'target_size': 10,
-        'mean': (0.4914, 0.4822, 0.4465),
-        'std': (0.2023, 0.1994, 0.2010),
-        'train_aug': 'cifar',
-    },
-    'CIFAR100': {
-        'root': 'cifar100',
-        'ctor': 'CIFAR100',
-        'train_kw': {'train': True},
-        'test_kw': {'train': False},
-        'data_size': (3, 32, 32),
-        'target_size': 100,
-        'mean': (0.5071, 0.4867, 0.4408),
-        'std': (0.2675, 0.2565, 0.2761),
-        'train_aug': 'cifar',
-    },
-    'SVHN': {
-        'root': 'svhn',
-        'ctor': 'SVHN',
-        'train_kw': {'split': 'train'},
-        'test_kw': {'split': 'test'},
-        'data_size': (3, 32, 32),
-        'target_size': 10,
-        'mean': (0.4377, 0.4438, 0.4728),
-        'std': (0.1980, 0.2010, 0.1970),
-        'train_aug': 'svhn',
-    },
+    name: {
+        'root': name.lower(),
+        'ctor': name,
+        'train_kw': {'split': 'train'} if name == 'SVHN' else {'train': True},
+        'test_kw': {'split': 'test'} if name == 'SVHN' else {'train': False},
+        'data_size': shape,
+        'target_size': classes,
+        'mean': mean,
+        'std': std,
+        'train_aug': augmentation,
+    }
+    for name, shape, classes, mean, std, augmentation in (
+        ('MNIST', (1, 28, 28), 10, (0.1307,), (0.3081,), None),
+        ('FashionMNIST', (1, 28, 28), 10, (0.2860,), (0.3530,), None),
+        ('CIFAR10', (3, 32, 32), 10, (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010), 'cifar'),
+        ('CIFAR100', (3, 32, 32), 100, (0.5071, 0.4867, 0.4408), (0.2675, 0.2565, 0.2761), 'cifar'),
+        ('SVHN', (3, 32, 32), 10, (0.4377, 0.4438, 0.4728), (0.1980, 0.2010, 0.1970), 'svhn'),
+    )
 }
 
-
-def _with_recorded_stats(spec: dict[str, Any], path: Path) -> dict[str, Any]:
+def _with_recorded_stats(spec: dict[str, Any], path: Path, *, required: bool = False) -> dict[str, Any]:
     """Prefer mean / std from ``stats.yaml`` when a profile has been written."""
-    from rpipe.structure.data.profile import load_stats
+    from rpipe.structure.data.stats import load_stats
 
-    recorded = load_stats(path)
+    recorded = load_stats(path, required=required)
     if recorded is None:
         return spec
+    import math
+    mean, std = recorded['mean'], recorded['std']
+    if (len(mean) != len(spec['mean']) or len(std) != len(mean)
+            or any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x)
+                   for x in (*mean, *std)) or any(x <= 0 for x in std)):
+        raise ValueError('normalization statistics require matching finite channels and positive std')
     copied = dict(spec)
     copied['mean'] = tuple(float(x) for x in recorded['mean'])
     copied['std'] = tuple(float(x) for x in recorded['std'])
     return copied
-
-
-def _train_transforms(spec: dict[str, Any], *, augment: bool) -> Any:
-    """Pixels stay in 0–1. Flip / crop happen later, in the model, via kornia."""
-    del spec, augment
-    from torchvision import transforms
-
-    return transforms.ToTensor()
-
-
-def _eval_transforms(spec: dict[str, Any]) -> Any:
-    from torchvision import transforms
-
-    return transforms.ToTensor()
-
 
 def vision_root(name: str) -> str | None:
     spec = _VISION_TORCH.get(name)
     if spec is None:
         return None
     return str(spec['root'])
-
 
 def _build_torch_vision(
     data_config: DataConfig,
@@ -361,29 +375,47 @@ def _build_torch_vision(
     from rpipe.structure.system.torchvision_load import import_torchvision
 
     import_torchvision()
-    from torchvision import datasets
+    from torchvision import datasets, transforms
 
     name = data_config.name or 'unknown'
     spec = _VISION_TORCH[name]
     cfg = dict(data_config.config)
-    root = assets_dir / str(spec['root'])
-    root.mkdir(parents=True, exist_ok=True)
+    explicit_root = data_config.path is not None
+    root = Path(data_config.path) if explicit_root else assets_dir / str(spec['root'])
     canonical_raw = assets_dir / name / 'raw'
     native_raw = root / name / 'raw' if name in ('MNIST', 'FashionMNIST') else root
-    if canonical_raw.is_dir():
+    if explicit_root:
+        if not root.is_dir():
+            raise FileNotFoundError(f'missing declared data directory: {root}')
+    else:
+        for output in (root, canonical_raw, native_raw):
+            contained(output, assets_dir)
+        root.mkdir(parents=True, exist_ok=True)
+    if not explicit_root and canonical_raw.is_dir():
         reference_tree(canonical_raw, native_raw)
     ctor = getattr(datasets, str(spec['ctor']))
     augment = bool(cfg.get('augment', spec.get('train_aug') is not None))
     stats = cfg.get('stats_path', profile_path if profile_path is not None else root / 'stats.yaml')
-    spec = _with_recorded_stats(spec, Path(stats))
-    train_tf = _train_transforms(spec, augment=augment)
-    test_tf = _eval_transforms(spec)
+    recorded_spec = _with_recorded_stats(spec, Path(stats), required='stats_path' in cfg)
+    stats_source = ('builtin_fallback' if recorded_spec is spec else
+                    'explicit_file' if 'stats_path' in cfg else 'study_profile')
+    spec = recorded_spec
+    # Pixels stay in 0–1; model-side kornia owns augmentation.
+    train_tf = transforms.ToTensor()
+    test_tf = transforms.ToTensor()
     endpoint = endpoint_for(name, origin)
-    discard_bad_archive(root, endpoint)
+    download = cfg.get('download', False)
+    if type(download) is not bool:
+        raise ValueError('data.config.download must be a boolean')
+    if explicit_root and download:
+        raise ValueError('declared data paths are read-only; download into the owned shared cache')
+    if download:
+        discard_bad_archive(root, endpoint)
     with bind_endpoint(ctor, endpoint):
-        train_full = ctor(root=str(root), download=True, transform=train_tf, **dict(spec['train_kw']))
-        test_ds = ctor(root=str(root), download=True, transform=test_tf, **dict(spec['test_kw']))
-    reference_tree(native_raw, canonical_raw)
+        train_full = ctor(root=str(root), download=download, transform=train_tf, **dict(spec['train_kw']))
+        test_ds = ctor(root=str(root), download=download, transform=test_tf, **dict(spec['test_kw']))
+    if not explicit_root:
+        reference_tree(native_raw, canonical_raw)
     train_size = cfg.get('train_size')
     if train_size is not None:
         n = min(int(train_size), len(train_full))
@@ -430,6 +462,8 @@ def _build_torch_vision(
             'target_size': int(spec['target_size']),
             'mean': tuple(spec['mean']),
             'std': tuple(spec['std']),
+            'stats_source': stats_source,
+            'stats_reference': None if stats_source == 'builtin_fallback' else str(Path(stats).resolve()),
             'train_aug': spec.get('train_aug') if augment else None,
             'augment': augment,
             'pin_memory': opts['pin_memory'],
@@ -441,15 +475,8 @@ def _build_torch_vision(
     data._train_set = train_ds
     return data
 
+for _name in ('Toy', *_VISION_TORCH):
+    DataRegistry.register(_name, 'stub', _build_stub)
 
-DataRegistry.register('Toy', 'stub', _build_stub)
-DataRegistry.register('MNIST', 'stub', _build_stub)
-DataRegistry.register('FashionMNIST', 'stub', _build_stub)
-DataRegistry.register('CIFAR10', 'stub', _build_stub)
-DataRegistry.register('CIFAR100', 'stub', _build_stub)
-DataRegistry.register('SVHN', 'stub', _build_stub)
-DataRegistry.register('MNIST', 'torch', _build_torch_vision)
-DataRegistry.register('FashionMNIST', 'torch', _build_torch_vision)
-DataRegistry.register('CIFAR10', 'torch', _build_torch_vision)
-DataRegistry.register('CIFAR100', 'torch', _build_torch_vision)
-DataRegistry.register('SVHN', 'torch', _build_torch_vision)
+for _name in _VISION_TORCH:
+    DataRegistry.register(_name, 'torch', _build_torch_vision)

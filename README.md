@@ -1,797 +1,298 @@
 # RPipe
 
-RPipe（Research Pipeline）是研究项目的代码架构与执行模板，本仓库的参考实现使用 Python 包名 `rpipe`。用 YAML 声明实验因素与 seed，展开并运行实验，再将配置、结果、日志、checkpoint 和跨 seed 汇总保存到同一 Study 中。
+RPipe（Research Pipeline，研究流水线）是用于搭建研究实验的参考模板，也是开始一个研究项目的 warm-up / starting point。研究者可以复制或 fork 本仓，从中学习如何组织实验部件、执行流程、配置和结果，再直接修改代码以适应自己的课题。后续项目可以继续拆合模块、替换实现和调整流程，由该项目自行维护。
 
-当前模板版本为 **0.4.1**，提供源码模板接入、跨 Study 不可变输入共享、原生 PyTorch / Hugging Face Trainer 通路、checkpoint/resume、运行日志与跨 seed 汇总。项目级输入固定在 `shared/data/`、`shared/model/`，Run 状态独立；完整目录合同见 [layout.md](docs/code/layout.md)，迁移与正确性修复见 [v0.4.1 发布材料](docs/releases/v0.4.1.md)。固定发布来源见 [v0.4.1](https://github.com/DreamSoul-AI/RPipe/releases/tag/v0.4.1)。
+RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他项目长期安装调用的通用 package 为产品目标，也不要求衍生项目持续跟随本仓接口。模板自身仍需讲清职责、保持可运行并验证示例，帮助研究者把有效配置、执行事实、科学结果和比较分析连接起来。Python 包名 `rpipe`、安装命令和打包配置是当前源码的组织与运行方式，不构成跨项目稳定 API 的承诺。仓库为 [DreamSoul-AI/RPipe](https://github.com/DreamSoul-AI/RPipe)，采用 [MIT 许可](LICENSE.md)。
 
-其他项目接入从[在其他项目中使用 RPipe](#在其他项目中使用-rpipe)开始：将固定版本的源码复制到项目的 `src/rpipe/`，按 structure / flow 两柱组织自己的代码，在自己的仓库声明和运行 Study。
+当前包元数据为 **0.5.0**，标签与正式发布状态以 [GitHub Release](https://github.com/DreamSoul-AI/RPipe/releases/tag/v0.5.0) 为准。五批核心重构及研究接入工程验证已本地提交；main_probe在固定环境、seed0和每侧60步条件下，8格CUDA配对及Study终验通过，见[本轮运行记录](<docs/运行记录 Run Record/2026-10-30 main_probe CUDA配对验证.md>)。首轮缺历史依赖的失败保留原身份，没有回签。架构和代码结构设计各以一份完整Markdown维护当前目标，剩余工作从[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)进入。main_exp八格600步CUDA配对及039c941全新version的完整E4已按固定协议通过，证据与适用范围见[新电脑执行记录](<docs/运行记录 Run Record/2026-10-30 新电脑main_exp完整矩阵执行.md>)。测试组织、模块无环、外部资源与模型合同四项整改已完成，见[四项整改验证](<docs/运行记录 Run Record/2026-11-02 四项整改验证.md>)。后续预算冲突拒绝、完整使用说明与plan --show-config已在c4eed0f完成，616项受影响回归及该提交自身9项CI成功，见[模板使用验证](<docs/运行记录 Run Record/2026-11-02 模板使用走查.md>)。#236已合入dev，版本号不表示本轮已发布。
 
-2026-10-13发布准备阶段完成恢复、设备调度及持久化 / 数值比较边界修复，详情见[开发记录](docs/development/record.md)。严格研究对照须两侧显式相同计算精度，不依赖Torch默认TF32；短探针和容量校准不替代新基线的完整长实验。
+## 文档与阅读顺序
 
-## 本机实测（2026-10-04）
+最新代码f1f012bd6d8b2e601fbbd0ea30856c6b0f88e314已完成研究者完整使用验收：复制模板、两个条件/两个seed的训练及自身best评测、读懂报告、实际修改模型后用新version继续，共16个Run通过，旧版全部文件哈希保全。报告可读性缺口已补，受影响899项回归通过（另1项既定静态豁免），该提交自身9项CI成功。流程与结果示例见[运行记录第十八章](<docs/运行记录 Run Record/2026-11-02 模板使用走查.md#十八最终候选的完整使用与二次开发验收>)。
 
-### MNIST / CIFAR10 训练曲线
+同一根仓候选的真实八格E0及main_exp八格seed0/每侧600步CUDA短配对已通过，horizon80000、原数据和原数值门保持；16份best/latest CPU状态读回及结束后16项数据哈希复核通过。新科学来源为53b6745f/76成员，详见[第二十一章](<docs/运行记录 Run Record/2026-11-02 模板使用走查.md#二十一最终候选八格600步短配对与收尾>)。完整E4仍绑定039c941历史身份，本次没有重跑。最新报告增量已在固定2959a88取得独立代码复核，16个Run及60组统计重算匹配、两版各100文件读取前后不变，未发现主流程阻断，见[第二十二章](<docs/运行记录 Run Record/2026-11-02 模板使用走查.md#二十二最新报告改动的独立增量复核>)。本轮模板实施与验证已完成，未发现待修主流程问题。用户于2026年11月3日确认旧独立实验不再追查，旧来源取证移出当前范围，历史记录与结果身份保留。交付状态见[开发计划第六章](<docs/开发计划 Development Plan 研究流水线.md#六研究者使用主流程与下一阶段开发计划>)及[收尾记录](<docs/开发记录 Development Record/2026-11-03 模板交付收尾.md>)；#236于2026年11月3日经用户授权转Ready并合入dev，当时main保持不变；后续v0.5.0发布进展与合并记录见[当日开发记录](<docs/开发记录 Development Record/2026-11-03 模板交付收尾.md#四236合并dev与仓库事项盘点>)。
 
-MNIST / CIFAR10 × linear / mlp / cnn / resnet18 × seeds 0–3：**32 条连续 80000-step 训练与 32 条自身 best 独立评测全部成功**。每条训练每 200 个 optimizer steps 完整评测 10000 张 test，共 400 个点。下图保留为实例 Study 的实测验证，不是所有下游项目的验收结果。图为本机实际训练曲线，横轴是 optimizer step，实线为四 seed mean，阴影为 **population std（ddof=0）**，保留全部点和瞬时波动。
+2026年10月31日已安全同步交接候选c5b12d6并保留本地草稿，独立审查已覆盖#236相对dev的完整差异。待办与停止点见[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)；规范复核依据见[复核记录](<docs/运行记录 Run Record/2026-10-31 规范复核与计划重排.md>)。原科学证据保持其SHA，新工程修复不继承旧E4验收。
 
-![MNIST：本机四 seed test Accuracy，mean ± population std](asset/MNIST_Accuracy_mean.png)
+研发协作的共用依据为 [研发用 AGENTS.md](https://dreamsoul.feishu.cn/docx/QICWdeEokobO9RxYR9zcjE6Pnyg)。采用其适用正文，并结合本仓 [AGENTS.md](AGENTS.md) 的项目约定执行。共用《研发用 AGENTS.md》与资料库根 AGENTS.md 是不同文档，不得相互替代。本地源与飞书正文需核对版本，不能以本仓规则已更新推定共用正文已同步。
 
-![CIFAR10：本机四 seed test Accuracy，mean ± population std](asset/CIFAR10_Accuracy_mean.png)
+先读本 README、共用《研发用 AGENTS.md》和本仓项目约定，再按问题进入以下唯一成果。开发与研究的计划独立维护，日期记录保存实际演进与证据，不另建同义进度、交接或验收报告。
 
-两图使用训练中的完整 test history，独立 eval 的 best 没有替代曲线终点。实验使用 Study 专用配方与固定环境；完整配置、数值、环境和验收范围见 [实测报告](https://github.com/DreamSoul-AI/RPipe/blob/18cd76c/studies/main_historical/docs/STUDY_REPORT.md)（2026-10-04，原 Study `main_historical`）。该 Study 已改名为 [main_exp](studies/main_exp/README.md)。
+| **成果** | **当前内容与边界** |
+| --- | --- |
+| [通用调研 General Research](<docs/通用调研 General Research 研究流水线.md>) | 机制、工程路线、直接来源、取舍与限制；项目历史执行只进入日期记录 |
+| [架构设计 Architecture Design](<docs/架构设计 Architecture Design 研究流水线.md>) | 单一完整正文：当前选定的实验部件、流程扩展、观测恢复及产物合同 |
+| [代码结构设计 Code Structure Design](<docs/代码结构设计 Code Structure Design 研究流水线.md>) | 依据完整架构推导的单一文档：目标目录、模块职责、接口、允许依赖及验证落点；规划/发布、生命周期、部件装配、快照读端、入口交付及本轮研究接入已实施，验收范围见开发计划 |
+| [开发计划 Development Plan](<docs/开发计划 Development Plan 研究流水线.md>) | 实现差距、逐模块工作、旧接口清理及验收顺序；按明确目标队列连续推进，每批验证、记录并本地提交 |
+| [缺陷记录 Bug Report](<docs/缺陷记录 Bug Report 研究流水线.md>) | 活动问题与待验证事项；已关闭问题的变更和证据只从日期记录追溯 |
+| [开发记录 Development Record](<docs/开发记录 Development Record/>) | 日期记录，本轮文档调整与历史集成、分支保全的归属；不复制整份测试结果 |
+| [运行记录 Run Record](<docs/运行记录 Run Record/>) | 各次静态、CPU、安装及 CI 验证的实际身份、结果和缺口；原始证据在 Git 外 |
+| [文献调研 Literature Review](<docs/文献调研 Literature Review 研究流水线.md>) | 按问题比较六篇原始研究的方法、证据和限制，注明阅读深度；非穷尽系统综述，无外部优越性结论 |
+| [研究计划 Research Plan](<docs/研究计划 Research Plan 研究流水线.md>) | 唯一中文研究计划，RQ1–RQ4、全部 Study 的 E0–E4 设计与判据；main_probe E3和main_exp600步配对已有固定证据，新电脑039c941全新version的32train/32eval及完整E4科学门已通过，适用范围见运行记录 |
 
-2026-10-13 的异机分支复验固定 v0.3.0 / `804b3823`，已报告 main_probe 八格 60-step 终验和 main_exp 的 32 train / 32 own-best eval、固定曲线门全部通过，见 [probe 报告](studies/main_probe/docs/STUDY_REPORT.md) / [长实验报告](studies/main_exp/docs/STUDY_REPORT.md)。两条长训练中断后以新身份从 step0 重跑，不能称一次连续 launch；报告与正式 JSON / 图已同步，原始 Run、checkpoint 和临时日志不随 Git 提供。上方两图仍保留为 2026-10-04 的实例，未替换成新一轮结果。该轮使用的 v0.3.0 有 B-030 报告来源缺陷，以额外身份核对避免混入旧聚合；后续修复与回归见[开发记录](docs/development/record.md#9-b-030-报告来源校验与分支清理)，旧实验来源与失败证据不回写。
+项目演进、旧文档归并与兼容迁移从[开发记录](<docs/开发记录 Development Record/2026-10-27 文档重构与历史归属.md>)追溯，实际历史验证从[运行记录](<docs/运行记录 Run Record/2026-10-27 历史验证整理.md>)追溯。记录保留原提交、日期及运行身份。
 
-## 核心模型
+修订建议集中放在 [docs/修订建议/](<docs/修订建议/>)，按被修订文档分别维护，目前为[研发用 AGENTS 修订建议](<docs/修订建议/修订建议 Revision Proposals 研发用 AGENTS.md>)。项目已采用的专项规范仍须执行；共用入口不另定布局，不构成豁免专项规范的理由。建议经讨论与验证后再纳入相应正文。
 
-```text
-Study
-  └─ Experiment（axes 的一个取值组合，不含 seed）
-       └─ Run（Experiment × seed 的一次实测）
+## 技术栈与目录
 
-src/rpipe/
-  ├─ structure/   # control、data、model、algorithm、system、artifact、make
-  └─ flow/        # prepare → execute → collect → summarize → write → process
+Python **3.10+**，setuptools 的 `src` 布局。实际依赖为 PyTorch、torchvision、NumPy、SciPy、PyYAML、matplotlib、kornia。`dev`、`tensorboard`、`hf` 为可选依赖组，准确范围见 [pyproject.toml](pyproject.toml)。元数据的支持范围不代表所有版本组合已验证。
+
+| **位置** | **职责** |
+| --- | --- |
+| [src/rpipe/](src/rpipe/) | 模板主体；当前 structure 提供声明、产物机制及 data/model/algorithm/system，flow 拥有阶段、执行权、所属科学进程及唯一正式写入；后续工程核验与研究接入差距见开发计划 |
+| [studies/](studies/) | `_template` 示例与 main_probe/main_exp 声明、研究适配及必要静态科学输入 |
+| [tests/](tests/) | 本仓源码/Study与测试程序自身镜像、最小合成输入、统一执行器和安装 smoke；[目标映射与例外](tests/README.md) |
+| [docs/](docs/) | 七类开发成果与两类研究成果、日期记录 |
+| [.github/workflows/](.github/workflows/) | 当前 CPU、打包和分支方向检查，不含 GPU/正式实验验收 |
+
+当前包根保留命令入口与版本信息，structure 描述条件、科学部件和持久化，flow 拥有生命周期。六阶段为 `prepare → execute → collect → summarize → write → process`，均由 stages 中的实际函数承接：worker 只交回草稿与收尾观察，run 持权并经唯一 write 定稿。基于模板开展课题时可以直接修改这些部件和流程；已有领域包也可以按需复用，不要求通过统一插件或薄适配接入。
+
+## 安装与入口
+
+以下是使用命令，不表示本轮执行过安装或测试。先选择满足项目依赖的独立 Python 环境。安装会解析依赖，缺包时可能联网和下载 PyTorch 等大包，按当前环境与授权准备，不自动升级已有环境。
+
+```console
+python -m pip install -e ".[dev]"
+python -m rpipe --help
+python -m rpipe --version
 ```
 
-- **structure** 定义一次 Run 如何组成，并由 `make` 将 Study 声明展开成 config、index 和调度计划。其中 `structure/artifact/` 管理 Study / Run 的磁盘契约，readout 将 index、result、日志和 `process.json` 读成表；artifact 不是与两柱并列的一层。
-- **flow** 是跑 Study 的入口：对每个 Run 执行固定阶段链，最后按 Experiment 跨 seed 聚合。`status` / `logs` / `report` 从 cli 进来，转给 readout。
+安装后 `rpipe` 与 `python -m rpipe` 同走 [flow/cli.py](src/rpipe/flow/cli.py) 的 main()，模块入口为 [__main__.py](src/rpipe/__main__.py)，规划与发布直接使用 [structure.make](src/rpipe/structure/make.py) 的 plan/expand/publish；单次执行使用 [flow.run.run](src/rpipe/flow/run.py)，批次使用 [flow.supervision](src/rpipe/flow/supervision.py)，派生使用 [flow.process](src/rpipe/flow/process.py)；正式读取使用 [artifact.readout](src/rpipe/structure/artifact/readout.py) 的 RunRef 接口，比较使用 [artifact.comparison](src/rpipe/structure/artifact/comparison.py) 的明确对象接口。HF/TensorBoard 功能另需相应依赖。只读路径延迟导入科学栈，不等于安装元数据没有科学依赖。
 
-Flow 的默认阶段是实际执行代码，不是空骨架：普通阶段实现在 `flow/<phase>/run.py`，process 按 Run / Study 聚合拆成独立模块；`__init__.py` 只做导出。Study 的同名目录仅承载可选扩展，没有扩展时仍执行库默认链。展开到文件的目录见 [layout.md](docs/code/layout.md)、[flow.md](docs/code/flow.md)。
-
-## 文档顺序
-
-Agent 的文档导航与通用工作约定见 [AGENTS.md](AGENTS.md)。
-
-设计与代码冲突时，先更新文档，再更新实现。权威阅读顺序是：
-
-1. [concept.md](docs/code/concept.md)：概念、职责与边界
-2. [layout.md](docs/code/layout.md)：仓库和 Study 的目录契约
-3. [code.md](docs/code/code.md)：模块边界与依赖方向
-4. [structure.md](docs/code/structure.md) / [flow.md](docs/code/flow.md)：两柱的详细契约
-5. [研究工作要求](docs/development/research.md)：研究流程、六方面计划和证据要求；[Study 使用指南](#study-使用指南)说明如何设计和运行一轮 Study，[Study 导航](studies/README.md)列出现有研究的计划、报告和代码
-6. [testing.md](docs/development/testing.md)：测试策略、标签和结果持久化
-
-已知缺陷见 [bugs.md](docs/development/bugs.md)，开发记录见 [record.md](docs/development/record.md)，Flow/Study 重构交接见 [handover.md](docs/development/handover.md)，阶段性想法见 [brainstorm.md](docs/development/brainstorm.md)。
-
-## 在其他项目中使用 RPipe
-
-下游项目采用**源码复制与架构复用**：把 RPipe 源码放进自己的 `src/`，以 structure / flow 组织项目实现，而不是把 RPipe 作为 pip / Git URL 外部依赖。通用展开、调度、阶段链与产物直接复用这份代码，项目保留自己的科学算法或运行时；例如量化、解码、内存卸载的内部执行不必强改为研究六阶段。
-
-### 1. 将固定版本源码复制到 src
-
-当前固定模板标签为 `v0.4.1`；使用标签的确切提交，不把 dev 当作发布标签。先取得目标标签对应的 checkout 并记录其确切提交，以下命令在下游仓库根执行；已有该版本 checkout 时可直接使用，不必重新 clone。历史实验来源不因此改写：
-
-```bash
-git clone --branch v0.4.1 https://github.com/DreamSoul-AI/RPipe.git .tmp/rpipe-v0.4.1
-git -C .tmp/rpipe-v0.4.1 rev-parse HEAD
-git -C .tmp/rpipe-v0.4.1 rev-parse "v0.4.1^{commit}"
-```
-
-确认 HEAD 与标签解析出的提交一致，并将完整 SHA 写入来源记录后，复制完整 `src/rpipe/` 包和许可证。Windows PowerShell 示例：
-
-```powershell
-if (Test-Path -LiteralPath src/rpipe) { throw 'src/rpipe already exists; compare before updating' }
-New-Item -ItemType Directory -Force src | Out-Null
-Copy-Item -LiteralPath .tmp/rpipe-v0.4.1/src/rpipe -Destination src -Recurse
-Copy-Item -LiteralPath .tmp/rpipe-v0.4.1/LICENSE.md -Destination src/rpipe/LICENSE.md
-```
-
-不要覆盖已有副本：升级时先比较上游差异和本地修改，再迁移及回归。只复制受 Git 管理的源码，不带 `__pycache__`、本地缓存或运行产物。保持包名 `rpipe` 与内部导入；记录 `src/rpipe/ORIGIN`，至少包含上游仓库、确切 commit、release 和本地差异，不能只记 `main` 或包版本号。
-
-运行环境要求 Python 3.10 或更高版本，第三方依赖按 [pyproject.toml](pyproject.toml) 核对；复制源码不会自动准备 PyTorch / torchvision、数据或设备环境。这里不以包安装作为项目接入步骤。
-
-`src/rpipe/` 始终保留为项目内的基础模板，不能用研究包替换、删除或改名。项目可以 import、继承、组合或按需要重构对应实现，改动先明确与模板的接口和数值差异；已有通用能力优先复用，不零散搭第二套入口。无需复制 RPipe 的历史实验、数据或 `.github/workflows/`。
-
-### 2. 在自己的仓库跑通最小 Study
-
-先让 Python 找到项目自己的 `src/`。PowerShell 示例（bash 使用 `export PYTHONPATH="$PWD/src"`）：
+已有环境可显式使用本仓源码，PowerShell 示例：
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path src).Path
 python -c "import rpipe; print(rpipe.__version__, rpipe.__file__)"
+python -m rpipe --help
 ```
 
-导入路径必须落在当前下游仓库的 `src/rpipe/`，不能实际使用另一个 checkout 或已安装的旧包。已有打包/开发环境同样须核对这一点。
+确认导入路径属于当前 checkout，避免误用其他项目内嵌副本。这里只解决源码定位，不安装或补齐依赖。main_probe/main_exp还需要固定历史源码的实际导入依赖，例如evaluate及TensorBoard；当前原生CPU smoke通过不等于历史全模块可导入。先完整核两侧导入、真实数据准备和实际模型结构/参数dtype，按需在隔离环境补依赖并记录版本与来源，不能用stub替代固定参考实现。
 
-在下游仓库创建 `studies/smoke/`，先在 `studies/smoke/docs/PLAN.md` 说明这只是源码接入与产物合同验证。以下两个文件即可跑离线 CPU Toy/Stub，不下载数据或使用 GPU。
+## Study 使用与执行边界
 
-`studies/smoke/study.yaml`：
+Study 至少有 `study.yaml` 和 `experiment_config.yaml`。因素轴展开为 Experiment，每个 seed 形成一个 Run。`structure.make.plan(study_dir, run_root=...)` 只读声明与源码，不加载 recipe/Torch、不写盘。常规 Study 命令要求显式 `--run-root`，路径须与 Study、库源码、可定位的完整 checkout/宿主项目和受保护输入双向分离，运行输出不写回源码。
+
+<a id="数据模型与大产出暂行规范待实测"></a>
+
+### 数据、模型与大产出（本项目约定）
+
+本节作为本项目的执行约定，共用条款仍按跨项目适用性评估。2026年11月2日已用独立小文件核部分Windows本机能力，具体实测范围见本节末及[运行记录](<docs/运行记录 Run Record/2026-11-02 四项整改验证.md>)，不外推未验证平台或后端。已有长实验使用其固定路径与运行身份，本轮不在运行中迁移输入、缓存或产出。
+
+1. 原始数据、大模型权重、派生缓存、checkpoint及大产出放在源码checkout之外。多个项目可共用中央原始数据或模型根，缓存与可写产出按项目隔离，正式输出再按Study/version区分。输入根、输出根和证据根须核真实路径、权限与包含关系，不将output放进data/model内，也不让清理输出触及共用输入。
+2. 首次使用、换机或路径变化时，Agent根据机器和已有布局提出具体位置，由用户确认；确认后复用，不逐次询问。项目使用者填写以下本机记录，不能照抄另一台机器的盘符。实际值保留在用户的本机配置记录中，不写死为团队默认路径，也不包含凭据。下表是人工确认模板，不是已实现的自动配置加载接口；执行命令仍须显式传入实际支持的路径参数。
+
+| **本机字段** | **用户填写并确认** | **用途** |
+| --- | --- | --- |
+| 原始数据根 | `<绝对路径>` | 可跨项目复用的原始数据及固定来源 |
+| 模型与权重根 | `<绝对路径或未使用>` | 版本、来源和许可证明确的预训练权重 |
+| 派生缓存根 | `<绝对路径>` | 可再生成缓存，注明由谁创建和清理 |
+| 项目运行输出根 | `<绝对路径>` | 本项目Study/version、Run、checkpoint及图表 |
+| 执行证据根 | `<绝对路径>` | 监管、测试与核验原件，按用途和身份隔离 |
+| 仓内访问入口 | `<入口路径 → 真实目标；链接类型，或未使用>` | 便捷访问的symbolic link/junction及其作用域 |
+
+3. 仓内需要便捷访问时，设计指向上述外部位置的symbolic link入口，并登记目标和用途；链接本身与运行物不进Git。现有`/data`、`/model`、`/output`、`/shared`入口及Study运行物已在[.gitignore](.gitignore)中排除，新入口另核实际忽略效果。科学参数、schema、固定输入清单、来源元数据及许可证继续按职责版本化，不按扩展名一概忽略。
+4. 当前实际执行使用解析后的真实绝对根。受监管输出树中的shared/data目录须保持实体目录，不能用指向树外的目录符号链接或junction代替；Windows输出监管会拒绝这类目录链接。因此仓内便捷入口与运行树内部链接须分别设计，不能把仓内入口直接当作已支持的监管路径。
+5. 原始文件复用优先使用明确的文件级symbolic link；现有artifact.io.link_input/reference_tree在符号链接不可用时可回退到同卷硬链接，使用前检查条件，实际类型和目标须记录。不要把整个多项目数据/模型根递归挂进Study，不静默复制大文件作为链接替代。模型后端是否支持外部权重及链接另核实际构造入口，不将文件链接能力外推为所有后端支持。
+6. 链接和硬链接都不构成写保护。共享原始输入按来源和固定哈希核验，可写派生与其分开；变更或清理前核消费者和执行占用。移除链接入口不得递归删除真实目标，未知文件、旧Run、权重及无关项目产出继续按仓库清理授权处理。
+7. 本机已实测：plan/publish将symlink/junction访问别名解析为实体运行根；output_snapshot拒绝直接目录别名而接受实体根，文件引用按身份去重；无symlink权限时同卷硬链回退，实际C/D跨卷以明确跨卷错误拒绝，未静默复制；Git忽略真实入口，静态科学配置继续保留；手工unlink/rmdir入口后真实目标及peer保全。这些用例不等于完整supervise旅程或自动清理器验收，也不证明链接具有只读保护。模型后端的外部权重路径、其他系统及实际用户目录迁移未执行，后续按实际消费者验证；没有使用真实数据或旧Run作清理fixture。
+
+### 从模板开始一个小研究
+
+以下先完成一次无下载的原生 CPU 训练及自身 best 独立评测，再替换成自己的数据和方法。示例只验证模板使用，不构成研究精度结论。先在已有隔离环境确认当前 checkout 的导入位置，不需要安装另一份同版本包。
+
+1. 在仓库根复制模板，不手写 runs。PowerShell 示例：
+
+```powershell
+Copy-Item -Recurse studies/_template studies/my_study
+```
+
+2. 完整替换副本的两份声明，去掉模板原有 fixed、train_size 轴、20 epoch 和 CUDA 条件。配置合并顺序为 experiment_config.yaml → study.yaml.fixed → axes 当前取值，嵌套 algorithm.config 内同名内容条件优先于外层扩展字段。训练只能给出 num_epochs 或 num_steps 中的一种非空预算，progress_unit 表达计数单位，不负责消除另一预算。
+
+`studies/my_study/study.yaml`：
 
 ```yaml
-study: downstream_smoke
-seeds: [0, 1]
+study: my_study
+origin: foreign
+recipe: recipe.py
+experiment: {name: tiny_cpu}
 axes:
   algorithm.mode: [train, eval]
-freeze: true
+seeds: [0]
+run_description: "mode={mode} seed={seed}"
 ```
 
-`studies/smoke/experiment_config.yaml`：
+`studies/my_study/experiment_config.yaml`：
 
 ```yaml
-version: downstream-smoke-v1
+version: first-cpu-v1
+experiment: tiny_cpu
 data:
-  name: Toy
-  source: stub
-model:
-  name: linear
+  name: TinyCPU
+  source: study
+  config: {batch_size: 4}
+model: {name: linear, source: custom_torch}
 algorithm:
   source: custom_torch
-  mode: train
   num_steps: 2
   progress_unit: step
-system:
-  device: cpu
-  deterministic: true
-  cudnn_benchmark: false
+  eval_period: 1
+  checkpoint: latest
+  checkpoint_period: 1
+  save_best: true
+  lr: 0.05
+system: {device: cpu, deterministic: true, cudnn_benchmark: false}
 ```
 
-下面先用复制后的 `rpipe` 参考入口验证模板，路径指向临时 smoke Study；这不规定研究项目以后的入口名称。项目建立自己的入口后，应使用该入口验证同样的流程：
+3. 新建副本内的 recipe.py。这个例子只替换数据，模型和算法继续使用模板主体中的原生实现。builder 交付实际数据元信息，不能靠模型参数静默覆盖真实形状或类别。
 
-```bash
-python -m rpipe make studies/smoke --num-gpus 0
-python -m rpipe launch studies/smoke --num-gpus 0
-python -m rpipe status studies/smoke
-python -m rpipe logs studies/smoke
-python -m rpipe report studies/smoke
+`studies/my_study/recipe.py`：
+
+```python
+from rpipe.structure.data.factory import Data, DataRegistry
+from rpipe.structure.system.runtime import make_generator
+
+def register(ctx):
+    def build(config, assets, seed=None):
+        import torch
+        from torch.utils.data import DataLoader, TensorDataset
+
+        x = torch.arange(16, dtype=torch.float32).reshape(8, 2) / 16
+        y = (torch.arange(8) % 2).long()
+        dataset = TensorDataset(x, y)
+        batch_size = config.config['batch_size']
+        return Data(name='TinyCPU', source='study', loaders={
+            'train': DataLoader(dataset, batch_size=batch_size, shuffle=True,
+                                generator=make_generator(seed)),
+            'test': DataLoader(dataset, batch_size=batch_size),
+        }, meta={'seed': seed, 'config': dict(config.config), 'data_size': [2],
+                 'target_size': 2, 'batch_size': batch_size, 'train_size': len(dataset)})
+
+    DataRegistry.register('TinyCPU', 'study', build)
 ```
 
-预期生成两个 Experiment、四个成功 Run，以及 Study 根的 `process.json` 和 `docs/NUMBERS.md`。`launch` 完成后会执行 Study 聚合；只重建聚合可用 `python -m rpipe process studies/smoke`。Toy/Stub 只证明源码接入与流程合同，不证明模型数值、GPU 性能或研究质量。正式研究再参考 [Study 模板](studies/_template/) 和下方[使用指南](#study-使用指南)，替换真实数据、模型、算法和验收计划，不沿用 smoke 的预算或结论。
+自己的数据、模型、算法实现可分别落在 Study 的 structure/data、structure/model、structure/algorithm，再由 recipe 显式连接实际构造点。模型使用 model.factory.ModelRegistry，算法使用 algorithm.factory.AlgorithmRegistry，循环合同在 algorithm.base。可以直接修改本仓主体，无需先包装成插件或保留跨项目稳定接口。目录骨架本身不会自动注册实现。
 
-### 3. 接入项目自己的代码
+仅在需要阶段协作时，于 study.yaml 显式设置 flow: {study_phases: true}，再在 flow/<阶段>/__init__.py 提供 run(ctx)，或采用同名 flow/<阶段>.py。prepare 可另提供 before(ctx)，在科学部件装配前执行。不要为启用而填满六个空 hook，也不要在研究 hook 另开正式结果写端，具体边界见两份设计。
 
-目录保留 structure / flow 及同名子目录，Study 也保持相同结构；各阶段是否添加实现按实际职责确定，图中不展开代码文件：
+4. 填入已确认、与源码和输入分离的真实绝对输出根。下面的占位符须替换，不能原样执行：
 
-```text
-my_project/
-  docs/research/                     # 宏观研究方向与方案
-  src/
-    rpipe/                          # 始终保留的基础模板
-      structure/
-      flow/
-    my_project/                     # 项目研究代码
-      structure/
-        api/
-        control/
-        data/
-        model/
-        algorithm/
-        system/
-        artifact/
-        make/
-      flow/
-        prepare/
-        execute/
-        collect/
-        summarize/
-        write/
-        process/
-  studies/my_study/
-    study.yaml
-    experiment_config.yaml
-    structure/                      # 导入 src 项目实现
-      api/
-      control/
-      data/
-      model/
-      algorithm/
-      system/
-      artifact/
-      make/
-    flow/                           # 与 src 的同名阶段对齐
-      prepare/
-      execute/
-      collect/
-      summarize/
-      write/
-      process/
-    docs/
-      PLAN.md
-      STUDY_REPORT.md
+```powershell
+$runRoot = '<已确认的外部绝对输出根>'
+python -m rpipe plan studies/my_study --run-root $runRoot --show-config
+python -m rpipe make studies/my_study --run-root $runRoot
+python -m rpipe launch studies/my_study --run-root $runRoot
+python -m rpipe process studies/my_study --run-root $runRoot
+python -m rpipe status studies/my_study --run-root $runRoot
+python -m rpipe report studies/my_study --run-root $runRoot
+python -m rpipe logs studies/my_study --run-root $runRoot
 ```
 
-三处代码使用同一套目录与职责：`src/rpipe/` 是基础模板，`src/<项目名>/` 是研究实现，`studies/<name>/` 是研究声明和薄组装。研究实现优先放 src 的项目包，Study 通过同名 structure 适配与 flow 扩展 import 它们，不把项目算法另写一遍。structure 定义配置、对象和领域能力，flow 组合这些能力并协调执行；项目按对应层的职责组织实现，不在 `__init__.py` 堆业务逻辑。
+plan --show-config 是只读有效配置预览，先核两个 Run、train_id、first-cpu-v1、CPU、单一2步预算及数据/模型条件。它不运行 recipe 或训练，既有 plan 默认只显示身份和路径。配置预览不能代替实际数据、设备和精度准入。已有发布可用 run 合并 make 与 launch，例中分开执行便于核对各阶段。
 
-| **职责层级** | **src/rpipe 与 src/项目包** | **Study 中的对应位置** |
-| --- | --- | --- |
-| 建构与结构 | `structure/api`、`control`、`data`、`model`、`algorithm`、`system`、`artifact`、`make` | `structure/` 下保持相同层名，导入 src 实现并做本 Study 的组装 |
-| 执行阶段 | `flow/prepare`、`execute`、`collect`、`summarize`、`write`、`process` | `flow/` 下保持相同阶段名，入口调用 src 项目包的对应实现 |
-| 入口与实现 | 包入口只导出，实现放职责模块 | Study 导入项目实现，目录示意只展示同名层级和阶段 |
+5. 运行物位于 `<runRoot>/my_study/first-cpu-v1/`，shared 缓存位于外部根的 shared。按实际 run_dir 查看下列文件：
 
-“同结构”指相同的分层、目录语义和实现落点，不是为每层复制一份无修改代码或填写空函数。只建立实际需要的模块，无项目差异时可以直接复用 RPipe；需要重构时在相同职责位置实施并验证。分层与依赖方向见 [代码结构](docs/code/code.md)。
-
-上面的 api、control、data、model、algorithm、system、artifact、make 及 flow 阶段名称只作导航。具体内容和下级结构请参见选定基线的 [src/rpipe/structure/](src/rpipe/structure/) 与 [src/rpipe/flow/](src/rpipe/flow/) 对应目录，并结合 [structure 文档](docs/code/structure.md) / [flow 文档](docs/code/flow.md) 理解职责。AI 应先查看相关目录的子目录、接口和已有实现，再决定本项目的代码落点与复用方式，不能只凭目录名猜测内容或套用固定文件清单。
-
-| **需要接入的内容** | **做法** |
+| **位置** | **查看什么** |
 | --- | --- |
-| 新数据或模型 | 通过 `DataRegistry.register(name, source, builder)` / `ModelRegistry.register(name, source, builder)` 注册，YAML 中点名相同的 name/source |
-| 专用计算，如量化、解码、卸载测量 | 实现 `Algorithm` 的 `run(data, model, system, tracker)`，通过 `AlgorithmRegistry.register(mode, source, impl)` 注册；复用已有计算，不重写通用执行链 |
-| 额外来源、指标或质量门 | 按真实职责添加 Study 阶段扩展；没有额外职责时使用库默认阶段 |
-| 项目自己的 Engine 或其他运行时 | 由专用 Algorithm / 薄适配组合使用；领域核心不必依赖 RPipe，也不替换库的调度与运行状态 |
+| index.json、runs/<id>/config.yaml | 正式清单、train_id 及保存的有效配置 |
+| runs/<id>/execution.json | 当前 attempt、执行与收尾事实，不用日志猜终态 |
+| runs/<id>/result.json | status、quality、evidence_complete、metrics 和 execute。train 的 execute.steps 应为2，eval 的 execute.resume_path 应指向对应训练的 best.pt |
+| runs/<id>/assets/checkpoints/、assets/tracker/scalars.jsonl | 实际 best/latest 快照及有效数字轨迹 |
+| runs/<id>/assets/logs/events.jsonl | 带 Run/attempt/PID 的结构化事件 |
 
-当前模板提供上述 Data/Model/Algorithm Registry，没有 `SystemRegistry`；设置 `system.source` 不会自动切换 SystemFactory 的实现。专项运行时由项目适配组合使用，库的原生 System 继续负责设备、日志和 checkpoint，不通过虚构配置键接入新后端。
+process 输出 Study 派生摘要，需要曲线时显式 process --figures。科学结果、执行成功与质量判断分别核对，进程退出0不能单独证明研究完成。修改数据、模型、算法或源码后使用明确的新 version，重新 plan/make/run，不给已成功的旧 Run 原地换来源。status/report/logs 可显式 --version first-cpu-v1 查看旧记录。扩大数据、步数或设备前先更新研究计划及实际准入条件。
 
-项目自己的入口、注册和建构由 `src/<项目名>/` 的对应层负责，Study 的同名 structure/flow 导入这些实现。模板提供的现有扩展接口及函数签名见[结构合同](docs/code/structure.md)和[阶段合同](docs/code/flow.md#14-study-扩展recipe来源清单run-对比)，不把某一个入口文件作为所有项目必须照搬的目录项。
+需要比较条件和复测时，可在该例的axes中增加`algorithm.lr: [0.01, 0.05]`，将seeds改为`[0, 1]`，得到4个train与4个eval。`report`在同一份Markdown中提供Run状态、seed、单次指标、Experiment条件映射及跨seed均值/标准差/n/完整性。表内E1等是临时展示标签，Saved identity列保留正式Experiment身份，不能用展示标签代替Run ID。条件摘要突出实际变化字段及数据/模型/算法模式，完整配置仍以`plan --show-config`或保存的config.yaml为准。
 
-添加阶段时在 `study.yaml` 显式设置 `flow: {study_phases: true}`。实现放 `flow/<phase>/run.py`，同目录 `__init__.py` 仅 `from .run import run`；旧 Study 根目录阶段包须迁移。prepare.before 在构造前，write 扩展在库成功定稿前，其余扩展在对应库阶段后；质量门在 summarize 或 write 扩展中完成，须早于库的成功定稿，不靠成功后的 process 追改 result。process 必须区分 `ctx.scope == 'run'` / `'study'`，不完整矩阵不能报告整轮通过。完整时序见[阶段扩展合同](docs/code/flow.md#14-study-扩展recipe来源清单run-对比)。
+报告浮点值按6位有效数字呈现，原始JSON与轨迹不改。通用跨seed汇总沿现有样本标准差定义，n≥2时ddof=1，缺项和未提供质量判定保持可见；main_exp固定科学验收的ddof=0由其研究协议和正式比较报告承接，二者用途不同。研究代码修改后的新版本应重新执行并保留旧源码/配置快照，使用显式`--version`回看旧结果。跨版本比较先看条件和来源差异，改了模型后比较不通过不等于运行失败。
 
-默认 make 会准备共享数据；需要隔离准备或特殊来源时才设置 `flow.prepare_shared: false`，由项目显式准备入口或 Study prepare/Data builder 承担。该开关不是吞掉未知 source 或跳过来源检查的方法。
+### 计划发布与执行
 
-### 4. 冻结来源、验证和交付
+发布先写完整配置，最后以单次原子替换提交 schema 3 的 index，来源清单与运行索引在同一记录内，所有目标 Run 在提交前持续持权。重复发布不改已有配置字节；既有配置、结果、执行事实或计划来源不匹配时拒绝，不自动给旧记录换身份。需要新实测时选择明确新 version；不提供旧格式回退。
 
-本模板的 make 记录实际使用的源码、声明、注册适配、Study 两柱源码及生成计划；`freeze: true` 在执行和聚合前拒绝来源变化。**项目包 `src/my_project/` 不自动纳入**，需要在 make 前生成 Study 内的项目源码清单，将其加入 `provenance.include`，并在构造前及终验核对实际包的新增、删除和修改；只冻结清单文件不能证明外部包未变。模型、tokenizer、数据及专项输入同样由项目明确核验。环境记录不参与 freeze 比较，不等于异机数值保证。
+先用只读计划核对 Run 数量、版本、依赖和输出身份。CLI plan --show-config 可打印每个 Run 的完整有效配置，默认 plan 保持身份与路径输出。设备、训练预算与部件参数也可通过程序化 RunSpec.to_config()，或 make 后的 config.yaml 核对。基底配置先合并 study.yaml 的 fixed，再由 axes 取值覆盖相应条件。以下外部路径由调用方替换，不能将占位符作为实际路径：
 
-每次独立复跑或上游源码迁移使用新 `version` / Run ID；重新 make 不会清除旧成功结果，不能用重签来源把旧结果算成新验收。先做小规模真实数值与失败边界验证，再按已授权计划扩大。单个 Run 成功、Study 聚合完成与专项质量通过分别记录；`report` 生成数字表，不代写研究结论。
-
-并行复用 make/launch 的 wait 组，先按目标设备和配方校准显存、主存、线程及 I/O；不照搬示例并发数或显存预算，不让多个进程写同一个 Run。库的 train/eval 依赖保护不是通用 DAG，专项多步依赖需由项目明确处理。性能对照期间不并行运行竞争资源的任务。自定义采样器或专项 Algorithm 的精确恢复须单独验证，不能由库的 resume 能力直接推定。
-
-正式计划、报告、图和复跑代码放自己的 Study。将本 README 的 [Study 忽略项](#study-中什么进-git)落实到下游 `.gitignore`，临时输出放 `.tmp/`；复制 src 不会复制忽略规则或 GitHub 设置。新建项目可参考模板，但模板会复制 workflow 文件，不继承本仓库的开关和分支规则，详见[模板接入说明](docs/development/cicd.md#模板派生仓库)。继续运行 RPipe 自身的历史对照应 clone 原仓库，不能用只有新历史的模板替代。
-
-### 5. 将下游发现反馈给 RPipe
-
-下游遇到通用不兼容、疑似缺陷或可复用方案时，按[下游反馈与上游收纳](docs/development/feedback.md)保存版本、最小复现、实际条件、验证与边界，脱敏并检索去重后向 [RPipe 创建 Issue](https://github.com/DreamSoul-AI/RPipe/issues)。项目专用算法和研究结论仍留在下游；Issue 是供上游核验与归纳的入口，不等于已批准实现或创建 PR。
-
-用户明确授权反馈后，AI 可直接创建或补充 Issue，并将 URL 回写下游长期记录；未授权时保存草稿。RPipe 是公开仓库，私有材料、内部链接、凭据和安全漏洞不进入公开 Issue。上游再将已确认缺陷、候选改进和采纳设计分别整理，不把建议直接当合同，也不自动覆盖下游源码副本。
-
-## 快速开始
-
-下游项目先将固定源码复制到 `src/rpipe/`，核对实际导入路径，再跑[四个 CPU smoke Run](#2-在自己的仓库跑通最小-study)。正式研究按下方 Study 指南准备声明、src 实现和计划，通过小规模验证后再按授权扩大。
-
-## Study 使用指南
-
-以下 §1–§9 从声明、目录、排班到结果说明如何在项目内做 Study。开始前先完成[源码复制与项目架构](#在其他项目中使用-rpipe)；正式 Study 导入 `src/<项目名>/` 的实现，不在 Study 另搭一套研究执行框架。现有研究入口与历史记录见 [Study 导航](studies/README.md)。
-
-做研究先遵循[研究工作要求](docs/development/research.md)：从灵感和文献形成问题与假设，联合规划文献调研、数据、模型、算法、指标和实验设计；不适用时说明替代证据。宏观方案放项目 `docs/research/`，具体计划、实测与结论放对应 Study。先小规模检查与必要基线，再按计划和授权扩大，保留失败、负结果及结论边界；只跑通流程不等于研究质量通过。
-
-研究可按任务复用 [knowledge 的 research-plan、literature-search、paper-analysis 与 pytorch-project](docs/development/research.md#六复用-knowledge-的研究-skills)：先读相应 skill，再按需读其参考资料；不用每个项目重复维护教程，也不将 skills 当作模板运行依赖。
-
-- [§1 概念](#1-三个词决定你写什么)、[§2 文件与目录](#2-你要准备的文件)
-- [§3 并行排班](#3-高效率实验设计)、[§4 执行命令](#4-一条命令怎么跑)
-- [§5 基底配置](#5-写-experiment_configyaml)、[§6 Study 声明](#6-写-studyyaml)
-- [§7 结果与报告](#7-跑完看什么)、[§8 操作清单](#8-新-study-最小步骤)、[§9 扩展边界](#9-现成能力-vs-要改库)
-
-### 1. 三个词（决定你写什么）
-
-| **比较项** | **Study** | **Experiment** | **Run** |
-|--|-----------|----------------|---------|
-| 是什么 | 这一轮研究的壳 + 磁盘根 | 研究因素的一个取值点 | 该点 × 一个 seed 的一次实测 |
-| 含 seed？ | 声明 `seeds` | **不含** | **至少**一个 |
-| 例子 | `mnist_train_size`（声明在 `tests/_data/studies/`） | `train_size=500` | `train_size=500, seed=0` |
-| 磁盘 | `studies/<name>/` | **无文件夹** | `runs/<id>/` |
-| 这一级看什么 | 声明、shared、index、process 信封、报告 | 跨 seed 的 **mean / std / min / max** | 这一次的 config / result / `run.log` |
-
-展开：`study.yaml` 的 **`axes`** → 多个 Experiment；每个 × **`seeds`** → 多次 Run。
-
-`experiment_config.yaml` 是 Study 的**基底默认**（怎么训、用什么数据/模型），不是「一个 Experiment 实例」。
-
----
-
-### 2. 你要准备的文件
-
-执行声明最少两份；正式研究还须先写本 Study 的计划：
-
-正式研究或可复用的验收案例放 `studies/`。一次性环境排错（例如文件占用、杀毒软件开关复测）放 `.tmp/diagnostics/`，把条件、结论及必要数字合并进关联 Study 报告；原始日志、缓存和临时配置保留本地，不为每次排错增加一个正式 Study。
-
-研究项目从 `docs/research/` 的宏观方案提取一个具体问题，再写本 Study 的对照、变量、预算和验收；拆分步骤见 [Studies 入口](studies/README.md#从宏观研究提取具体-study)。Study 不等于整个宏观方向，也不以已有脚本代替研究设计。
-
-```text
-studies/<name>/
-  study.yaml
-  experiment_config.yaml
-  structure/                       # 同名层级，导入 src 项目代码
-    api/
-    control/
-    data/
-    model/
-    algorithm/
-    system/
-    artifact/
-    make/
-  flow/                            # 同名阶段，不展开阶段文件
-    prepare/
-    execute/
-    collect/
-    summarize/
-    write/
-    process/
-  docs/
-    PLAN.md
-    STUDY_REPORT.md
-    figures/
+```console
+python -m rpipe plan studies/_template --run-root <external-run-root>
+python -m rpipe status studies/_template --run-root <external-run-root>
+python -m rpipe report studies/_template --run-root <external-run-root>
 ```
 
-`docs/NUMBERS.md` 不在这份清单里：`report` 从 `process.json` 生成，可以入库，但它不是结论。
+复制模板后的完整短流程见[从模板开始一个小研究](#从模板开始一个小研究)，已完成整改与验收见[开发计划](<docs/开发计划 Development Plan 研究流水线.md#四模板使用走查与下一批工作>)。训练的有效 num_epochs 和 num_steps 同时非空时拒绝。切换成纯步数训练时，清除不再采用的 epoch 条件，或在实际覆盖位置显式设为 null，再核有效配置。合法 epoch 预算内部推导更新数不属于第二份输入。
 
-跑完后会补上，默认不入库：
+**`_template` 当前是 MNIST/CUDA、20 epoch 示例，不是离线 CPU smoke。** 复制后先在研究计划登记问题、条件和判据，再核有效声明、数据/模型来源、设备、精度与预算。plan 不下载或训练。模板配置注释指向本节。离线合成安装旅程由 tests/package_smoke.py 提供，不能外推到模板科学实验。
 
-```text
-  index.json                 # 按 Experiment 列 Run；每条含 log → 该 Run 的 run.log
-  process.json               # Study 信封；experiments[] 里是跨 seed 的 mean / std / min / max
-  shared/{data,model}/       # Study 级 asset：make/launch 先准备共享数据，再 spawn
-  runs/<id>/
-    config.yaml              # 这一次 Run 的完整 config
-    result.json              # Flow write：摘要（status / metrics / paths）
-    assets/
-      tracker/               # AlgorithmTracker 数字曲线
-      logs/run.log           # 这一次 Run 的 Logger 文本（无 Study 级总 log）
-      checkpoints/           # latest.pt + latest/（分件）；save_best 时另有 best
-```
-
-#### 模版目录（`studies/_template/`）
-
-```text
-studies/_template/
-  study.yaml
-  experiment_config.yaml
-  structure/                       # 同名层级，导入 src 项目代码
-    api/
-    control/
-    data/
-    model/
-    algorithm/
-    system/
-    artifact/
-    make/
-  flow/                            # 同名阶段，不展开阶段文件
-    prepare/
-    execute/
-    collect/
-    summarize/
-    write/
-    process/
-  docs/
-    PLAN.md
-    STUDY_REPORT.md
-    figures/
-```
-
-PLAN 按[研究工作要求](docs/development/research.md)补齐本轮问题与假设、六方面安排及判据，可引用宏观方案中已明确的内容而不重复全文；再写清固定条件、seed、排班、预算、失败处置和恢复边界。执行模板只是起点，未知项保留待确认。复制后把 `my_study` 改成新目录名。Study 与 src 的研究包都保持 RPipe 的 structure/flow 职责映射；模型、算法和领域流程在 src 实现，Study 导入并声明本轮因素与验收。
-
-新 Study 复制 `_template/`，改 yaml 与 `docs/`；格子与脚本由 **structure.make** 生成，入口由项目自己的 src 实现确定；本仓库实例使用 `rpipe`，下游可使用自己的模块或脚本。
-
----
-
-### 3. 高效率实验设计
-
-追求的是**这一轮 Study 的实验效率**：在质量和资源边界内提高总吞吐、缩短墙钟，不规定必须占满显存或使用固定资源系数。并行是排班手段，写进 `docs/PLAN.md`，和「比什么、几个 seed」一起定。
-
-| **先分清** | **是什么** | **不是什么** |
-|--------|--------|----------|
-| `axes` | 研究因素，决定有几个 Experiment | 并发数 |
-| `seeds` | 每个点要复测几次 | 同时开几个进程 |
-| 并行 / `--round` | 同一时刻叠几个 `run-one` | seed 个数、模型个数 |
-
-保留模板分组调度时，一组并发叫一个 **wait 组**。组内按项目校准的预算并行执行，组末 **`wait`**：本组进程全部退出、资源释放后再启动下一组。不能去掉等待后直接叠加下一批，否则可能超出本轮资源预算。
-
-一组 `wait` 的墙钟由组内最慢任务决定。模板 make 的 conservative 墙钟只供排班参考，不是实测；任务混合会影响竞争和等待，实际分组以整体吞吐测量为依据，不仅按模型名称或单条耗时判断最优。
-
-**标准（按优先级）：**
-
-1. **正确性先于速度。** 默认整轮 launch：有依赖就分波，全部 train `wait` 完再 eval。也可以 `--mode eval` 单独重跑评测。已 `succeeded` 的默认跳过；中断恢复须符合对应 Algorithm / Study 的合同，不能自动推定自定义循环可精确续跑。一次 `FlowRunner` 只跑一个 Run。
-2. **先校准再提高并发。** 同类、相近耗时的格子按目标设备与工作负载的实测容量安排并发，估算系数、显存预算和并发上限可随校准调整，不规定统一比例，并测量整体吞吐、allocated / reserved、进程开销、主存、线程和 I/O。不能直接照搬其他设备预算或用“无 OOM”证明并行有效；性能校准时不同时运行竞争资源的验证。
-3. **error 不阻断无关任务。** 某条 `run-one` 失败：记下 `run_id` 和退出码（日志在该 Run 的 `assets/logs/`），同组其余进程继续。本波结束后库默认对失败格子重试一次，恢复行为仍受专项合同约束；单次执行或非恢复型任务用 `launch --no-retry` 关闭本次 launch 的自动重试，保留首个失败结果。该开关不持久化到生成脚本，也不禁止后续显式再次 launch；拒绝恢复的 Study 须保留失败并按计划换新 version。依赖该 train 的 eval 只有在它成功后才运行，不把局部故障扩散到其他 seed。
-4. **按本轮格子排班。** 轻的同类型可以叠很多；重的 resnet 可能一组 1～2 个。不要用一个全局 `--round` 把轻重砍齐。默认 `auto` 按类型装箱；`--round N` 是均匀切块。
-5. **PLAN 里写清排班。** 几个 seed、哪类一组、error 后怎么续。报告里复述实际怎么跑的。
-
-显存估算系数是可调整的项目参数，不是模板规定的固定比例。参考容量函数已有 `safety` 参数，项目可在对应 structure/make 实现中接入校准值；当前 rpipe CLI 未提供独立的 safety 开关，不能把示意配置写成已支持的命令。无论采用哪个入口，都记录实际预算、系数与验证结果。
-
-`system.device` 决定资源队列：`cpu` Run 不绑定 GPU、不设置 `CUDA_VISIBLE_DEVICES`，按 CPU 并发上限分组；`cuda` Run 才探测 GPU 并按显存装箱。混合 Study 中两类 Run 分组执行。默认整轮仍是 train 全部完成后再进入 eval；`--mode` 可以只发其中一波。
-
-机制（进程并行 / `wait`、脚本入口）见下一节。
-
----
-
-### 4. 一条命令怎么跑
-
-`<project_entry>` 是项目实际入口的占位符，例如 `my_project`，不是可直接照抄的命令。本仓库实例使用 `rpipe`；下游项目可以在 src 的 flow 层复用或重构入口。下列流程仅适用于保留相应模板命令合同的项目，参数和脚本名以项目实现为准，不要求入口始终叫 rpipe。
-
-```bash
-# 只写出格子：config + index
-python -m <project_entry> run studies/<name> --skip-launch
-
-# 写出格子并按顺序跑每个 Run
-python -m <project_entry> run studies/<name>
-
-# 写出格子与调度脚本，再按 §3 同类装箱并行
-# pack 只出现在 make；launch 复用 scripts/jobs.json
-python -m <project_entry> data studies/<name>
-python -m <project_entry> make studies/<name> --num-gpus 1 --init-gpu 0
-python -m <project_entry> launch studies/<name> --num-gpus 1 --init-gpu 0
-# launch 结束会跑 Study process；也可单独再跑：
-python -m <project_entry> process studies/<name>
-# 默认 --round auto（装箱）。手写均匀切块：--round 4
-# 也可在独立终端跑：
-#   studies/<name>/scripts/launch.ps1
-#   bash studies/<name>/scripts/launch.sh
-```
-
-`data` 先给每个数据集写一份概况：`studies/<name>/shared/data/<数据集>/stats.yaml`（张数、形状、类别数量、像素范围，以及 train 的 mean / std）。Normalize 优先读这份文件。
-
-排班标准见 §3。保持与 git `main` 一致的组内进程并行 / 组末 wait；生成脚本复用同一调度器，以免裸 `run-one` 绕过失败重试和依赖检查。
-
-进程级并行。保留模板 `auto` 策略时按同类分组，资源预算及估算系数由项目校准，不把模板初值当作固定要求。每组末尾的 `wait` 挡住下一组，避免还在占显存时下一波挤进来。某条失败打印 `error <id>`，在本波结束后对失败格子 `resume` 重跑一次；train 的重试必须在 eval 波之前完成。手写 `--round N` 仍是均匀切块。
-
-有 `algorithm.mode: eval` 时，**默认**一次 `launch` 拆成两波：全部 train `wait` 完再启动 eval。Study 可以按这个写 PLAN。要单独重跑 eval（或只发 train）：`python -m <project_entry> launch studies/<name> --mode eval`。已成功的格子默认 skip，加上 `--include-done`。单条仍可用 `run-one`。eval 找不到 sibling `best` 照样失败。
-
-**失败恢复验收约定：** `launch` 按当前 index 的同因素（仅替换 mode）与同 seed 识别 sibling train；它最终未成功时，不启动依赖它的 eval，并将该 eval 记为非成功，其他独立任务仍可继续。开始重跑 train 前，已成功的相关 sibling eval 必须失效，防止 `--mode train` 后聚合旧评估。后续 launch 还会将父 train 未成功、或 train result 修改时间晚于 eval result 的旧成功 eval 视为待重评；不因此重写 jobs 清单，清单漏掉的 Run 仍需 `--remake`。`resume: false`、明确的外部权重或 eval 自己的 checkpoint 不应被误当作 sibling 依赖。
-
-这是本地 `launch` 的依赖保护，不是通用 DAG 或文件来源追踪系统。手动修改/复制权重、回拨文件时间，或绕过调度器直接 `run-one`，不在自动失效承诺内；研究结论仍需核对实际 checkpoint 来源。`--include-done` 只是重执行，不清 checkpoint；需要独立无中断对照时换新 `version`。
-
-以本仓库 `tests/_data/studies/mnist_train_size/` 复制成 `studies/mnist_train_size/` 为例：18 次 Run，分别是9 train和9 eval；实际 wait 组数由设备及资源估计决定，不保证只需两组。下游项目不必复制这套测试输入，按自己的计划声明因素。该例入口：
-
-```bash
-python -m rpipe launch studies/mnist_train_size --num-gpus 1 --console shared
-# 或使用 make 生成的脚本
-bash studies/mnist_train_size/scripts/launch.sh
-```
-
-`launch.sh` 用 Python heredoc 调用同一 `launch_jobs`，保留 make 生成的 wait 组及 GPU 分配；`--split-round` 仍按 wait 组切脚本，按顺序执行各片段，最后一个片段执行 Study process。每组子进程全部退出后下一组才启动。旧版已生成的裸 `run-one` 脚本不会自动变更，需要重新 make 后使用新脚本。
-
-训练 Logger 每一行是 `时间 级别 Run id [事件] 内容`，写入该 Run 的 `run.log`（与终端同一套）。时间是本地 RFC 3339（毫秒和时区）。`--console shared` 时终端会混，靠 Run id 这一格分辨；文件仍是每 Run 一份。`[time]` 里的 `elapsed` / `eta` 是这一轮的进度时钟。Windows 上 `python -m <project_entry> launch` 默认 **每个 run-one 一个新控制台窗口**。`launch.ps1` 只转调 `launch`（有 `jobs.json` 就不再 make）。多卡时仍设 `CUDA_VISIBLE_DEVICES`。`scripts/` 默认 gitignore。
-
-Windows / Conda 若报 `OMP: Error #15`，说明环境里加载了多份 OpenMP runtime。先用 `where.exe libiomp5md.dll` 检查来源，并在同一个包管理器中重装 PyTorch / NumPy，或改用干净虚拟环境。`KMP_DUPLICATE_LIB_OK=TRUE` 只能由使用者临时显式设置用于诊断；RPipe 不默认注入它。
-
-1. **make** 读 `study.yaml`，按 `axes` × `seeds` 展开
-2. 每个补丁 ⊕ `experiment_config.yaml` → `runs/<id>/config.yaml`
-3. 写 `index.json`（每条 Run 带 `log`）
-4. 按 `data.name` + `source` 各准备一次共享数据到 `shared/data/`（忽略 `train_size`；只有成功后的 `.ready` 才跳过；半截压缩包会重下；下载不刷 tqdm）。数据地址和模型 hub 都看 Study 的 `origin`。
-5. **launch** 读 `scripts/jobs.json` 跑未完成 Run（缺清单或 `--remake` 才再 make）；每个 Run：prepare → execute → collect → summarize → **write** → process
-
-常用参数：
-
-| **开关** | **作用** |
-|------|------|
-| `--skip-launch` | 只写出 config 与 index（不下载共享数据、不 spawn） |
-| `--phases prepare,execute,...` | 只跑列出的阶段；相对顺序不变 |
-| `make` | 写出 config、index、`scripts/jobs.json`，并把共享数据落到 `shared/data/`；这里打印 `pack N waits` |
-| `launch` | 已有 `scripts/jobs.json` 且 GPU/`round` 一致则直接跑未完成 Run，**不**再 make、**不**重印 `pack`；缺清单、参数变了或 `--remake` 才 make。Windows 默认每条 Run 新窗口；全部 wait 完再跑 Study `process` |
-| `--mode` | 仅 `launch`：只发该 `algorithm.mode`（可重复，如 `eval`）。**不**改写 `jobs.json`。已成功的默认 skip，重跑加 `--include-done` |
-| `--remake` | 仅 `launch`：忽略已有 `jobs.json`，重新 make 再跑 |
-| `--console` | `auto`（Windows=`new` 窗口 / 其它=`shared`）；`new`；`shared` |
-| `process` | 只跑 Study 级聚合（信封 + Experiment 的 mean/std/min/max + 图） |
-| `status` | 只读，实现在 `structure/artifact/readout/`。把 `index.json` 和各条 `result.json` 列成表。`pending` / `failed` 才填 `note`（见 §7）。`--mode` 可滤。不写文件 |
-| `logs` | 同一份 readout。各 Run 的事件行按时间打到终端。不写 Study 级总 log |
-| `report` | 同一份 readout。从 `process.json` 写 `docs/NUMBERS.md`。不改 `STUDY_REPORT.md` |
-| `--round` / `--num-gpus` / `--init-gpu` | `auto` = §3 按 `system.device` 分流，CUDA 按显存装箱、CPU 按进程上限分组；`N` = 均匀切块；GPU 卡号轮转 |
-| `--include-done` | 把 `jobs.json` 里已经 succeeded 的也排进去（仍复用清单；清单里没有的格子才要 `--remake --include-done`） |
-
-直接保留模板 CLI 时，`study run` 是 `run` 的旧别名；项目重构入口后，以该项目实际支持的命令为准。
-
----
-
-### 5. 写 `experiment_config.yaml`
-
-基底字段对应 structure 四层。native 真训通路：有 `model.module` 且 `Data.iter_batches`（不再要求 `data.name: MNIST`）。`algorithm.source` 默认 `custom_torch`；`transformers_trainer` 用同一套 `optimizer` / `scheduler` / `resume` 键映射到 `TrainingArguments`。
-
-```yaml
-experiment: mnist_linear          # 给人看的名字，不是磁盘路径
-description: MNIST linear classifier
-data:
-  name: MNIST
-  source: torch                   # torch：真下 MNIST 到 shared/data；stub/Toy：不下载
-  config:
-    train_size: 1000              # 可被 study.yaml 的 axes 覆盖
-    batch_size: 64
-    # pin_memory: true            # DataLoader；缺省 false
-    # num_workers: 0
-model:
-  name: linear                    # 默认 MNIST 784→10；CIFAR/SVHN 由 Data.meta.data_size 对齐
-algorithm:
-  source: custom_torch            # 或 transformers_trainer（同一套键 → TrainingArguments）
-  mode: train
-  num_epochs: 20              # 有 epoch 概念时：推导并覆盖 num_steps
-  progress_unit: epoch        # 本例按 epoch 评 test / 存 latest；默认 step（LLM 只写 num_steps）
-  eval_period: 1              # 每 N 个进度单位评 test；0 = 只在训完评一次
-  # eval_num_steps: -1        # 正整数限test batch数；缺省 / <0 = 完整test；0报错
-  checkpoint: latest          # latest = 覆盖 latest 这一份（.pt 整包 + 目录分件）；percent = 再按总预算百分比留快照
-  checkpoint_period: 1        # 每 N 个单位更新 latest；0 = 只在训完写一次
-  save_best: true             # 默认：test Accuracy 最好时另写 best；可用 best_metric / best_mode 改口径
-  metric:                     # 可选；默认 train/test 都是 Loss + Accuracy（structure.md §6.9）
-    train: [Loss, Accuracy]   # 还认 MSE（batch）；RMSE / GLUE 是 full，在 save() 时收口
-    test: [Loss, Accuracy]
-  # 不要在会覆盖 eval 的基底里写 resume。缺省：train=latest（没有则从头），eval=best（sibling train）
-  optimizer: SGD              # 名字；momentum / nesterov / weight_decay 等同层 extras，按构造函数 signature 过滤
-  max_grad_norm: 0            # 缺省 / 0 = 不裁。HF Trainer 自带 1.0，必须映射此键
-  lr: 0.1
-  scheduler: cosine            # 算法层接口；无 / constant = 固定 lr；HF 映射 lr_scheduler_type
-  eta_min: 0.0
-system:
-  device: cpu
-  deterministic: false          # prepare 最先落地；true 则 cudnn.deterministic + use_deterministic_algorithms
-  cudnn_benchmark: true         # 跟旧 main；deterministic 开时默认关
-```
-
-合并规则：`study.yaml` 的 `fixed` 与 `axes` 补丁 **覆盖** 基底同名字段（深层 dict 合并，list 整段替换）。
-
----
-
-### 6. 写 `study.yaml`
-
-#### 扫研究因素（一个因素一个 Experiment）
-
-```yaml
-study: mnist_train_size
-origin: foreign                 # Study 级。domestic 时数据走国内镜像，模型 hub 为 hf-mirror.com
-description: MNIST train_size sweep → test accuracy
-
-experiment:
-  name: mnist_linear
-
-fixed:
-  data:
-    name: MNIST
-    source: torch
-    config:
-      batch_size: 64
-  model:
-    name: linear
-  algorithm:
-    source: custom_torch
-    num_epochs: 20
-    progress_unit: epoch      # 每个 epoch 评一次 / 更新 latest；不写则默认 step（eval_period: 1 会每步评 test）
-    eval_period: 1
-    checkpoint: latest
-    checkpoint_period: 1
-    save_best: true
-    optimizer: SGD
-    max_grad_norm: 0
-    lr: 0.1
-    scheduler: cosine
-    eta_min: 0.0
-  system:
-    device: cpu
-    deterministic: false
-    cudnn_benchmark: true
-
-axes:
-  data.config.train_size: [500, 2000, 8000]
-  algorithm.mode: [train, eval]
-
-seeds: [0, 1, 2]
-
-tags:
-  - when:
-      data.config.train_size: 500
-      algorithm.mode: train
-    tags: [baseline]
-
-run_description: "train_size={train_size} mode={mode} seed={seed}"
-```
-
-这会得到 **6 个 Experiment**（size × mode），每个下面 **3 个 Run**。同一 `train_size` 先 train 再 eval；eval 默认 resume `best`，从 sibling train Run 读 `best`。`process.paired` 把 train/eval 拼成报告表。九次训练共用 `shared/data` 里的 MNIST。
-
-#### 只扫 seed（一个 Experiment，多次 Run）
-
-`axes: {}`，因素全部放进 `fixed`，再写 `seeds: [0, 1]`。index 里会是 **一组** `factors: {}`，下面两条 Run（只差 seed）。不需要单独再开一个 Study 目录。
-
-#### 字段约定
-
-同一项目的 Study 默认共用项目根 `shared/data/` 与 `shared/model/`，原始数据和预训练权重只保存一份。训练对象、checkpoint、RNG 和报告仍按 Run 独立。已有缓存可用 `python -m rpipe shared studies/<name>` 检查路径，再用 `--migrate` 按 hash 校验并建立旧路径引用；冲突不会覆盖。确实不能共用的派生输入在 `study.yaml` 中显式选择 `shared.data: study` 或 `shared.model: study` 并在计划说明原因。详见 [共享路径与迁移合同](docs/code/layout.md#跨-study-共享资产2026-10-14)。
-
-| **字段** | **含义** |
-|------|------|
-| `fixed` | 每次 Run 都带上的补丁（不要把研究因素只写在这里却期望它变成多个 Experiment） |
-| `axes` | 研究因素；每个取值组合 = 一个 Experiment。**不要把 seed 放这里** |
-| `seeds` | 每个 Experiment 下的随机复测 |
-| `tags` | `when` 匹配当前格子（可含 seed）则打标签；`baseline` 只是 tag |
-| `run_description` | 写入 config 的说明；**不进** `id` hash。占位符可用轴的末段名（如 `{train_size}`）以及 `{seed}`、`{experiment}` |
-| `flow.study_phases` | 显式启用阶段包；`flow/<phase>/run.py` 实现 hook，`__init__.py` 仅导出。prepare.before 在构造前，write 在库定稿前，其余 hook 在库阶段后。旧根目录阶段包需迁移 |
-| `flow.prepare_shared` | 默认 `true`；每条 Run 内准备隔离数据或注册专用 source 时设为 `false`，make 不提前构造 Data |
-| `shared` | `root` 为相对 Study 的可选公共根；`data` / `model` 默认 `project`，私有例外用 `study`。同项目的 Study 应指向同一公共根 |
-| `freeze` | 复用模板时，make 后已记录的源码、声明、注册适配或计划变化会被拒绝；项目重构后须验证实际冻结范围 |
-| `provenance.include` | 额外纳入来源清单的 Study 内文件（glob 列表），例如固定的参考数据或清单 |
-
-#### Study 声明与扩展逻辑
-
-调度、阶段链、来源记录与通用 Run 对比由库提供。Study 在声明之外通过 注册适配、同名 structure/flow 薄适配导入 src 项目包，完成专用计算、数据准备和研究终验：
-
-| **需要** | **用库里的** |
-|------|----------|
-| 注册 Study 特有的数据、模型或算法 | 导入 src 项目包的注册与建构实现，优先复用模板接口 |
-| 记录源码、计划和环境，防止中途改代码 | make 写的 `provenance.json`，加 `freeze: true` |
-| 两条 Run 的指标、曲线、checkpoint 是否一致 | `python -m <project_entry> compare <run_a> <run_b> [--atol --rtol --checkpoint NAME --out FILE]` |
-| 聚合、数字表、曲线图 | `process` / `report` |
-
-构造前先完成项目的注册与来源核验；Study `prepare.before` 负责隔离准备，`prepare.run` 检查构造结果。collect / summarize 收口数值与判定，write 写证据并在库结果定稿前验收，process 生成派生内容。与外部实现对比时，将已有观测投影为 Run artifact 后复用 `compare`，研究特有的输入、RNG、样本计数和自身 best 等门继续保留。成对计算可通过注册的 Algorithm 执行，每条 Run 只负责自己的组合。
-
-`id` hash **包含** 实验变量、seed、tags，以及可选 `version`；**不含** `id`、`description`。Run 是最底层的一次实测。同内容、同 `version` 再跑仍落到同一 `runs/<id>/`，用于 skip / resume；需要避免相同实验参数与 seed 的不同实测发生 ID 冲突时，换一个 `version` 生成新 Run。timestamp 只是可选内容之一。
-
-version 可写在 `experiment_config.yaml` 顶层，或在 `study.yaml` 的 `fixed` 下覆盖，例如：
-
-```yaml
-fixed:
-  version: "baseline-repeat-2"
-```
-
-这段合并到已有 fixed，不替换其余配置。不要写成 Study 顶层的 `version`，它不会被展开。省略字段保持原有 ID；改变它后重新 make，旧 Run 文件保留，新 index 只列本轮。launch 会复用 jobs，`--include-done` 不清 checkpoint，不代表从头训练。需要保留一次独立实测时使用新 version，不靠删除旧日志或权重实现。
-
----
-
-### 7. 跑完看什么
-
-**index**（按 Experiment 分组，不是扁平 run 列表）：
-
-```json
-{
-  "study": "mnist_train_size",
-  "experiments": [
-    {
-      "factors": { "data.config.train_size": 500 },
-      "runs": [
-        { "id": "…", "seed": 0, "tags": ["baseline"], "config": "runs/…/config.yaml", "log": "runs/…/assets/logs/run.log" },
-        { "id": "…", "seed": 1, "tags": ["baseline"] },
-        { "id": "…", "seed": 2, "tags": ["baseline"] }
-      ]
-    }
-  ]
-}
-```
-
-**result**（`runs/<id>/result.json`）：`status`、`metrics`（如 `train_loss` / `accuracy`）、`control`、`paths`。成功则 `status: succeeded`。
-
-**`status`** 把上面两份拼成一张表，只读，不写文件、不跑训练。实现在 `structure/artifact/readout/`，`flow/cli.py` 只转发：
-
-```bash
-python -m <project_entry> status studies/<name>
-python -m <project_entry> status studies/<name> --mode eval
-```
-
-先打一行计数：`planned` / `succeeded` / `failed` / `pending`。然后每条 Run 一行（tab）：`status`、`mode`、`seed`、`id`、因素、一个 metric、失败时的 `error`、`note`、`log`。顺序跟 index。没有 `result.json` 的格子是 `pending`。metric 只在 `succeeded` 时出现，优先 `accuracy`，否则 `best_accuracy` 或 `train_loss`。`pending` 的 `note` 读该 Run 的 `run.log`：最后一条 `[epoch]` 或 `[error]` 摘要，跳过 `Traceback` / `File ` 续行；都没有就用最后一条 `[flow]`。没有日志是 `-`。`failed` 的 `error` 仍是 result 里的消息，`note` 是日志里最后一条 `[error]` 摘要。`succeeded` 的 `note` 是 `-`。`--mode` 只滤显示。缺 `index.json` 则退出码 2。
-
-`launch` 每一组开始前打 `launch: wait i/n mode=train`（失败再试是 `launch: retry`）。结束时再打一行和 `status` 相同的 `planned` / `succeeded` / `failed` / `pending`。不改 `jobs.json`。
-
-`python -m <project_entry> logs studies/<name>` 把各 Run 的事件行按时间打到终端，不写 Study 级总 log。`python -m <project_entry> report studies/<name>` 从 `process.json` 写 `docs/NUMBERS.md`（Experiment 的 mean / std / min / max，以及 Run 表）。模板 report 先核对当前 index 与聚合的 Study、全部计划 Run ID / seed / 因素归属；缺失、损坏或不匹配时退出 2，不覆盖已有数字表。换 version / fresh make 后先重新 process，再 report；合法部分聚合仍可导出，不要求所有 Run 已成功。不改 `STUDY_REPORT.md` 里的结论，不以清单匹配证明指标新鲜度或科学验收。
-
-`make` 进行中会立刻打出阶段（flush），并写 study 根上的 `activity.json`（不进 Git）：`make: origin <foreign|domestic> model <hub>`、`make: expand`、`make: shared <name> download <origin> <url>` / `ready` / `cached`、`make: pack`。另开一个终端跑上面的 `status`，有这份文件时第一行就是当前阶段；index 还没写出时只打这一行也退出 0。make 成功结束后删掉它。下载仍不刷 tqdm。`origin` 写在 `study.yaml` 顶层，不写在 `data` 下。`foreign` 用 torchvision 官方地址和 `https://huggingface.co`；`domestic` 用国内数据镜像和 `https://hf-mirror.com`。缺省 `foreign`，且不改本机已有的 `HF_ENDPOINT`。只有 `.ready` 才跳过；半截包会删掉再下。
-
-`metrics.train_loss` 应是 AlgorithmTracker **最后一段 train mean**，不是最后一个 batch 的 CE。完整曲线在 `runs/<id>/assets/tracker/`；终端同款文本**必写** `assets/logs/run.log`（`时间 级别 Run id [事件] 内容`）。
-
-`process` 分三层含义，对应 concept §2.1：每条 Run 写 `runs/<id>/process.json`。整轮结束后 `process` 写根 `process.json`（Study **信封**）。信封里每个 Experiment 才是跨 seed 的 metrics / history **mean / std / min / max**。图在 `docs/figures/learning_curves.png`。**不**改 `STUDY_REPORT.md`。
-
-Study process 只聚合当前 index 列出的 Run，不扫描旧 version 目录。index 缺失或不可读取时会失败并提示 make，已有 process、图与 result 保留。重建前先确认当前 YAML 就是要分析的那一轮，再执行 make 和 process。
-
-有训练曲线的 Study 在 `docs/STUDY_REPORT.md` 嵌入实际图，并保留可打开的图与 Run 日志链接。报告中的曲线链接用 `figures/learning_curves.png`；log 按 index 的 Study 相对路径转换为报告相对路径 `../runs/<id>/assets/logs/run.log`。数字读 `process.json`，按 Experiment 写结论，不把 Run 明细表当主结论。原始日志默认仅本机可取得，须明确不会随 clone 提供；纯文献、理论或没有训练曲线的研究按[研究工作要求](docs/development/research.md)提供适用证据，不伪造图、Run 或实测。
-
----
-
-### 8. 新 Study 最小步骤
-
-1. 复制 `studies/_template/` 为 `studies/<name>/`，对照本指南 §1–§3。
-2. 在 src 的研究包实现需要的同名 structure/flow 模块；Study 的建构与阶段入口导入这些实现。改 `experiment_config.yaml` 的基底；改 `study.yaml` 的 `axes` / `seeds` / `tags`。
-3. 在 `docs/PLAN.md` 写清：比什么、什么固定、成功标准，以及 **§3 高效率排班**（同类一组、按校准配置并行、error 后在本波重试，成功后才放行依赖 eval）。`make` 之后、`launch` 之前，把每条 Run 的预估秒数写进 **时长预估** 表。同一 `wait` 的墙钟是组内最慢的一条，整轮是各组相加。不含显存。
-4. `python -m <project_entry> run studies/<name> --skip-launch`，核对 index。
-5. `python -m <project_entry> make studies/<name>`，看打印的 `pack N waits`，再 `python -m <project_entry> launch studies/<name>`（launch 不应再印 pack）。
-6. `python -m <project_entry> status studies/<name>` 看谁 `succeeded` / `failed` / `pending`。`python -m <project_entry> report studies/<name>` 把数字表写到 `docs/NUMBERS.md`。读 `process.json` + `docs/figures/learning_curves.png`，按 Experiment 写 `docs/STUDY_REPORT.md`：图做成可点链接，Run 表带各 `run.log` 链接。结论仍由人写。
-
-检查清单：
-
-- [ ] 目录最终有 `docs/`、`shared/`、`runs/`
-- [ ] `axes` 与 `seeds` 分开
-- [ ] 每个 Run 的 config 含 `seed`
-- [ ] 结论按 Experiment 聚合，而不是按扁平 run 列表
-- [ ] `PLAN.md` / `STUDY_REPORT.md` 写清本轮怎么并行（同类一组、error 后续跑）
-- [ ] `STUDY_REPORT.md` 的「怎么跑的」写整轮预估和实际；Runs 表每行有 `est` 和 `actual`。不另开时长记录，不含显存
-- [ ] `STUDY_REPORT.md` 有可点开的 learning curve，以及各 Run 的 `run.log` 链接
-
----
-
-### 9. 现成能力 vs 要改库
-
-Study 可在 `study.yaml` 写 `flow: {study_phases: true}`。库加载 `flow/` 下的 `prepare/`、`execute/`、`collect/`、`summarize/`、`write/`、`process/` 包；每包在 `run.py` 定义 `run(ctx)`，`__init__.py` 仅通过 `from .run import run` 导出，不能承载函数或业务实现。空目录或没有包入口的手动工具目录不加载，但库默认阶段仍执行，不需要在 Study 复制默认链或填入空 hook。专用建构代码放在 `structure/`。prepare 的 `run.py` 可定义 `before(ctx)`，由包入口一并导出，在库初始化后、recipe / Factory 构造前准备；`run(ctx)` 检查已构造对象。write 先跑 Study 再由库定稿，其他阶段先跑库再跑 Study；未启用时不会自动加载目录。建构前注册通过项目适配接入，现有模板合同见技术分册。两柱全部 Python 源码自动进入来源清单，无须再写重复的 `provenance.include`；固定参考文件等额外输入仍需声明。
-
-`ctx.scope == 'run'` 时是单条 Run 上下文；整轮聚合后还会调用一次 `process.run(ctx)`，此时 `ctx.scope == 'study'`，使用 `ctx.study_dir` 和 `ctx.state['process']`，没有单条 Run 的 layout。只在 Study scope 做终验，避免每条 Run 重复执行矩阵或跨 seed 统计。make 前的下载、数据预检使用显式手动入口（`main_exp` 为 `flow/prepare_data.py`），不接入阶段链。加载、失败和 freeze 的完整合同见 [flow.md §14.0](docs/code/flow.md#140-study-阶段目录)。
-
-| **你想做的** | **怎么做** |
-|----------|--------|
-| 扫已有字段（样本量、lr、seed…） | 只改 Study 的 yaml |
-| 换 MNIST 子集大小 / epoch | yaml 即可 |
-| 新数据集、新模型、新训练循环 | 在 src 项目包的相应 structure 层实现，Study 导入并经项目建构接入，再在 YAML 中点名 |
-| 换 HF Trainer；或新增 Accelerate 适配 | 已注册的 `transformers_trainer` 可改 `algorithm.source`；Accelerate 尚无内建 source，需先在 src 实现并注册，不能只改 YAML。统一接口见 structure.md §6.11 |
-| 独立评测（加载 best） | 另一次 Run：`algorithm.mode: eval`，`resume: best`；不是 Flow 多一个阶段。整波重跑：`<project_entry> launch --mode eval`（已成功加 `--include-done`） |
-| 断点续训 | 在已验证的恢复合同内使用 train 的 `resume: latest`；自定义 Algorithm / 采样器不自动获得精确恢复 |
-| 调整项目执行链 | 直接复用模板时保持合同；需要重构时先更新设计，再验证调用方、状态和失败边界 |
-| 自动出报告 / 跨 Run 对比表 | 人写 `STUDY_REPORT.md`，有实际曲线时嵌图。库 Study process 出 mean/std/min/max 和 `docs/figures/learning_curves.png`。`report` 把同一份数字写成 `docs/NUMBERS.md`，不能代写结论 |
-| 训练曲线 | process 优先读 JSONL 的有效训练轨迹：显式 optimizer_step（优先）或 epoch；旧记录 / state history 回退仍用 observation。跨 seed 按坐标并集统计，缺失点不插值，逐点 n 见 process / 图；不同单位分开。原始日志保留回滚分支，恢复规则见 structure §6.9.2。不做 TensorBoard |
-| 终端 + 硬盘日志 | **Logger** 必写 `runs/<id>/assets/logs/run.log`（`时间 级别 Run id [事件]`）；失败时 traceback 每一行都是 `[error]`。`index.json` 的 `log` 指向它。没有 Study 级总 log |
-| 并行时日志挤在一起 | 文件按 Run 分开；终端每行带 Run `id`。Windows：`launch` 默认 `--console new`；`--console shared` 只混终端 |
-| 看这轮谁好了谁挂了 | `python -m <project_entry> status studies/<name>`（只读；`--mode eval` 可滤） |
-| 下一组挤进还在跑的实验、显存爆 | 组末必须 `wait`（make 脚本 / `launch` 都这样）；不要手改脚本去掉 `wait` |
-
-脚本里若要编程调用：`from rpipe.flow.cli import run_study`。读写路径用 `rpipe.structure.artifact`；造格子用 `rpipe.structure.make`。
-
-## Study 中什么进 Git
-
-| **内容** | **是否入库** | **原因** |
-|------|----------|------|
-| `study.yaml`、`experiment_config.yaml`、项目适配、阶段源码 | 是 | 可复现实验声明与 Study 自己的注册配方 |
-| `docs/PLAN.md`、`docs/STUDY_REPORT.md`、报告图片 | 是 | 人写的研究计划与结论 |
-| `docs/NUMBERS.md` | 可以 | `rpipe report` 从 `process.json` 生成的数字表，不是结论 |
-| `runs/`、`shared/`、`scripts/` | 否 | 可重新生成或体积较大的运行产物 |
-| `index.json`、`process.json`、`activity.json`、`provenance.json` | 否 | make / process 重建；`activity.json` 只在 make 进行中存在 |
-| `.tmp/` | 否 | 本地测试、缓存和临时验证 |
-| `docs/*.tmp`、`docs/*.claim` | 否 | 本地事务暂存和执行占用标记；正式恢复/失败快照单独保留 |
-
-数据、运行产物、计划、报告和复跑代码都保存在各自 Study 目录中，不放到 `docs/` 或仓库根目录。
-
-`studies/` 保留正式研究与模板，通用测试声明放在 `tests/_data/studies/`。一次性的文件占用、环境开关等排错放 `.tmp/diagnostics/`，结论合并到相关 Study 报告；本地证据链接不会随 Git clone 提供。
-
-## 开发与 CI
-
-下游模板项目参照 [CI/CD 执行约定](docs/development/cicd.md#下游项目的分支与可选-ci)，保留以下分支关系：
-
-| **分支** | **用途与流转** |
+| **命令** | **作用与边界** |
 | --- | --- |
-| `main` | 正式可发布状态，接收 dev 的发布 PR |
-| `dev` | 日常集成基线，接收工作分支的 PR |
-| `codex/*` / `feature/*` / `fix/*` / `refactor/*` | 从 dev 建立，完成必要验证后通过 PR 合回 dev |
+| `plan [--show-config]` / `shared` | 只读当前声明，可显式预览每个Run有效配置，不启动、清理或补写 |
+| `status/logs/report` | 按已发布清单和保存身份读取，不核当前源码；显式 --version 可在源码不在场时定位历史版本 |
+| `compare <left-run-dir> <right-run-dir>` | 两端须在各自正式 index 中；容差和 checkpoint 选择明确，--out 必须在输入 Study 域外 |
+| `make` | 经 structure.make.publish 发布配置与索引，不准备科学数据或生成旧 jobs/脚本 |
+| `run` | 先 make 再 launch，显式执行 |
+| `launch [--id]` | 执行明确规格，核来源与自身 train 依赖，默认每 Run 独立科学子进程 |
+| `process [--figures]` | 核当前源码、正式清单、配置与结果，写派生摘要及明确请求的图；输入漂移拒绝发布，不覆盖科学结果 |
+| `data [--download]` / `tensorboard --out` | 显式 profile/下载或导出，遵守输入、输出与来源约束 |
+| `supervise` | 显式 Windows 批次监管，不自动 make、预留 GPU 或恢复旧队列 |
 
-GitHub Actions **可选**：可以启用适合项目的远端检查，也可以只运行本地验证，不因复制源码而强制接入。没有 Actions 仍需记录真实测试与数值门，不称为“CI 已通过”；核对新仓库是否保留了无法上报的必需检查，规则变更须由该仓库授权。分支保护、评审和发布按实际维护配置核对，不把模板文件当作已配置的 GitHub 规则。
+在已确认来源、资源及本次执行授权后，执行用法为：
 
-以下是 **RPipe 本仓库**的测试与已启用 Actions，不是下游必须复制的流水线：
-
-```bash
-# 快速门：unit + p1 + c1，不跑 slow / external / gpu
-python tests/run.py --fast
-
-# 当前 PR 门：unit 的 c1 与 c2，不跑 slow / external / gpu
-python tests/run.py --core
-
-# 本地执行链：符合 c1/c2 的 integration/e2e，不跑 slow / external / gpu
-python tests/run.py --all --cost-class c1 --cost-class c2 -- -m "(integration or e2e) and not external and not gpu and not slow"
-
-# 显式运行所有已收集测试
-python tests/run.py --all
+```console
+python -m rpipe run <study-dir> --run-root <external-run-root>
+python -m rpipe process <study-dir> --run-root <external-run-root>
 ```
 
-pytest 的 base temp、cache 和测试结果都写入 `.tmp/`。测试入口与标记约定见 [tests/README.md](tests/README.md)。
+四类部件的程序化构造分别使用各职责模块的 build_data/build_model/build_algorithm/build_system，轻量能力合同在 [structure.api](src/rpipe/structure/api.py)。模型接 data_meta 和 System，算法构造显式接本次 checkpoint_dir 和可选 train_checkpoint_dir，compute 接注入部件及只读取消检查器；runtime/System/Logger 和研究准备有明确顺序。不同来源的数据游标与恢复支持分别解释，不因接口相同就保证跨后端等价。
 
-GitHub Actions 配置包括：
+持权前 busy、来源失配或无效请求只返回 status=rejected 的 RunReport，不给目标 Run 写失败记录。成功定稿须先核源码与有效配置、科学响应和资源关闭；未确认释放时保留 owner 和 unknown 事实，禁止成功发布或新派发。正式结果后的 process 仅使用已保存记录，派生失败单独报告。Study 摘要记录 index/config/result/execution、明确 outcome 及 busy 状态的输入指纹，汇总期间变化时保全旧文件。
 
-- `Unit Tests`：Ubuntu/Windows × Python 3.10/3.13，安装 `.[dev]` 后执行 core 和本地 CPU 流程门；
-- `Package Check`：在 Ubuntu/Windows 构建 wheel / sdist，在源码目录之外的全新虚拟环境中安装两种分发包，验证模块入口、console script 与离线 Toy/Stub Study 的 make / launch / process / readout。
+已有正式 result 拒绝原地重跑，须使用显式新 version。无 result 的已确认 failed/cancelled 仅允许显式 --retry（flow.run.run 的 retry=True），unknown/busy 不重放。批次退出 0 还要求非空、完整覆盖所选项、各项执行成功、质量非 False 且证据完整；提前停止、取消或成功前缀不算整批成功。execution.json 明确索引当前 attempt，执行、科学结果、派生分析、证据完整度分列，不由 mtime、UUID、退出码或日志推断整体成功。
 
-各提交的检查状态见 [GitHub Actions](https://github.com/DreamSoul-AI/RPipe/actions)。CPU 安装与流程验收不覆盖所有 GPU 或可选 HF 场景。分支顺序、必需检查和自行合并见 [cicd.md](docs/development/cicd.md)。
+只读命令省略 --version 时，仅读取当前声明的版本字段定位输出；需要查看另一版本或源码已移走时显式提供 --version，不按目录时间猜选。正式轨迹和导出只使用清单列出的 Run 及 JSONL 有效观测，不扫描旧目录或用 state-history 回退补齐。
 
-## 当前实现范围
+完整快照由 [artifact.checkpoint](src/rpipe/structure/artifact/checkpoint.py) 的 save_snapshot/load_snapshot 存取，明确绝对 .pt 文件，以原子替换为完成点，只接受安全 Tensor 与基础状态，不加载研究类或旧格式。保存失败保全先前完整文件；恢复准入归算法，CPU 原生与 HF 的支持范围分别验证。
 
-- 数据：stub，以及 torchvision 的 MNIST、FashionMNIST、CIFAR10、CIFAR100、SVHN；
-- 模型：`custom_torch` 的 linear、MLP、CNN、ResNet、WideResNet；
-- 算法：原生 PyTorch train/eval，以及 `transformers_trainer`；
-- 运行：顺序执行、按 GPU/wait 组并行、checkpoint/resume、Run 日志与 Study 聚合。
+provenance.inputs 可固定外部文件或目录清单，未固定 path/stats_path、默认缓存与隐式 profile 分列未验证。以上命令和能力说明对应当前实现；目标结构见两份设计，实施差距与接口清理见开发计划，实际演进和验证见日期记录。
 
-原生精确续训支持单进程、`num_workers=0` 的标准采样器和相同训练预算 / 配置；新 checkpoint 保存 RNG 与数据位置。旧 checkpoint、HF 或未实现恢复协议的数据只保证部分状态加载，并明确警告，不保证等价于连续训练。具体条件见 [resume 合同](docs/code/structure.md#6113-resumetrain-与-eval-的特殊接口)，历史 Study 的续训拒绝门保持不变。
+### 资源监管与当前限制
 
-文档中列出的其他下游生态是扩展边界，不代表已经实现；以 Registry 和 [bugs.md](docs/development/bugs.md) 为准。
+默认 Budget 拒绝硬内存限制和同进程硬超时。Windows 有启用的 Study hook、recipe、DataLoader worker 或 HF 后端时，普通 run 的硬超时仍拒绝。执行命令作用域中的 Ctrl+C 请求同一 Cancellation，父进程通过绑定本 attempt 的标记通知科学进程；算法在只读检查点合作退出。协作和所属资源强停均受清理时限约束，硬超时不延长为合作宽限；不能确认关闭时保留 unknown 和 owner，不承诺任意阻塞代码都可立即合作退出。
 
-上述清单表示已有实现，不代表全部模型与数据组合已完成真实运行验收。六个指定组合的 30-step 验收见 [数据报告](https://github.com/DreamSoul-AI/RPipe/blob/71143ab/studies/support_data_smoke/docs/STUDY_REPORT.md) 与 [模型报告](https://github.com/DreamSoul-AI/RPipe/blob/71143ab/studies/support_model_smoke/docs/STUDY_REPORT.md)，模型报告保留 ResNet10 的 Accuracy 复算差异；未解决缺陷见 [bugs.md](docs/development/bugs.md)。
+main_probe参考侧训练、周期评测和自身best独立评测也使用同一只读取消检查器，在请求批次及交回观测前检查；已经进入的一次阻塞读取不能被合作检查器抢占，实际边界与关闭证据见[参考侧取消记录](<docs/运行记录 Run Record/2026-10-29 参考侧合作取消验证.md>)。
 
-## 给 Agent 的重构指令
+Windows 可另选 flow.supervision.supervise / rpipe supervise。CLI 必须显式提供 --run-root、--evidence-dir、--run-seconds、--batch-seconds、--rss-bytes、--output-bytes，另可设置 --poll-seconds 与 --cleanup-seconds。匿名 Job 监管本批协调者、worker 和后代，入组后才放行，首败、质量 False、证据不全、观察失败或超限即停后续派发。
 
-在目标研究项目中直接复制下面的 prompt，参考仓库为 `https://github.com/DreamSoul-AI/RPipe/`；已有本地 checkout 时也可据此核对来源。按需指定模板版本与当次授权；不填写时先核对可用基线，记录确切提交，只重构和做小规模验证，不自动推送或启动大规模实验。第 9 项含范围受限的上游 Issue 反馈授权，不需要对外反馈时删除该项。本段是任务指令，不替代上面的接入与阶段合同。
+RSS 与输出是采样停止线，可能漏峰或超调，**不是硬内存或磁盘配额**。须使用专用外部运行根与新建独立证据根，保留原 Run owner/unknown 协议，其他平台拒绝此入口。用户已授权按本机硬件与准入实测自主设置常规预算；换机须重新核环境、硬件和停止线。039c941的完整研究矩阵已按记录验收，当前工程候选未重新做完整矩阵，不继承旧SHA的科学验收。详细计量与清理合同见架构第四章；本次停止本机实验、推送与换机重新执行的边界见[交接记录](<docs/开发记录 Development Record/2026-10-30 跨电脑交接.md>)。
 
-```text
-请实际将当前研究项目按 RPipe 的架构重构，不只给建议。
-参考：https://github.com/DreamSoul-AI/RPipe/
+## 验证与证据
 
-1. 先查看工作区状态和项目 AGENTS.md，保留已有修改。阅读本项目 README、相关设计、docs/research、Study 计划与报告；再读 RPipe README，重点遵循“在其他项目中使用 RPipe”“Study 使用指南”“开发与 CI”及其链接的 concept、layout、code、structure、flow、docs/development/research.md 和测试文档。研究先从灵感与文献明确问题和假设，核对文献调研、数据、模型、算法、指标与实验设计；不适用时说明原因和替代证据。确认文档与代码差异，不把现状直接当成设计。参考资料无法取得时如实说明，不凭记忆编造接口。
+统一入口为 [tests/run.py](tests/run.py)，按标签与成本选择，结果根在 checkout 外，每个 pytest 进程指定独立临时目录。以下为后续受控 CPU 检查用法，不是本轮执行结果：
 
-2. 按 README 采用源码模板，不以 pip / Git URL 外部依赖接入。将选定基线的完整源码放入本项目 src/rpipe/ 并长期保留，记录上游 commit、版本与本地差异；已有副本先比较，不覆盖或删除。src/<项目包名>/ 放本项目实现，研究包名从现有代码确认，优先复用原算法和 RPipe 的已有能力。
-
-3. 项目包和 studies/<name>/ 都按 RPipe 同名职责目录组织：structure 下为 api、control、data、model、algorithm、system、artifact、make；flow 下为 prepare、execute、collect、summarize、write、process。这些名称只作导航，具体内容和下级结构请参见选定 RPipe 基线的 src/rpipe/structure/<对应目录>/、src/rpipe/flow/<对应阶段>/ 及相关 docs/code 文档。先查看相关目录的子目录、接口和已有实现，再决定本项目的代码落点与复用方式，不能只凭目录名猜测内容或套用固定文件清单。artifact 不独立于两柱。保持目录语义与依赖方向，不机械复制通用代码、不写无用空函数，业务实现不堆在 __init__.py。Study 只声明、导入和薄组装 src 中的实现，不再维护另一套算法、训练循环、调度或产物系统。
-
-4. 先写明旧代码到新职责的映射、复用点、接口与配置迁移、阶段输入输出、调用时机和成功条件，再修改实现。保留研究算法、数值口径、原始证据与必要兼容；确需改变行为时记录原因并做对照，不能只搬目录或靠 hook 存在宣布完成。项目可以按对应职责重构模板实现，但必须记录差异并回归验证。
-
-5. 从 docs/research 的宏观问题提取可独立验收的具体 Study，先写 PLAN：对照、变量、固定条件、来源、精度、seed、预算、指标、成功门与停止规则；宏观资料缺失时明确问题后补充，不编造来源。按 README 接通阶段、来源核验和 provenance，确认项目源码新增、删除、修改都能检出；独立复跑用新 version，不把旧成功结果算作新验收。
-
-   研究规划、文献检索、论文分析和 PyTorch 复现，按 RPipe docs/development/research.md 中的任务分流读取 knowledge 对应 skill 与必要 references，记录来源 commit 和实际阅读范围。它们是可复用的工作指引，不替代项目设计，不自动安装、不新增运行依赖，也不授权额外训练或发布。
-
-6. 使用项目真实入口，不强制叫 python -m rpipe；先确认它复用或接通了哪些模板命令，不能照抄不存在的参数。先做源码导入、模板 smoke、真实项目最小 Study、关键失败边界与受影响回归。分别报告执行完成和研究质量通过，不把 Toy/Stub 通过当成真实数值验收。
-
-7. 并行运行先校准设备、显存、主存、线程和 I/O，显存系数可调整，不规定固定比例。复用已有调度，避免多个进程写同一 Run；并行 pytest 使用不同 basetemp，性能对照不混入竞争任务。大规模实验只在小验证通过且已有明确授权时执行。
-
-8. 同步项目 README、设计、Study 计划/报告、测试与 .gitignore。临时文件放 .tmp，正式实验材料放对应 Study。参考 RPipe CI/CD 使用 main/dev，工作分支从 dev 建立，经 PR 进入 dev，发布再由 dev 经 PR 进入 main；已有不同分支体系先明确迁移，不擅改远端规则。GitHub Actions 可选，关闭时仍要本地验证，未执行不能记为通过。
-
-9. 本任务允许向 DreamSoul-AI/RPipe 创建或补充与本次接入直接相关的上游 Issue，按 RPipe docs/development/feedback.md 执行。遇到通用不兼容、疑似缺陷或可复用方案，先在本项目记录版本、本地差异、最小复现、实际条件和验证边界；检索 open/closed Issues 与 PR 去重，脱敏后直接反馈，无需逐条询问。项目专用逻辑留在本项目，未复现写疑似；公开 Issue 不包含私有仓库地址、内部文档、数据、权重、凭据、可识别路径或安全漏洞。不能安全公开或缺权限时保存草稿并说明；不盲目重试重复创建。将真实 Issue URL 回写长期记录。此授权不含上游代码推送、PR、合并、关闭 Issue、修改权限或其他项目写入。
-
-在当前授权范围内持续完成文档、重构和验证，不停在方案阶段。提交、推送、合并、发布、清理旧证据及大规模实验遵循当次明确授权。最终简要交付结构映射、真实运行命令、验证结果、剩余风险和未执行事项。
+```console
+python tests/run.py --help
+python tests/run.py --core --results-root <external-test-root> --timeout-seconds 600 --budget-seconds 660 -- --basetemp <unique-external-temp>
 ```
+
+结果包含 manifest、逐项 events 与可重建 report，未执行、跳过、取消、缺失与失败分别保留。执行器只监督本次 pytest 根进程，不提供逐项内存或全部后代硬限。制品验证另用 [tests/package_smoke.py](tests/package_smoke.py)，须用本次实际 wheel/sdist 安装到新 venv 的解释器，显式 --artifact 指明制品和 --workspace 指明新外部位置；核 venv/导入/console/RECORD 与制品来源哈希，不用 editable、外来 PYTHONPATH 或旧同版本包替代。
+
+现有工作流在 dev/main 的 PR 和 push 上运行 CPU 矩阵（Ubuntu/Windows × Python3.10/3.13）及两平台 Python3.10 打包安装，另在 PR 检查分支方向。CPU 作业归档统一测试回执和命令日志，打包作业归档构建/安装日志及已生成的 wheel/sdist smoke 工作区。上传在成功或失败后均尝试执行，缺少文件时明确失败；artifact 名包含矩阵、Actions run/attempt 和检出 SHA，保留7天。日志管道使用 Bash pipefail，不吞测试或构建失败。平台强制终止、runner 丢失或上传服务不可用时可能无完整归档，不能将未上传当作通过。工作流声明、远端实际结果与分支保护不是同一事实，不把配置存在记为当前 HEAD 已通过。
+
+当前已验收工程代码为f1f012bd6d8b2e601fbbd0ea30856c6b0f88e314，其自身9项CI均成功，实际使用、真实E0及600步范围见[模板使用验证第十八至二十一章](<docs/运行记录 Run Record/2026-11-02 模板使用走查.md#十八最终候选的完整使用与二次开发验收>)；后续文档收尾提交自身CI在交付时按真实HEAD另核。c4eed0f的预算拒绝、历史只读边界、原生训练与恢复、配置规划、CLI及README原文复现保留原执行身份。Windows/Ubuntu两版Python的CPU、真实TensorBoard及两平台严格安装检查均通过，平台跳过与未执行范围分别保留。当前源码的完整科学矩阵、专门的长程性能评价、矩阵外环境及原始历史归档可恢复性未另行验收。
+
+安装最小旅程使用显式Toy/Stub，README使用8个合成样本的两步CPU训练及自身best独立评测，均为工程验证。main_probe/main_exp既有CUDA配对及039c941完整E4按原SHA、环境和配方保留，不能据本轮工程通过回签。更早各批的命令、结果与失败从[运行记录](<docs/运行记录 Run Record/>)追溯，README不重复维护逐批通过数。
+
+来源完整度按范围解释：通用 input_provenance 只观察声明及默认引用，Study 自定义输入另保存核验证据。已完成八格的准备、raw 哈希及归档关联经[只读复核](<docs/运行记录 Run Record/2026-10-30 来源边界与准入选择验证.md>)确认，未改写旧 Run。main_exp preflight 已拒绝空、重复或不支持的显式组合，避免意外扩大执行；600步实际执行证据见当前研究状态，不能用该离线修复代替。
+
+## 宿主接入与资料来源
+
+下游固定完整上游提交，整体同步 src/rpipe/，记录完整 SHA、成员/哈希并保留 MIT。dayan、SD、量化的内嵌副本不得自行修改，问题先在 RPipe 修复验证，再按单独授权整套同步。宿主集成身份与验证记录只在日期记录维护。共用文档职责的同步不包含内嵌库、源码、测试或配置同步。
+
+数据、权重、日志、trace、图、checkpoint、源码快照与大报告保存在显式外部根，不进 Git。studies/main_exp/docs/ 的两个 JSON 是有实际消费者的静态科学输入，原路径与 pin 保留，不按扩展名删除。历史 Run 不因文档改名回签身份。
+
+共用资料从 [DreamSoul GitHub 组织](https://github.com/DreamSoul-AI)、[公司资料入口](https://dreamsoul.feishu.cn/drive/folder/HFFFfNlvelicdsd46PCcrVZ2n4g)、[规范总索引](https://dreamsoul.feishu.cn/docx/UmU1d2EwLoeET5xCJChcOKPknyb) 与 [工具教程索引](https://dreamsoul.feishu.cn/docx/VSQ5dlJl3o0hbIxrEhUc8qKEnBc) 定位。[研发用 AGENTS.md](https://dreamsoul.feishu.cn/docx/QICWdeEokobO9RxYR9zcjE6Pnyg)、[通用调研](https://dreamsoul.feishu.cn/docx/XOwxdH7aYoplBjx7JCFcZCQ5n9f)、[使用教程](https://dreamsoul.feishu.cn/docx/JrUgdOKh2oJ9SBxosWyc4Dk7nIh) 提供共用方法，采用范围见 AGENTS 与运行记录。架构粒度参考 [固定 CPU 内存清理样板](https://github.com/DreamSoul-AI/cpu-memory-cleanup/tree/6938f10447b250958856a845fc5448aa1185b52d)，不把案例或其他仓库指令当本仓授权。
+
+当前开发任务、建议顺序与执行边界见开发计划。代码、实验、合并、发布与下游同步按各自明确范围推进。
+
+当前用户已要求持续完成开发计划。研究资源由Agent按[研究计划的硬件自适应规则](<docs/研究计划 Research Plan 研究流水线.md>)自主测量与分配，不再逐次询问常规预算；科学参数和门限保持，首败停止。main_exp八格CPU准入及[600步CUDA配对](<docs/运行记录 Run Record/2026-10-30 main_exp 600步配对验证.md>)已通过，新电脑039c941完整曲线已按固定协议验收，当前工程修复保留独立候选身份。pytest使用importlib导入，允许镜像目录中的同名测试完整收集；本机原生DLL启动条件与候选制品验证范围从[本批记录](<docs/运行记录 Run Record/2026-10-30 硬件自适应与交付准入验证.md>)读取，不推定所有机器环境相同。
+
+新电脑main_exp完整32train/32eval矩阵已按039c941及新version从头完成，完整曲线、四seed统计、自身best独立eval、固定参考及模型顺序门均通过，正式资源收尾完成；实际环境、证据与适用范围从[新电脑执行记录](<docs/运行记录 Run Record/2026-10-30 新电脑main_exp完整矩阵执行.md>)追溯；[旧电脑执行记录](<docs/运行记录 Run Record/2026-10-30 main_exp完整矩阵执行.md>)保留交接中断事实，不拼接。该验收不外推其他机器、配方或总体统计等价。采用本轮结构的新课题应以当前两份设计和示例直接组织研究代码，使用新version保留来源。旧接口和旧checkpoint不作新版兼容承诺；需要复查的历史Run保留其原源码与环境，不给旧成果换身份，也不要求下游迁移。

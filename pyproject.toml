@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rpipe"
-version = "0.4.1"
+version = "0.5.0"
 description = "Research execution substrate: structure / flow"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -40,21 +40,22 @@ rpipe = "rpipe.flow.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
-hf = ["accelerate", "evaluate", "transformers"]
+tensorboard = ["tensorboard>=2.14"]
+hf = ["accelerate", "evaluate", "transformers", "datasets", "modelscope"]
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
+namespaces = false
 include = ["rpipe*"]
 exclude = ["examples*", "output*", "data*", "asset*", "build*", "dist*", "tests*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-q --tb=short --strict-markers --basetemp=.tmp/pytest"
-cache_dir = ".tmp/pytest-cache"
+addopts = "-q --tb=short --strict-markers --import-mode=importlib"
 filterwarnings = [
   "ignore::DeprecationWarning",
 ]
@@ -77,10 +78,13 @@ markers = [
   "module_algorithm: structure.algorithm",
   "module_system: structure.system",
   "module_artifact: structure.artifact",
-  "module_make: structure.make",
   "module_cli: flow.cli",
   "module_runner: flow runner / execute",
   "module_process: flow process / collect",
+  "module_plan: declaration planning",
+  "module_make: declaration expansion and explicit publication",
+  "module_execution: execution ownership and lifecycle",
+  "module_readout: read-only evidence and aggregation",
   "runtime: runtime budget",
   "memory: memory budget",
   "gpu: requires a real GPU",

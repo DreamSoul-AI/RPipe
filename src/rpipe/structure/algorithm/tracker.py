@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from contextlib import closing
+
 import json
+import math
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from rpipe.structure.artifact.asset import kinds
-from rpipe.structure.artifact._atomic import atomic_write_text
-from rpipe.structure.algorithm.metric import MetricBundle
+from rpipe.structure.artifact import io as kinds
+from rpipe.structure.artifact.io import _owned_stream
+from rpipe.structure.artifact.io import atomic_write_text
+from rpipe.structure.algorithm.metrics import MetricBundle
 
 
 class _Meter:
@@ -112,10 +116,7 @@ class AlgorithmTracker:
 
     def display_mean(self, split: str) -> dict[str, float]:
         """Running mean if this segment still has samples; else last saved segment."""
-        running: dict[str, float] = {}
-        for name, meter in self._meters.get(split, {}).items():
-            if meter.n > 0:
-                running[name] = meter.mean
+        running = {name: meter.mean for name, meter in self._meters.get(split, {}).items() if meter.n > 0}
         if running:
             return running
         return self.segment_mean(split)
@@ -130,14 +131,12 @@ class AlgorithmTracker:
 
     def save(self, split: str | None = None) -> None:
         splits = [split] if split else list(self._meters)
-        snapshot: dict[str, dict[str, float]] = {}
         for name in splits:
             for metric, value in self.metrics.finish_full(name).items():
                 self._meter(name, metric).append(value, 1)
-            snapshot[name] = {}
-            for metric, meter in self._meters.get(name, {}).items():
-                snapshot[name][metric] = meter.save_point()
-            self._last_segment[name] = dict(snapshot[name])
+            self._last_segment[name] = {
+                metric: meter.save_point() for metric, meter in self._meters.get(name, {}).items()
+            }
 
     def reset(self, split: str | None = None) -> None:
         splits = [split] if split else list(self._meters)
@@ -156,7 +155,7 @@ class AlgorithmTracker:
             and type(offset) is int and 0 <= offset <= self.jsonl_path.stat().st_size
         ):
             keep = offset
-        with self.jsonl_path.open('ab+') as handle:
+        with _owned_stream(closing(self.jsonl_path.open('ab+'))) as handle:
             if handle.tell():
                 handle.seek(-1, 2)
                 if handle.read(1) != b'\n':
@@ -166,7 +165,7 @@ class AlgorithmTracker:
     def append_jsonl(self, split: str, *, progress: dict[str, Any] | None = None) -> None:
         self.jsonl_path.parent.mkdir(parents=True, exist_ok=True)
         means = self.mean(split)
-        with self.jsonl_path.open('a', encoding='utf-8') as handle:
+        with _owned_stream(closing(self.jsonl_path.open('a', encoding='utf-8'))) as handle:
             for name, value in means.items():
                 row = {'step': self.step, 'split': split, 'name': name, 'mean': value}
                 if progress is not None:
@@ -202,9 +201,47 @@ class AlgorithmTracker:
             'last_segment': self._last_segment,
         }
 
+    def validate_state_dict(self, state: dict[str, Any]) -> None:
+        if not isinstance(state, dict) or type(state.get('step')) is not int or state['step'] < 0:
+            raise ValueError('invalid checkpoint tracker progress')
+        if (not isinstance(state.get('jsonl_path'), str) or type(state.get('jsonl_offset')) is not int
+                or state['jsonl_offset'] < 0):
+            raise ValueError('invalid checkpoint tracker evidence reference')
+        for field in ('segment_batches', 'splits', 'last_segment'):
+            if not isinstance(state.get(field), dict):
+                raise ValueError(f'invalid checkpoint tracker {field}')
+        if any(type(value) is not int or value < 0 for value in state['segment_batches'].values()):
+            raise ValueError('invalid checkpoint tracker batch counts')
+        progress = state.get('progress')
+        if progress is not None and (not isinstance(progress, dict)
+                or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0
+                       for v in progress.values())):
+            raise ValueError('invalid checkpoint tracker coordinates')
+        for metrics in state['splits'].values():
+            if not isinstance(metrics, dict):
+                raise ValueError('invalid checkpoint tracker metrics')
+            for body in metrics.values():
+                if not isinstance(body, dict) or type(body.get('n')) is not int or body['n'] < 0:
+                    raise ValueError('invalid checkpoint tracker samples')
+                for name in ('last', 'mean', 'weighted_sum'):
+                    value = body.get(name)
+                    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                        raise ValueError('invalid checkpoint tracker accumulation')
+                if not isinstance(body.get('history'), list):
+                    raise ValueError('invalid checkpoint tracker history')
+                if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+                       for value in body['history']):
+                    raise ValueError('invalid checkpoint tracker history values')
+        for metrics in state['last_segment'].values():
+            if (not isinstance(metrics, dict) or any(isinstance(value, bool)
+                    or not isinstance(value, (int, float)) or not math.isfinite(value)
+                    for value in metrics.values())):
+                raise ValueError('invalid checkpoint tracker segment')
+
     def load_state_dict(self, state: dict[str, Any] | None) -> None:
         if not state:
             return
+        self.validate_state_dict(state)
         self.step = int(state.get('step') or 0)
         self.progress = state.get('progress')
         self._last_segment = dict(state.get('last_segment') or {})
@@ -221,3 +258,11 @@ class AlgorithmTracker:
                 self._meters[split][name] = meter
                 if 'segment_batches' not in state and meter.n > 0:
                     self._segment_batches[split] = 1
+
+
+def make_tracker(assets_dir: Path | str, algorithm_config: Any = None) -> AlgorithmTracker:
+    from rpipe.structure.algorithm.metrics import resolve_metric_names
+
+    names = resolve_metric_names(algorithm_config.setting('metric')) if algorithm_config is not None else None
+    glue = str(algorithm_config.setting('glue_subset', 'cola') or 'cola') if algorithm_config is not None else 'cola'
+    return AlgorithmTracker(assets_dir, metrics=MetricBundle(names, glue_subset=glue))

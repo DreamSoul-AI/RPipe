@@ -39,19 +39,36 @@ def sha(path: Path) -> str:
 
 
 def save_json(path: Path, body: Any) -> None:
-    from rpipe.structure.artifact._atomic import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
 
     atomic_write_text(path, json.dumps(body, ensure_ascii=False, indent=2) + '\n')
 
 
+@contextlib.contextmanager
+def owned(resource: Any, close: Any = None):
+    """Release a local resource without replacing its primary failure."""
+    primary = None
+    try:
+        yield resource
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        cleanup = close if close is not None else getattr(resource, 'close', None)
+        if callable(cleanup):
+            try:
+                cleanup()
+            except BaseException as error:
+                if primary is None:
+                    raise
+                primary.cleanup_errors = (*getattr(primary, 'cleanup_errors', ()), error)
+
+
 def source_manifest() -> dict[str, str]:
-    from rpipe.structure.artifact.provenance import source_files
-    from rpipe.structure.make.expand import load_study_yaml
+    from rpipe.structure.artifact.provenance import source_digest
 
     study = Path(__file__).resolve().parents[2]
-    # Reuse the canonical source contract: generated Run archives are artifacts.
-    # Their byte integrity is independently checked by MainArchive.verify_exports.
-    return source_files(study, load_study_yaml(study))
+    return {'source_digest': source_digest(study)}
 
 
 @contextlib.contextmanager
@@ -73,7 +90,7 @@ class MainArchive:
         self.original_root = workspace / 'original'
         self.archive = workspace / 'source-main-98648f3'
         manifest = []
-        for entry in subprocess.check_output(['git', 'ls-tree', '--full-tree', '-r', '-z', MAIN], cwd=ROOT).split(b'\0'):
+        for entry in subprocess.check_output(['git', '-c', 'safe.directory=' + str(ROOT), 'ls-tree', '--full-tree', '-r', '-z', MAIN], cwd=ROOT).split(b'\0'):
             if not entry:
                 continue
             attributes, filename = entry.split(b'\t', 1)
@@ -81,14 +98,24 @@ class MainArchive:
             if kind != 'blob':
                 continue
             name = filename.decode('utf-8')
-            payload = subprocess.check_output(['git', 'cat-file', 'blob', blob], cwd=ROOT)
+            payload = subprocess.check_output(['git', '-c', 'safe.directory=' + str(ROOT), 'cat-file', 'blob', blob], cwd=ROOT)
             target = self.archive / name
             if target.exists():
                 if target.read_bytes() != payload:
                     raise ValueError(f'archived source changed: {target}')
             else:
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(payload)
+                handle = target.open('xb')
+                try:
+                    handle.write(payload)
+                except BaseException:
+                    try:
+                        handle.close()
+                    except OSError:
+                        pass
+                    raise
+                else:
+                    handle.close()
             manifest.append({'path': name, 'git_blob': blob,
                              'sha256': hashlib.sha256(payload).hexdigest()})
         save_json(workspace / 'ARCHIVE_MANIFEST.json', {'main_commit': MAIN, 'files': manifest})
@@ -163,7 +190,7 @@ class MainArchive:
 
 
 def runtime_config(device: str) -> Any:
-    from rpipe.structure.system.config import SystemConfig
+    from rpipe.structure.control import SystemConfig
     return SystemConfig.from_mapping({'device': device, 'deterministic': True,
                                      'cudnn_benchmark': False, 'cudnn_deterministic': True,
                                      'cudnn_allow_tf32': False, 'matmul_allow_tf32': False})
@@ -291,28 +318,28 @@ class Observations:
 
 
 def native_data(workspace: Path, name: str, assets: Path) -> Any:
-    from rpipe.structure.data.config import DataConfig
-    from rpipe.structure.data.factory import DataFactory
-    return DataFactory.build(DataConfig.from_mapping({'name': name, 'source': 'torch', 'config': {
+    from rpipe.structure.control import DataConfig
+    from rpipe.structure.data.factory import build_data
+    return build_data(DataConfig.from_mapping({'name': name, 'source': 'torch', 'config': {
         'batch_size': 250, 'test_batch_ratio': 4, 'pin_memory': True, 'num_workers': 0, 'augment': True}}),
         workspace / 'native-data', seed=SEED, origin='foreign')
 
 
-def native_model(data: Any, name: str, assets: Path) -> Any:
-    from rpipe.structure.model.config import ModelConfig
-    from rpipe.structure.model.factory import ModelFactory
-    return ModelFactory.build(ModelConfig.from_mapping({'name': name, 'source': 'custom_torch'}),
-                              assets, data_meta=data.meta)
+def native_model(data: Any, name: str, assets: Path, *, system: Any) -> Any:
+    from rpipe.structure.control import ModelConfig
+    from rpipe.structure.model.factory import build_model
+    return build_model(ModelConfig.from_mapping({'name': name, 'source': 'custom_torch'}),
+                              assets, data_meta=data.meta, system=system)
 
 
-def observe_native(data: Any, module: Any) -> tuple[dict[str, Observations], list[Any]]:
+@contextlib.contextmanager
+def observe_native(data: Any, module: Any):
     observations = {'train': Observations(), 'test': Observations()}
     original_iter = data.iter_batches
-    def batches(split: str):
-        for images, targets in original_iter(split):
+    def batches(split: str, *, resumable: bool = True):
+        for images, targets in original_iter(split, resumable=resumable):
             observations[split].batch(images, targets)
             yield images, targets
-    data.iter_batches = batches
     base = data._train_set
     class Indexed:
         def __len__(self):
@@ -320,20 +347,34 @@ def observe_native(data: Any, module: Any) -> tuple[dict[str, Observations], lis
         def __getitem__(self, index):
             observations['train'].index(index)
             return base[index]
-    data._train_set = Indexed()
     def core_hook(_module: Any, args: Any) -> None:
         observations['train' if module.training else 'test'].core(args[0])
-    handle = module.net.register_forward_pre_hook(core_hook)
-    return observations, [handle]
+    def restore():
+        data.iter_batches = original_iter
+        data._train_set = base
+    with owned(data, restore):
+        data.iter_batches = batches
+        data._train_set = Indexed()
+        handle = module.net.register_forward_pre_hook(core_hook)
+        with owned(handle, handle.remove):
+            yield observations
 
 
-def observed_original(loader: Any, observation: Observations):
+def observed_original(loader: Any, observation: Observations, *, cancel_check):
     class ObservedLoader:
         def __len__(self):
             return len(loader)
 
         def __iter__(self):
-            for batch in loader:
+            cancel_check()
+            iterator = iter(loader)
+            while True:
+                cancel_check()
+                try:
+                    batch = next(iterator)
+                except StopIteration:
+                    return
+                cancel_check()
                 observation.batch(batch['data'], batch['target'], batch['id'])
                 yield batch
 
@@ -349,14 +390,15 @@ def mapping() -> dict[str, Any]:
             'scheduler': 'cosine', 'T_max': 60, 'eta_min': 0., 'resume': False}
 
 
-def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[Any, Any, Any, Any, Any]) -> dict[str, Any]:
+def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[Any, Any, Any, Any, Any], *, cancel_check, checkpoint_dir: Path) -> dict[str, Any]:
+    cancel_check()
     bootstrap()
     import torch
-    from rpipe.structure.algorithm.config import AlgorithmConfig
+    from rpipe.structure.control import AlgorithmConfig
     from rpipe.structure.algorithm.train import TrainAlgorithm
-    from rpipe.structure.algorithm.eval import EvalAlgorithm
+    from rpipe.structure.algorithm.evaluation import EvalAlgorithm
     from rpipe.structure.algorithm.tracker import AlgorithmTracker
-    from rpipe.structure.system.factory import SystemFactory
+    from rpipe.structure.system.factory import build_system
     prepared = json.loads((workspace / 'PREPARED.json').read_text(encoding='utf-8'))
     if prepared.get('passed') is not True:
         raise ValueError('CPU preparation must pass before training')
@@ -370,7 +412,7 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
     if len(pairs) != len(set(pairs)) or any(name not in DATA or model not in MODELS for name, model in pairs):
         raise ValueError('combinations must contain unique supported data/model pairs')
     result: dict[str, Any] = {'started_at_utc': datetime.now(timezone.utc).isoformat(), 'main_commit': MAIN,
-        'dev_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'device': device, 'torch': torch.__version__, 'seed': 0,
+        'dev_commit': subprocess.check_output(['git', '-c', 'safe.directory=' + str(ROOT), 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(), 'device': device, 'torch': torch.__version__, 'seed': 0,
         'expected_combinations': pairs, 'full_eight_combination_matrix_selected': len(pairs) == 8,
         'scope': 'full_matrix' if len(pairs) == 8 else 'diagnostic_subset',
         'recipe': mapping(), 'control_changed_from_main_default': ['deterministic=true', 'benchmark=false', 'CUBLAS_WORKSPACE_CONFIG=:4096:8', 'cudnn_allow_tf32=false', 'matmul_allow_tf32=false'],
@@ -388,8 +430,8 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
     save_json(workspace / 'ENVIRONMENT.json', environment)
 
     class CapturedTrain(TrainAlgorithm):
-        def __init__(self, config: Any):
-            super().__init__(config)
+        def __init__(self, config: Any, *, checkpoint_dir: Path):
+            super().__init__(config, checkpoint_dir=checkpoint_dir)
             self.snapshots: dict[int, Any] = {}
         def on_checkpoint(self, tracker: Any, logger: Any, data: Any, model: Any, system: Any, extra: Any = None):
             super().on_checkpoint(tracker, logger, data, model, system, extra)
@@ -424,28 +466,28 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
             def old_core_hook(_module: Any, args: Any):
                 obs_old['train' if old.training else 'test'].core(args[0])
             old_hook = old.model.register_forward_pre_hook(old_core_hook)
-            iterator = enumerate(observed_original(loaders['train'], obs_old['train']))
-            logger = archive.metric.make_logger(str(cell / 'original_tensorboard'), **archive.config.cfg['log'],
-                                               tag=archive.config.cfg['tag'], metric=archive.config.cfg['metric'])
-            old_snaps = {}
-            old_best = None
-            for step in (30, 60):
-                archive.train_model.train(iterator, old, optimizer, scheduler, logger)
-                if archive.config.cfg['step'] != step:
-                    raise ValueError(f'original train stopped at {archive.config.cfg["step"]}, expected {step}')
-                archive.train_model.test(observed_original(loaders['test'], obs_old['test']), old, logger)
-                snapshot = {'step': step, 'model': model_state(old), 'optimizer': cpu_tree(optimizer.state_dict()),
-                            'scheduler': copy.deepcopy(scheduler.state_dict()), 'rng': rng(device),
-                            'observations': {split: item.result() for split, item in obs_old.items()},
-                            'train': {key.split('/')[1]: value for key, value in logger.mean.items() if key.startswith('train/')},
-                            'test': {key.split('/')[1]: value for key, value in logger.mean.items() if key.startswith('test/')}}
-                old_snaps[step] = snapshot
-                torch.save(snapshot, cell / f'original_step_{step}.pt')
-                if logger.compare('test'):
-                    old_best = snapshot
-                logger.reset()
-            old_hook.remove()
-            logger.writer.close()
+            with owned(old_hook, old_hook.remove):
+                iterator = enumerate(observed_original(loaders['train'], obs_old['train'], cancel_check=cancel_check))
+                logger = archive.metric.make_logger(str(cell / 'original_tensorboard'), **archive.config.cfg['log'],
+                                                   tag=archive.config.cfg['tag'], metric=archive.config.cfg['metric'])
+                with owned(logger.writer):
+                    old_snaps = {}
+                    old_best = None
+                    for step in (30, 60):
+                        archive.train_model.train(iterator, old, optimizer, scheduler, logger)
+                        if archive.config.cfg['step'] != step:
+                            raise ValueError(f'original train stopped at {archive.config.cfg["step"]}, expected {step}')
+                        archive.train_model.test(observed_original(loaders['test'], obs_old['test'], cancel_check=cancel_check), old, logger)
+                        snapshot = {'step': step, 'model': model_state(old), 'optimizer': cpu_tree(optimizer.state_dict()),
+                                    'scheduler': copy.deepcopy(scheduler.state_dict()), 'rng': rng(device),
+                                    'observations': {split: item.result() for split, item in obs_old.items()},
+                                    'train': {key.split('/')[1]: value for key, value in logger.mean.items() if key.startswith('train/')},
+                                    'test': {key.split('/')[1]: value for key, value in logger.mean.items() if key.startswith('test/')}}
+                        old_snaps[step] = snapshot
+                        torch.save(snapshot, cell / f'original_step_{step}.pt')
+                        if logger.compare('test'):
+                            old_best = snapshot
+                        logger.reset()
             if old_best is None:
                 raise ValueError('original Loss-best was not selected')
             torch.save(old_best, cell / 'original_best.pt')
@@ -461,14 +503,13 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
                 torch.cuda.set_rng_state_all(initial_rng['cuda'])
             current_init = model_state(model.module)
             current_init_rng = rng(device)
-            obs_new, handles = observe_native(data, model.module)
-            algorithm = CapturedTrain(AlgorithmConfig.from_mapping(mapping()))
-            algorithm.observations = obs_new
-            summary = algorithm.run(data, model, system, tracker)
-            for handle in handles:
-                handle.remove()
-            new_best = cpu_tree(system.load_checkpoint('best'))
-            current_best_path = str(system.checkpoint_dir() / 'best.pt')
+            with observe_native(data, model.module) as obs_new:
+                algorithm = CapturedTrain(AlgorithmConfig.from_mapping(mapping()), checkpoint_dir=checkpoint_dir)
+                algorithm.observations = obs_new
+                summary = algorithm.compute(data, model, system, tracker, cancel_check=cancel_check)
+            from rpipe.structure.artifact.checkpoint import load_snapshot
+            current_best_path = str(checkpoint_dir / 'best.pt')
+            new_best = cpu_tree(load_snapshot(Path(current_best_path)))
             del model, data, system, tracker
             release_memory(device)
             # Original independent eval reconstructs the model/DataLoader and
@@ -482,37 +523,39 @@ def run_pair(workspace: Path, device: str, pair: tuple[str, str], native: tuple[
             eval_loaders = archive.dataset.make_data_loader(datasets, {'train': 250, 'test': 1000})
             eval_logger = archive.metric.make_logger(str(cell / 'original_eval_tensorboard'), **archive.config.cfg['log'],
                                                      tag=archive.config.cfg['tag'], metric=archive.config.cfg['metric'])
-            old_eval_observation = Observations()
-            archive.test_model.test(observed_original(eval_loaders['test'], old_eval_observation), eval_old, eval_logger)
-            old_eval = {key.split('/')[1]: value for key, value in eval_logger.mean.items() if key.startswith('test/')}
-            eval_logger.writer.close()
+            with owned(eval_logger.writer):
+                old_eval_observation = Observations()
+                archive.test_model.test(observed_original(eval_loaders['test'], old_eval_observation, cancel_check=cancel_check), eval_old, eval_logger)
+                old_eval = {key.split('/')[1]: value for key, value in eval_logger.mean.items() if key.startswith('test/')}
             config = seed_runtime(device)
             eval_assets = cell / 'current_eval' / 'assets'
-            eval_data = native_data(workspace, name, eval_assets)
-            eval_model = native_model(eval_data, model_name, eval_assets)
-            eval_observations, eval_handles = observe_native(eval_data, eval_model.module)
-            eval_system = SystemFactory.build(config, eval_assets)
-            eval_tracker = AlgorithmTracker(eval_assets)
-            eval_mapping = mapping()
-            eval_mapping.update(mode='eval', resume_from=current_best_path)
-            eval_summary = EvalAlgorithm(AlgorithmConfig.from_mapping(eval_mapping)).run(eval_data, eval_model, eval_system, eval_tracker)
-            for handle in eval_handles:
-                handle.remove()
-            new_eval = eval_tracker.segment_mean('test')
-            raw = {'old_init': old_init, 'old_init_rng': old_init_rng,
-                'current_init': current_init, 'current_init_rng': current_init_rng,
-                'old_snaps': old_snaps, 'current_snaps': algorithm.snapshots,
-                'old_best': old_best, 'new_best': new_best,
-                'eval_model_state': model_state(eval_model.module),
-                'old_eval': old_eval, 'new_eval': new_eval,
-                'old_eval_observation': old_eval_observation.result(),
-                'eval_observations': {key: item.result() for key, item in eval_observations.items()},
-                'obs_old': {key: item.result() for key, item in obs_old.items()},
-                'obs_new': {key: item.result() for key, item in obs_new.items()},
-                'summary': summary, 'eval_summary': eval_summary,
-                'elapsed_seconds': time.monotonic() - cell_start,
-                'gpu_peak_allocated_bytes': torch.cuda.max_memory_allocated(torch.device(device)) if device.startswith('cuda') else None,
-                'gpu_peak_reserved_bytes': torch.cuda.max_memory_reserved(torch.device(device)) if device.startswith('cuda') else None}
+            with contextlib.ExitStack() as resources:
+                eval_data = resources.enter_context(owned(native_data(workspace, name, eval_assets)))
+                eval_system = build_system(config, eval_assets)
+                resources.enter_context(owned(eval_system.logger))
+                eval_model = resources.enter_context(owned(native_model(eval_data, model_name, eval_assets, system=eval_system)))
+                eval_observations = resources.enter_context(observe_native(eval_data, eval_model.module))
+                eval_tracker = AlgorithmTracker(eval_assets)
+                eval_mapping = mapping()
+                eval_mapping.update(mode='eval', resume_from=current_best_path)
+                eval_summary = EvalAlgorithm(AlgorithmConfig.from_mapping(eval_mapping), checkpoint_dir=(eval_assets / 'checkpoints').resolve()).compute(eval_data, eval_model, eval_system, eval_tracker, cancel_check=cancel_check)
+                new_eval = eval_tracker.segment_mean('test')
+                raw = {'old_init': old_init, 'old_init_rng': old_init_rng,
+                    'current_init': current_init, 'current_init_rng': current_init_rng,
+                    'old_snaps': old_snaps, 'current_snaps': algorithm.snapshots,
+                    'old_best': old_best, 'new_best': new_best,
+                    'eval_model_state': model_state(eval_model.module),
+                    'old_eval': old_eval, 'new_eval': new_eval,
+                    'old_eval_observation': old_eval_observation.result(),
+                    'eval_observations': {key: item.result() for key, item in eval_observations.items()},
+                    'obs_old': {key: item.result() for key, item in obs_old.items()},
+                    'obs_new': {key: item.result() for key, item in obs_new.items()},
+                    'summary': summary, 'eval_summary': eval_summary,
+                    'elapsed_seconds': time.monotonic() - cell_start,
+                    'gpu_peak_allocated_bytes': torch.cuda.max_memory_allocated(torch.device(device)) if device.startswith('cuda') else None,
+                    'gpu_peak_reserved_bytes': torch.cuda.max_memory_reserved(torch.device(device)) if device.startswith('cuda') else None}
+            if not eval_system.logger.diagnostics_complete:
+                native[2].logger.diagnostics_complete = False
             torch.save(raw, cell / 'OBSERVATIONS.pt')
             result['runs'].append({'data': name, 'model': model_name, 'summary': summary,
                                   'elapsed_seconds': raw['elapsed_seconds'],

@@ -1,5 +1,5 @@
 """Stage package exports; implementation lives in run.py."""
 
-from .run import run, write_observed_run
+from .run import run, compare_observed
 
-__all__ = ['run', 'write_observed_run']
+__all__ = ['run', 'compare_observed']
