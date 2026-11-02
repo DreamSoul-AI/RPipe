@@ -126,7 +126,7 @@ def download(url: str, destination: Path, md5: str) -> dict[str, str]:
 
 
 def reuse_caches(data_root: Path, expected: dict[str, str], cache_roots: list[Path]) -> dict[str, str]:
-    from rpipe.structure.artifacts import link_input
+    from rpipe.structure.artifact.io import link_input
     copied = {}
     for relative, expected_hash in expected.items():
         destination = data_root / relative
@@ -231,9 +231,9 @@ def split_counts(data_root: Path) -> dict[str, dict[str, int]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
 
-    from rpipe.structure.artifacts import cache_lock
+    from rpipe.structure.artifact.io import cache_lock
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--data-root', type=Path, required=True)
     parser.add_argument('--manifest', type=Path, required=True)

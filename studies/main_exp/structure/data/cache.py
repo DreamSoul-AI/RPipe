@@ -1,7 +1,7 @@
 """One complete, source-versioned processed cache shared by historical consumers."""
 import hashlib
 
-from rpipe.structure.artifacts import cache_lock, prepared_resource, reference_tree
+from rpipe.structure.artifact.io import cache_lock, prepared_resource, reference_tree
 from ..api import COMMIT, _working_directory
 
 

@@ -55,7 +55,7 @@ exclude = ["examples*", "output*", "data*", "asset*", "build*", "dist*", "tests*
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-q --tb=short --strict-markers"
+addopts = "-q --tb=short --strict-markers --import-mode=importlib"
 filterwarnings = [
   "ignore::DeprecationWarning",
 ]
@@ -81,7 +81,8 @@ markers = [
   "module_cli: flow.cli",
   "module_runner: flow runner / execute",
   "module_process: flow process / collect",
-  "module_plan: pure declaration planning",
+  "module_plan: declaration planning",
+  "module_make: declaration expansion and explicit publication",
   "module_execution: execution ownership and lifecycle",
   "module_readout: read-only evidence and aggregation",
   "runtime: runtime budget",

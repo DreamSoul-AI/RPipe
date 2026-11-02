@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from typing import Any, Mapping
 
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 
 
 SKIP_CTOR_KEYS = frozenset(

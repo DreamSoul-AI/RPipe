@@ -6,7 +6,6 @@ import importlib.abc
 import importlib.machinery
 import importlib.util
 import os
-import pickle
 import site
 import sys
 from dataclasses import dataclass, field
@@ -162,35 +161,6 @@ def _recipe_package(root: Path, recipe_root: Path) -> ModuleType:
         sys.modules[name] = package
     package.__path__[:] = list(dict.fromkeys([str(recipe_root), str(root)]))
     return package
-
-def _recipe_pickle_module(study_dir: Path | str) -> ModuleType | None:
-    package = sys.modules.get(_recipe_namespace(Path(study_dir)))
-    if package is None or not getattr(package, '_recipe_namespace', False):
-        return None
-
-    class RecipeUnpickler(pickle.Unpickler):
-
-        def find_class(self, module_name, name):
-            prefix, separator, local = module_name.partition('.')
-            private = separator and prefix.startswith('_rpipe_recipe_') and (len(prefix) == len('_rpipe_recipe_') + 64) and all((char in '0123456789abcdef' for char in prefix[len('_rpipe_recipe_'):]))
-            qualified = package.__name__ + '.' + (local if private else module_name)
-            if not private:
-                if not _local_module(package, module_name):
-                    return super().find_class(module_name, name)
-                try:
-                    spec = importlib.util.find_spec(qualified)
-                except (ModuleNotFoundError, AttributeError, ValueError):
-                    spec = None
-                if spec is None:
-                    return super().find_class(module_name, name)
-            value = importlib.import_module(qualified)
-            for part in name.split('.'):
-                value = getattr(value, part)
-            return value
-    reader = ModuleType('_rpipe_recipe_pickle')
-    reader.__dict__.update({name: value for name, value in vars(pickle).items() if name != '__name__'})
-    reader.Unpickler = RecipeUnpickler
-    return reader
 
 def load_recipe(study_dir: Path | str, study: dict[str, Any]) -> ModuleType | None:
     if not any(isinstance(finder, _RecipeFinder) for finder in sys.meta_path):

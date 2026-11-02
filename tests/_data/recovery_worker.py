@@ -9,13 +9,13 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, RandomSampler
 
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.tracker import AlgorithmTracker
 from rpipe.structure.algorithm.metrics import MetricBundle
 from rpipe.structure.algorithm.train import TrainAlgorithm
 from rpipe.structure.data.factory import Data
-from rpipe.structure.contracts import SystemConfig
-from rpipe.structure.system.factory import SystemFactory
+from rpipe.structure.control import SystemConfig
+from rpipe.structure.system.factory import build_system
 from rpipe.structure.system.runtime import apply_runtime
 
 root, action, unit, device, period, stop, eval_period, interrupt_step = sys.argv[1:]
@@ -55,18 +55,21 @@ settings = {'mode': 'train', 'progress_unit': unit,
             'eval_period': int(eval_period), 'checkpoint_period': 1, 'early_stop_patience': int(stop) or None}
 if int(stop):
     settings.update(best_split='train', best_metric='Loss', best_mode='min', early_stop_min_delta=100.0)
-system = SystemFactory.build(SystemConfig.from_mapping({'device': device}), root)
-save = system.save_checkpoint
+system = build_system(SystemConfig.from_mapping({'device': device}), root)
+model.module = system.place_module(model.module)
+from rpipe.structure.artifact import checkpoint
+save = checkpoint.save_snapshot
 
 
-def interrupt(payload, name):
-    result = save(payload, name)
+def interrupt(path, payload):
+    result = save(path, payload)
+    name = Path(path).stem
     if action.startswith('interrupt') and name == 'latest' and payload['step'] == (int(interrupt_step) if unit == 'step' else len(loader) // int(period)):
         raise RuntimeError('fixture interruption after committed checkpoint')
     return result
 
 
-system.save_checkpoint = interrupt
+checkpoint.save_snapshot = interrupt
 
 
 class CustomMetrics(MetricBundle):
@@ -75,7 +78,7 @@ class CustomMetrics(MetricBundle):
 
 try:
     tracker = AlgorithmTracker(root, CustomMetrics() if action.endswith('-custom-metrics') else None)
-    result = TrainAlgorithm(AlgorithmConfig.from_mapping(settings)).run(data, model, system, tracker)
+    result = TrainAlgorithm(AlgorithmConfig.from_mapping(settings), checkpoint_dir=root / 'checkpoints').compute(data, model, system, tracker, cancel_check=lambda: None)
 except RuntimeError as exc:
     if str(exc) != 'fixture interruption after committed checkpoint' or not action.startswith('interrupt'):
         raise

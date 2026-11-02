@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from rpipe.structure.artifacts import safe_error_record
-from rpipe.structure.execution import Cancelled
+from rpipe.structure.artifact.io import safe_error_record
+from rpipe.flow.context import Cancelled
 
 pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.structure_layer, pytest.mark.module_algorithm,
@@ -23,7 +23,7 @@ def pair_run(tmp_path, monkeypatch):
     paired = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(paired)
     state = SimpleNamespace(fail=None, error=RuntimeError('operation failed'),
-                            cleanup_fail=set(), silent_logger_failure=False, resources={})
+                            cleanup_fail=set(), silent_logger_failure=False, resources={}, cancel_check=lambda: None)
 
     def at(stage):
         if state.fail == stage:
@@ -72,7 +72,8 @@ def pair_run(tmp_path, monkeypatch):
             self.original_set = self._train_set
             self.original_iter = self.iter_batches
 
-        def iter_batches(self, split):
+        def iter_batches(self, split, *, resumable=True):
+            self.batch_requests = [*getattr(self, 'batch_requests', []), (split, resumable)]
             return iter(())
 
     class Model(Resource):
@@ -85,12 +86,6 @@ def pair_run(tmp_path, monkeypatch):
             at(name)
             self.logger = Resource(name + '_logger')
 
-        def load_checkpoint(self, name):
-            return {}
-
-        def checkpoint_dir(self):
-            return tmp_path
-
     class Tracker:
         def __init__(self, assets=None):
             at('eval_tracker')
@@ -99,15 +94,17 @@ def pair_run(tmp_path, monkeypatch):
             return {'Loss': 0.0}
 
     class Train:
-        def __init__(self, config):
+        def __init__(self, config, *, checkpoint_dir, train_checkpoint_dir=None):
             pass
 
-        def run(self, data, model, system, tracker):
+        def compute(self, data, model, system, tracker, cancel_check):
+            cancel_check()
             at('native_train')
             return {'completed': True}
 
     class Eval(Train):
-        def run(self, data, model, system, tracker):
+        def compute(self, data, model, system, tracker, cancel_check):
+            cancel_check()
             at('native_eval')
             return {'completed': True}
 
@@ -146,7 +143,7 @@ def pair_run(tmp_path, monkeypatch):
         'rpipe.structure.algorithm.evaluation': SimpleNamespace(EvalAlgorithm=Eval),
         'rpipe.structure.algorithm.tracker': SimpleNamespace(AlgorithmTracker=Tracker),
         'rpipe.structure.system.factory': SimpleNamespace(
-            SystemFactory=SimpleNamespace(build=lambda *args: System('eval_system'))),
+            build_system=lambda *args: System('eval_system')),
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.setattr(paired, 'bootstrap', lambda: None)
@@ -157,16 +154,20 @@ def pair_run(tmp_path, monkeypatch):
     monkeypatch.setattr(paired, 'seed_runtime', lambda device: None)
     monkeypatch.setattr(paired, 'release_memory', lambda device: None)
     monkeypatch.setattr(paired, 'cpu_tree', lambda value: value)
+    import rpipe.structure.artifact.checkpoint as checkpoint
+    monkeypatch.setattr(checkpoint, 'load_snapshot', lambda path: {})
     monkeypatch.setattr(paired, 'native_data', lambda *args: Data('eval_data'))
-    monkeypatch.setattr(paired, 'native_model', lambda *args: Model('eval_model'))
+    monkeypatch.setattr(paired, 'native_model', lambda *args, **kwargs: Model('eval_model'))
     monkeypatch.setattr(paired.subprocess, 'check_output', lambda *args, **kwargs: 'fixed-head')
     for filename, body in [('PREPARED.json', {'passed': True}),
                            ('SOURCE_MANIFEST.json', {'files': {}}), ('ENVIRONMENT.json', {})]:
         (tmp_path / filename).write_text(json.dumps(body), encoding='utf-8')
     native = (Data('caller_data'), Model('caller_model'), System('caller_system'),
               Tracker(), {'cpu': None})
-    state.run = lambda: paired.run_pair(tmp_path, 'cpu', ('MNIST', 'linear'), native)
+    state.run = lambda: paired.run_pair(tmp_path, 'cpu', ('MNIST', 'linear'), native,
+                                      cancel_check=state.cancel_check, checkpoint_dir=tmp_path / 'checkpoints')
     state.paired = paired
+    state.archive = archive
     state.native = native
     return state
 
@@ -177,6 +178,17 @@ def assert_released(state):
         if hasattr(resource, 'original_set'):
             assert resource._train_set is resource.original_set
             assert resource.iter_batches == resource.original_iter
+
+
+@pytest.mark.parametrize('resumable', [True, False])
+def test_native_observation_forwards_resumable_choice_and_restores_owned_data(pair_run, resumable):
+    data, model = pair_run.native[:2]
+    with pair_run.paired.observe_native(data, model.module):
+        assert list(data.iter_batches('train', resumable=resumable)) == []
+    assert data.batch_requests == [('train', resumable)]
+    assert data.iter_batches == data.original_iter
+    assert data._train_set is data.original_set
+    assert_released(pair_run)
 
 
 @pytest.mark.parametrize('stage', [
@@ -210,6 +222,50 @@ def test_success_releases_resources_without_closing_the_callers(pair_run):
     assert_released(pair_run)
 
 
+def test_all_reference_loader_callers_receive_the_same_read_only_checker(pair_run, monkeypatch):
+    calls = []
+    original = pair_run.paired.observed_original
+    def observe(loader, observation, *, cancel_check):
+        calls.append(cancel_check)
+        return original(loader, observation, cancel_check=cancel_check)
+    monkeypatch.setattr(pair_run.paired, 'observed_original', observe)
+    pair_run.run()
+    # Train once, test at30/60 and independent evaluation of original best.
+    assert len(calls) == 4 and all(check is pair_run.cancel_check for check in calls)
+    assert_released(pair_run)
+
+
+@pytest.mark.parametrize('stage', ['old_train', 'old_test', 'old_eval'])
+@pytest.mark.parametrize('cleanup_failure', [False, True])
+def test_reference_caller_cancellation_preserves_first_error_and_owned_cleanup(
+        pair_run, stage, cleanup_failure):
+    from rpipe.flow.context import Cancellation
+
+    token = Cancellation()
+    primary = Cancelled('reference caller cancelled')
+    def check():
+        if token.is_set():
+            raise primary
+    pair_run.cancel_check = check
+    def cancel(iterator, *args):
+        token.request()
+        next(iter(iterator))
+        pytest.fail('a cancelled reference loader returned another batch')
+    if stage == 'old_train':
+        pair_run.archive.train_model.train = cancel
+    elif stage == 'old_test':
+        pair_run.archive.train_model.test = cancel
+    else:
+        pair_run.archive.test_model.test = cancel
+    if cleanup_failure:
+        pair_run.cleanup_fail = {'old_eval_writer' if stage == 'old_eval' else 'old_train_writer'}
+    with pytest.raises(Cancelled) as caught:
+        pair_run.run()
+    assert caught.value is primary
+    assert {str(error) for error in getattr(primary, 'cleanup_errors', ())} == pair_run.cleanup_fail
+    assert_released(pair_run)
+
+
 def test_silent_eval_logger_failure_marks_callers_evidence_incomplete(pair_run):
     pair_run.silent_logger_failure = True
     report = pair_run.run()
@@ -239,7 +295,8 @@ def test_primary_and_every_cleanup_failure_survive(pair_run, stage, cleanup_fail
 
 def test_cleanup_failure_without_primary_still_attempts_remaining_resources(pair_run):
     pair_run.cleanup_fail = {'eval_system_logger', 'eval_model_hook', 'eval_data'}
-    with pytest.raises(OSError, match='eval_system_logger') as caught:
+    # System precedes Model construction; the model hook is released first.
+    with pytest.raises(OSError, match='eval_model_hook') as caught:
         pair_run.run()
-    assert {str(item) for item in caught.value.cleanup_errors} == {'eval_model_hook', 'eval_data'}
+    assert {str(item) for item in caught.value.cleanup_errors} == {'eval_system_logger', 'eval_data'}
     assert_released(pair_run)

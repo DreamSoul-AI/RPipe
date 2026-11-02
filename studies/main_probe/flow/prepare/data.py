@@ -61,7 +61,7 @@ def prepare(workspace: Path, source_data: Path, pair: tuple[str, str]) -> dict[s
     runtime_source = verify_runtime()
     source_before = source_manifest()
     copied = verify_raw(source_data, pair[0])
-    from rpipe.structure.artifacts import link_input, reference_tree
+    from rpipe.structure.artifact.io import link_input, reference_tree
     bootstrap()
     import numpy as np
     import torch
@@ -127,8 +127,10 @@ def prepare(workspace: Path, source_data: Path, pair: tuple[str, str]) -> dict[s
                 old_model = archive.model.make_model(archive.config.cfg['model'])
                 old_rng = rng('cpu')
                 old_state = model_state(old_model)
-                seed_runtime('cpu')
-                with owned(native_model(current, model_name, workspace / 'prepare-assets')) as new_model:
+                config = seed_runtime('cpu')
+                from rpipe.structure.system.factory import build_system
+                system = build_system(config, workspace / 'prepare-assets')
+                with owned(system.logger), owned(native_model(current, model_name, workspace / 'prepare-assets', system=system)) as new_model:
                     initial = state_compare(old_state, model_state(new_model.module))
                     initial_rng = rng_equal(old_rng, rng('cpu'))
                     size = tuple(current.meta['data_size'])

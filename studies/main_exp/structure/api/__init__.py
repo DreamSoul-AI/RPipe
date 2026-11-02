@@ -38,7 +38,7 @@ def export_source(archive_root: Path) -> dict[str, Any]:
     archive_root = Path(archive_root).resolve()
     if archive_root.is_relative_to(REPO) or REPO.is_relative_to(archive_root):
         raise ValueError('archive output must be separate from the source checkout')
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
 
     tree = subprocess.check_output(
         ['git', '-c', 'safe.directory=' + str(REPO), 'ls-tree', '--full-tree', '-r', '-z', COMMIT], cwd=REPO

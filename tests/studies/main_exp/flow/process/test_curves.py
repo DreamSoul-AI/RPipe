@@ -18,6 +18,28 @@ pytestmark = [pytest.mark.unit, pytest.mark.content, pytest.mark.p1,
               pytest.mark.result_type('categorical', detail='summary')]
 
 
+def test_checkpoint_summary_reads_committed_safe_snapshot_without_rewriting(tmp_path):
+    from rpipe.structure.artifact.checkpoint import save_snapshot
+    source = Path(__file__).resolve().parents[5] / 'studies/main_exp/flow/process/curves.py'
+    spec = importlib.util.spec_from_file_location('_study_checkpoint_summary', source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    root = tmp_path / 'run'
+    path = root / 'assets/checkpoints/latest.pt'
+    payload = {'step': 80000, 'best_metric': 'Accuracy', 'best_value': 80.,
+               'best_accuracy': 80., 'test_accuracy': 79.,
+               'tracker': {'step': 1200, 'progress': {'step': 80000},
+                           'splits': {'test': {'Accuracy': {'history': [78., 79.]}}}}}
+    save_snapshot(path, payload)
+    before = path.read_bytes()
+    result = module.checkpoint_summary(root, 'latest')
+    assert result == {'path': str(path), 'step': 80000, 'best_metric': 'Accuracy',
+                      'best_value': 80., 'best_accuracy': 80., 'test_accuracy': 79.,
+                      'tracker_step': 1200, 'tracker_progress': {'step': 80000},
+                      'test_history': [78., 79.]}
+    assert path.read_bytes() == before
+
+
 @pytest.fixture
 def study_plot_case(tmp_path, old):
     import matplotlib.pyplot as plt
@@ -219,7 +241,8 @@ def test_study_plot_stream_close_io_keeps_primary_and_success_close_stays_strict
 @pytest.fixture
 def curve_audit_case(tmp_path, monkeypatch):
     """Synthetic 400-point evidence; checkpoint reading never imports Torch."""
-    import rpipe.api
+    from rpipe.structure.artifact import provenance
+    from rpipe.structure.make import plan, publish
 
     source = Path(__file__).resolve().parents[5] / 'studies/main_exp/flow/process/curves.py'
     spec = importlib.util.spec_from_file_location('study_curve_audit_under_test', source)
@@ -228,9 +251,21 @@ def curve_audit_case(tmp_path, monkeypatch):
     monkeypatch.setattr(module, 'DATA_NAMES', ('MNIST',))
     monkeypatch.setattr(module, 'MODEL_NAMES', ('linear',))
     monkeypatch.setattr(module, 'SEEDS', (0,))
-    monkeypatch.setattr(rpipe.api, 'source_digest', lambda path: 'current-source')
-    study = tmp_path / 'research-version'
-    roots = {mode: study / 'runs' / mode for mode in ('train', 'eval')}
+    source_dir = tmp_path / 'source' / 'main_exp'
+    source_dir.mkdir(parents=True)
+    (source_dir / 'study.yaml').write_text(
+        'study: main_exp\nseeds: [0]\naxes:\n  data.name: [MNIST]\n'
+        '  model.name: [linear]\n  algorithm.mode: [train, eval]\n', encoding='utf-8')
+    (source_dir / 'experiment_config.yaml').write_text(
+        'experiment: curve\nversion: research-version\ndata: {name: MNIST, source: stub}\n'
+        'model: {name: linear}\nalgorithm: {mode: train}\nsystem: {device: cpu}\n', encoding='utf-8')
+    specs = plan(source_dir, run_root=tmp_path / 'output')
+    index = publish(specs)
+    refs = {spec.to_config()['algorithm']['mode']: spec.ref for spec in specs}
+    digest = specs[0].source_digest
+    monkeypatch.setattr(provenance, 'source_digest', lambda path: digest)
+    study = specs[0].study_root
+    roots = {mode: ref.run_dir for mode, ref in refs.items()}
     best_path = roots['train'] / 'assets' / 'checkpoints' / 'best.pt'
     best_path.parent.mkdir(parents=True)
     best_path.write_bytes(b'synthetic checkpoint identity; never loaded')
@@ -250,11 +285,13 @@ def curve_audit_case(tmp_path, monkeypatch):
         (tracker / 'tracker_state.json').write_text(json.dumps({
             'splits': {'test': {'Accuracy': {'history': y}}}}), encoding='utf-8')
         (root / 'assets' / 'logs').mkdir()
-        entries[mode] = {'id': mode, 'seed': 0, 'run_dir': mode}
+        entries[mode] = {'id': refs[mode].id, 'seed': 0, 'run_dir': refs[mode].id,
+                         'identity': refs[mode].identity, 'train_id': refs[mode].train_id}
         results[mode] = {
+            'id': refs[mode].id,
             'status': 'succeeded', 'attempt': ('a' if mode == 'train' else 'b') * 32,
             'quality': None, 'evidence_complete': True,
-            'identity': {'id': mode, 'source_digest': 'current-source', 'version': study.name},
+            'identity': refs[mode].identity,
             'metrics': {'accuracy': 80.0, 'best_accuracy': 80.0, 'eval_accuracy': 80.0},
             'execute': {'mode': mode, 'resume_count': 0 if mode == 'train' else 1,
                         'resume_path': None if mode == 'train' else str(best_path),
@@ -268,7 +305,7 @@ def curve_audit_case(tmp_path, monkeypatch):
                  'best_value': 80.0, 'best_accuracy': 80.0, 'test_accuracy': 80.0}}
     monkeypatch.setattr(module, 'checkpoint_summary', lambda root, stem: summaries[stem])
     case = SimpleNamespace(module=module, study=study, roots=roots, entries=entries,
-                           results=results, best_path=best_path,
+                           results=results, best_path=best_path, refs=refs, index=index,
                            reference={'acceptance_contract': {}, 'source_sha': 'historical',
                                       'evidence_type': 'synthetic fixture'})
     for mode in roots:
@@ -281,7 +318,7 @@ def _save_curve_result(case, mode):
     result, root = case.results[mode], case.roots[mode]
     (root / 'result.json').write_text(json.dumps(result), encoding='utf-8')
     record = {'schema': 1, 'identity': result['identity'], 'attempt': result['attempt'],
-              'owner_token': 'fixture-owner', 'phase': 'closing', 'candidate_status': 'succeeded',
+              'owner_token': 'e' * 32, 'phase': 'closing', 'candidate_status': 'succeeded',
               'quality': None, 'evidence_complete': True, 'scientific_result_published': True,
               'derived_status': 'succeeded', 'error': None, 'cleanup_errors': [], 'cancelled': False}
     outcome = root / 'attempts' / record['attempt'] / 'outcome.json'
@@ -291,9 +328,10 @@ def _save_curve_result(case, mode):
 
 
 def _save_curve_index(case):
-    (case.study / 'index.json').write_text(json.dumps({'experiments': [
-        {'factors': {'data.name': 'MNIST', 'model.name': 'linear', 'algorithm.mode': mode},
-         'runs': [case.entries[mode]]} for mode in ('train', 'eval')]}), encoding='utf-8')
+    index = json.loads(json.dumps(case.index))
+    for group in index['experiments']:
+        group['runs'] = [case.entries[group['factors']['algorithm.mode']]]
+    (case.study / 'index.json').write_text(json.dumps(index), encoding='utf-8')
 
 
 def _write_curve_jsonl(case, mode, filename='events.jsonl', *, restored=True):
@@ -301,24 +339,21 @@ def _write_curve_jsonl(case, mode, filename='events.jsonl', *, restored=True):
            'event': 'checkpoint.restored' if mode == 'eval' and restored else 'task.succeeded',
            'logger': 'rpipe.test', 'message': 'synthetic diagnostic',
            'app_name': 'rpipe', 'app_version': 'test', 'runtime_id': 'runtime-a',
-           'pid': 123, 'process_name': 'synthetic-worker', 'task_id': mode,
+           'pid': 123, 'process_name': 'synthetic-worker', 'task_id': case.refs[mode].id,
            'attempt_id': case.results[mode]['attempt']}
     path = case.roots[mode] / 'assets' / 'logs' / filename
     path.write_text(json.dumps(row) + '\n', encoding='utf-8')
     return path
 
 
-def _write_curve_legacy_logs(case):
-    (case.roots['train'] / 'assets' / 'logs' / 'run.log').write_text(
-        'historical training diagnostic\n', encoding='utf-8')
-    (case.roots['eval'] / 'assets' / 'logs' / 'run.log').write_text(
-        f'[resume] target={case.best_path} epoch=0 step=400\n'
-        f'[split] test resume_path={case.best_path} step=400\n', encoding='utf-8')
+def _write_curve_jsonl_pair(case):
+    for mode in ('train', 'eval'):
+        _write_curve_jsonl(case, mode)
 
 
 def _inspect_curve(case, mode):
-    return case.module.inspect_run(case.study, case.entries[mode], 'MNIST', 'linear', mode, 0,
-                                   expected_source='current-source')
+    return case.module.inspect_run(case.refs[mode], 'MNIST', 'linear', mode,
+                                   expected_source=case.refs[mode].source_digest)
 
 
 @pytest.mark.parametrize('filename', ['events.jsonl', 'events.1.jsonl'])
@@ -337,7 +372,7 @@ def test_curve_inspection_accepts_jsonl_without_legacy_log(curve_audit_case, fil
 @pytest.mark.parametrize('count', [1, -1, True, 0.0, '0', None])
 def test_curve_train_rejects_restored_or_invalid_scientific_count(curve_audit_case, count):
     case = curve_audit_case
-    _write_curve_legacy_logs(case)
+    _write_curve_jsonl_pair(case)
     case.results['train']['execute']['resume_count'] = count
     _save_curve_result(case, 'train')
     assert _inspect_curve(case, 'train')['errors']
@@ -345,7 +380,7 @@ def test_curve_train_rejects_restored_or_invalid_scientific_count(curve_audit_ca
 
 def test_curve_train_rejects_scientific_resume_path_at_zero_count(curve_audit_case):
     case = curve_audit_case
-    _write_curve_legacy_logs(case)
+    _write_curve_jsonl_pair(case)
     case.results['train']['execute']['resume_path'] = str(case.best_path)
     _save_curve_result(case, 'train')
     assert _inspect_curve(case, 'train')['errors']
@@ -354,7 +389,7 @@ def test_curve_train_rejects_scientific_resume_path_at_zero_count(curve_audit_ca
 @pytest.mark.parametrize('missing', ['execute', 'resume_count', 'resume_path', 'step'])
 def test_curve_forged_diagnostics_cannot_fill_scientific_resume_fields(curve_audit_case, missing):
     case = curve_audit_case
-    _write_curve_legacy_logs(case)
+    _write_curve_jsonl_pair(case)
     _write_curve_jsonl(case, 'train')
     _write_curve_jsonl(case, 'eval')
     if missing == 'execute':
@@ -377,7 +412,7 @@ def test_curve_forged_diagnostics_cannot_fill_scientific_resume_fields(curve_aud
     ('step', 200), ('step', True), ('step', 400.0)])
 def test_curve_eval_rejects_wrong_scientific_best_source(curve_audit_case, field, value):
     case = curve_audit_case
-    _write_curve_legacy_logs(case)
+    _write_curve_jsonl_pair(case)
     case.results['eval']['execute'][field] = value
     _save_curve_result(case, 'eval')
     report = case.module.compare(case.study, case.reference)
@@ -387,7 +422,7 @@ def test_curve_eval_rejects_wrong_scientific_best_source(curve_audit_case, field
     assert all(not row['gates_applied'] for row in report['experiments'])
 
 
-def test_curve_eval_matches_scientific_best_using_actual_run_directory(curve_audit_case):
+def test_curve_eval_rejects_nonformal_run_directory_without_mutating_inputs(curve_audit_case):
     case = curve_audit_case
     relocated = case.roots['eval'].with_name('eval-artifacts')
     case.roots['eval'].rename(relocated)
@@ -397,12 +432,8 @@ def test_curve_eval_matches_scientific_best_using_actual_run_directory(curve_aud
     for mode in ('train', 'eval'):
         _write_curve_jsonl(case, mode)
     before = {path: path.read_bytes() for path in case.study.rglob('*') if path.is_file()}
-    report = case.module.compare(case.study, case.reference)
-    evaluation = next(row for row in report['runs'] if row['mode'] == 'eval')
-    assert report['errors'] == []
-    assert evaluation['best_source_audit']['passed'] is True
-    assert evaluation['best_source_audit']['eval_loads_matching_train_best'] is True
-    assert not report['complete'] and not report['final_gates_applied']
+    with pytest.raises(ValueError, match='location does not match'):
+        case.module.compare(case.study, case.reference)
     assert {path: path.read_bytes() for path in case.study.rglob('*') if path.is_file()} == before
 
 
@@ -410,7 +441,7 @@ def test_curve_eval_matches_scientific_best_using_actual_run_directory(curve_aud
                                         ('source_digest', 'old-source'), ('version', 'old-version')])
 def test_curve_eval_identity_must_match_current_research_source(curve_audit_case, field, value):
     case = curve_audit_case
-    _write_curve_legacy_logs(case)
+    _write_curve_jsonl_pair(case)
     case.results['eval']['identity'][field] = value
     _save_curve_result(case, 'eval')
     report = case.module.compare(case.study, case.reference)
@@ -494,7 +525,7 @@ def test_curve_closed_execution_has_complete_evidence(curve_audit_case):
     ('owner', 'unknown', True), ('candidate_failed', 'failed', False),
     ('outcome_mismatch', 'unknown', False), ('outcome_typed', 'unknown', False),
     ('outcome_missing', 'unknown', False), ('invalid_attempt', 'unknown', False),
-    ('identity_mismatch', 'unknown', False), ('legacy', 'legacy', False)])
+    ('identity_mismatch', 'unreadable', False), ('missing_execution', 'unknown', False)])
 def test_curve_execution_projection_preserves_science_without_final_gate(
         curve_audit_case, damage, status, busy):
     case = curve_audit_case
@@ -520,20 +551,56 @@ def test_curve_execution_projection_preserves_science_without_final_gate(
     elif damage == 'invalid_attempt':
         index.write_text(json.dumps({**record, 'attempt': 'x' * 32}), encoding='utf-8')
     elif damage == 'identity_mismatch':
-        record['identity'] = {**record['identity'], 'source_digest': 'another-source'}
+        record['identity'] = {**record['identity'], 'source_digest': 'f' * 64}
         index.write_text(json.dumps(record), encoding='utf-8')
         outcome.write_text(json.dumps(record), encoding='utf-8')
     else:
         index.unlink()
     before = {path: path.read_bytes() for path in case.study.rglob('*') if path.is_file()}
+    if damage == 'identity_mismatch':
+        with pytest.raises(ValueError):
+            _inspect_curve(case, 'eval')
+        report = case.module.compare(case.study, case.reference)
+        assert any(row['status'] == 'unreadable' for row in report['runs'])
+        assert report['errors'] and not report['final_gates_applied']
+        assert {path: path.read_bytes() for path in case.study.rglob('*') if path.is_file()} == before
+        return
     row = _inspect_curve(case, 'eval')
     assert row['status'] == status and row['busy'] is busy
     assert row['scientific_status'] == 'succeeded' and row['evidence_complete'] is False
-    if damage == 'legacy':
-        assert row['execution_status'] == 'legacy_unindexed'
+    if damage == 'missing_execution':
+        assert row['execution_status'] == 'missing_execution'
     assert row['metrics'] == case.results['eval']['metrics']
     assert row['optimizer_steps'] == [400] and row['accuracy_pct'] == [80.0]
     report = case.module.compare(case.study, case.reference)
     assert report['errors'] and not report['complete'] and not report['final_gates_applied']
     assert all(not experiment['gates_applied'] for experiment in report['experiments'])
+    assert {path: path.read_bytes() for path in case.study.rglob('*') if path.is_file()} == before
+
+
+def test_curve_legacy_log_cannot_supply_current_diagnostics(curve_audit_case):
+    case = curve_audit_case
+    for root in case.roots.values():
+        (root / 'assets/logs/run.log').write_text('[resume] historical only\n', encoding='utf-8')
+    before = {path: path.read_bytes() for path in case.study.rglob('*') if path.is_file()}
+    report = case.module.compare(case.study, case.reference)
+    assert all(row['diagnostic_format'] == 'missing' and row['errors'] for row in report['runs'])
+    assert not report['complete'] and not report['final_gates_applied']
+    assert {path: path.read_bytes() for path in case.study.rglob('*') if path.is_file()} == before
+
+
+@pytest.mark.parametrize('damage', ['old_index', 'config_digest', 'duplicate'])
+def test_curve_rejects_unbound_plan_before_inspecting_research(curve_audit_case, damage):
+    case = curve_audit_case
+    index = json.loads((case.study / 'index.json').read_text(encoding='utf-8'))
+    if damage == 'old_index':
+        index.pop('schema')
+    elif damage == 'config_digest':
+        index['experiments'][0]['runs'][0]['identity']['config_digest'] = 'f' * 64
+    else:
+        index['experiments'].append(index['experiments'][0])
+    (case.study / 'index.json').write_text(json.dumps(index), encoding='utf-8')
+    before = {path: path.read_bytes() for path in case.study.rglob('*') if path.is_file()}
+    with pytest.raises(ValueError):
+        case.module.compare(case.study, case.reference)
     assert {path: path.read_bytes() for path in case.study.rglob('*') if path.is_file()} == before

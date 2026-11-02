@@ -10,6 +10,26 @@ import stat
 import time
 
 
+class WindowsFileErrors:
+    """Capture the observing thread's Win32 file error retained by the CRT."""
+
+    def __init__(self):
+        if os.name != 'nt':
+            raise OSError('Windows CRT file errors require Windows')
+        self.crt = ctypes.CDLL('ucrtbase')
+        self.crt._set_doserrno.argtypes = [ctypes.c_ulong]
+        self.crt._set_doserrno.restype = ctypes.c_int
+        self.crt._get_doserrno.argtypes = [ctypes.POINTER(ctypes.c_ulong)]
+        self.crt._get_doserrno.restype = ctypes.c_int
+        self._value = ctypes.c_ulong()
+
+    def clear(self) -> bool:
+        return self.crt._set_doserrno(0) == 0
+
+    def code(self) -> int | None:
+        return self._value.value if self.crt._get_doserrno(ctypes.byref(self._value)) == 0 else None
+
+
 class _BasicLimits(ctypes.Structure):
     _fields_ = [('process_time', ctypes.c_longlong), ('job_time', ctypes.c_longlong),
                 ('flags', wintypes.DWORD), ('minimum_ws', ctypes.c_size_t),
@@ -37,9 +57,9 @@ class _MemoryCounters(ctypes.Structure):
 
 
 class WindowsJob:
-    """Anonymous kill-on-close Job; RSS is sampled, not a commit-memory limit."""
+    """Owned kill-on-close Job; RSS is sampled, not a commit-memory limit."""
 
-    def __init__(self):
+    def __init__(self, *, name: str | None = None):
         if os.name != 'nt':
             raise OSError('Windows Job supervision requires Windows')
         # Adapted from cpu-memory-cleanup 17c5363f06b548a63a47b98efcd118476cfedcb7
@@ -56,17 +76,20 @@ class WindowsJob:
             'IsProcessInJob': ([wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)], wintypes.BOOL),
             'CloseHandle': ([wintypes.HANDLE], wintypes.BOOL),
         }
-        for name, (args, result) in signatures.items():
-            function = getattr(self.kernel, name)
+        for function_name, (args, result) in signatures.items():
+            function = getattr(self.kernel, function_name)
             function.argtypes, function.restype = args, result
         self.psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD]
         self.psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
-        self.handle = self.kernel.CreateJobObjectW(None, None)
+        self.handle = self.kernel.CreateJobObjectW(None, name)
+        existed = ctypes.get_last_error() == 183 if name is not None else False
         if not self.handle:
             raise ctypes.WinError(ctypes.get_last_error())
         limits = _ExtendedLimits()
         limits.basic.flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         try:
+            if existed:
+                raise FileExistsError('the selected Windows Job already exists')
             if not self.kernel.SetInformationJobObject(self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
                 raise ctypes.WinError(ctypes.get_last_error())
         except BaseException as primary:
@@ -84,7 +107,12 @@ class WindowsJob:
         """Assign a still-gated Popen child before allowing its work to start."""
         self._require_open()
         if not self.kernel.AssignProcessToJobObject(self.handle, int(process._handle)):
-            raise ctypes.WinError(ctypes.get_last_error())
+            error = ctypes.WinError(ctypes.get_last_error())
+            # The actual interpreter can already have opened and joined this Job.
+            member = wintypes.BOOL()
+            if (not self.kernel.IsProcessInJob(int(process._handle), self.handle, ctypes.byref(member))
+                    or not member.value):
+                raise error
 
     def pids(self) -> tuple[int, ...]:
         self._require_open()
@@ -164,6 +192,42 @@ class WindowsJob:
             self.handle = None
 
 
+def join_windows_job(job_name: str) -> None:
+    """Open the launch Job before scientific imports; close the local handle."""
+    if os.name != 'nt' or not isinstance(job_name, str) or not job_name.startswith('Local\\RPipe-'):
+        raise ValueError('an explicit Windows worker Job name is required')
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    signatures = {
+        'GetCurrentProcess': ([], wintypes.HANDLE),
+        'OpenJobObjectW': ([wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR], wintypes.HANDLE),
+        'IsProcessInJob': ([wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)], wintypes.BOOL),
+        'AssignProcessToJobObject': ([wintypes.HANDLE, wintypes.HANDLE], wintypes.BOOL),
+        'CloseHandle': ([wintypes.HANDLE], wintypes.BOOL),
+    }
+    for name, (args, result) in signatures.items():
+        function = getattr(kernel, name)
+        function.argtypes, function.restype = args, result
+    handle = kernel.OpenJobObjectW(0x5, False, job_name)  # ASSIGN_PROCESS | QUERY
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    primary = None
+    try:
+        current, member = kernel.GetCurrentProcess(), wintypes.BOOL()
+        if not kernel.IsProcessInJob(current, handle, ctypes.byref(member)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not member.value and not kernel.AssignProcessToJobObject(handle, current):
+            raise ctypes.WinError(ctypes.get_last_error())
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        if not kernel.CloseHandle(handle):
+            cleanup = ctypes.WinError(ctypes.get_last_error())
+            if primary is None:
+                raise cleanup
+            primary.cleanup_errors = (*getattr(primary, 'cleanup_errors', ()), cleanup)
+
+
 def _output_info(path):
     try:
         info = path.lstat()
@@ -171,7 +235,15 @@ def _output_info(path):
         return None
     if stat.S_ISLNK(info.st_mode):
         # Input references may be file symlinks; only inspect their target metadata.
-        target = path.stat()
+        try:
+            target = path.stat()
+        except FileNotFoundError:
+            # Atomic publication may move the reference between the two reads.
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return None
+            raise
         if not stat.S_ISREG(target.st_mode):
             raise OSError(f'directory or unsupported output link: {path}')
         return target

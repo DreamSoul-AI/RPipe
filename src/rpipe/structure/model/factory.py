@@ -6,8 +6,9 @@ import math
 from pathlib import Path
 from typing import Any, Callable
 
-from rpipe.structure.contracts import ModelConfig
-from rpipe.structure.artifacts import cache_lock
+from rpipe.structure.control import ModelConfig
+from rpipe.structure.api import ModelPort, SystemPort
+from rpipe.structure.artifact.io import cache_lock
 from rpipe.structure.system.origin import apply_model_origin, normalize_origin
 
 
@@ -29,18 +30,39 @@ def init_param(m: Any) -> Any:
     return m
 
 
+def _positive_dimension(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f'{name} must be a positive integer')
+    return value
+
+
+def _input_shape(value: Any) -> tuple[int, ...]:
+    if not isinstance(value, (list, tuple)) or not value:
+        raise ValueError('data_size must contain positive integer dimensions')
+    return tuple(_positive_dimension(dimension, 'data_size') for dimension in value)
+
+
 def resolve_shape(cfg: dict[str, Any], data_meta: dict[str, Any] | None) -> tuple[tuple[int, ...], int]:
-    meta = dict(data_meta or {})
-    target_size = int(cfg.get('target_size') or cfg.get('out_features') or meta.get('target_size') or 10)
-    if cfg.get('data_size') is not None:
-        data_size = tuple(int(x) for x in cfg['data_size'])
-    elif meta.get('data_size') is not None:
-        data_size = tuple(int(x) for x in meta['data_size'])
-    elif cfg.get('in_features') is not None:
-        data_size = (int(cfg['in_features']),)
-    else:
-        data_size = (1, 28, 28)
-    return data_size, target_size
+    if data_meta is not None and not isinstance(data_meta, dict):
+        raise ValueError('data_meta must be a mapping')
+    meta = data_meta or {}
+    explicit = _input_shape(cfg['data_size']) if cfg.get('data_size') is not None else None
+    observed = _input_shape(meta['data_size']) if meta.get('data_size') is not None else None
+    if explicit is not None and observed is not None and explicit != observed:
+        raise ValueError('data_size conflicts with actual data metadata; transform the data explicitly')
+    features = (_positive_dimension(cfg['in_features'], 'in_features')
+                if cfg.get('in_features') is not None else None)
+    data_size = explicit if explicit is not None else observed
+    if data_size is None:
+        data_size = (features,) if features is not None else (1, 28, 28)
+    if features is not None and math.prod(data_size) != features:
+        raise ValueError('in_features must match the flattened input size')
+    targets = [_positive_dimension(body[name], name)
+               for body, name in ((cfg, 'target_size'), (cfg, 'out_features'), (meta, 'target_size'))
+               if body.get(name) is not None]
+    if len(set(targets)) > 1:
+        raise ValueError('target_size/out_features conflicts with actual target metadata')
+    return data_size, targets[0] if targets else 10
 
 
 class Model:
@@ -81,29 +103,32 @@ class ModelRegistry:
         return sorted(cls._items)
 
 
-class ModelFactory:
-    @staticmethod
-    def build(
-        model_config: ModelConfig,
-        assets_dir: Path | str,
-        data_meta: dict[str, Any] | None = None,
-        origin: str | None = None,
-    ) -> Model:
-        name = model_config.name
-        source = model_config.source if model_config.source is not None else 'custom_torch'
-        builder = ModelRegistry.get(name, source)
-        if builder is None:
-            raise ValueError(f'unknown model name/source: {name!r}/{source!r}')
-        if origin not in (None, ''):
-            apply_model_origin(origin)
-        with cache_lock(assets_dir):
-            model = builder(model_config, Path(assets_dir), data_meta=data_meta)
-        model.module = _attach_input_norm(model.module, data_meta)
-        if origin not in (None, ''):
-            chosen = normalize_origin(origin)
-            model.meta['origin'] = chosen
-            model.meta['hub'] = apply_model_origin(chosen)
-        return model
+def build_model(
+    model_config: ModelConfig,
+    assets_dir: Path | str,
+    *,
+    data_meta: dict[str, Any] | None,
+    system: SystemPort,
+    origin: str | None = None,
+) -> ModelPort:
+    name = model_config.name
+    source = model_config.source if model_config.source is not None else 'custom_torch'
+    builder = ModelRegistry.get(name, source)
+    if builder is None:
+        raise ValueError(f'unknown model name/source: {name!r}/{source!r}')
+    resolve_shape(model_config.config, data_meta)
+    if origin not in (None, ''):
+        apply_model_origin(origin)
+    with cache_lock(assets_dir):
+        model = builder(model_config, Path(assets_dir), data_meta=data_meta)
+    model.module = _attach_input_norm(model.module, data_meta)
+    if origin not in (None, ''):
+        chosen = normalize_origin(origin)
+        model.meta['origin'] = chosen
+        model.meta['hub'] = apply_model_origin(chosen)
+    if model.module is not None:
+        model.module = system.place_module(model.module)
+    return model
 
 
 def _attach_input_norm(module: Any, data_meta: dict[str, Any] | None) -> Any:

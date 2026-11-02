@@ -17,25 +17,24 @@ def test_hf_two_step_training_publishes_own_best_for_independent_eval(tensor_stu
     pytest.importorskip('transformers')
     pytest.importorskip('accelerate')
     import yaml
-    from rpipe.api import plan, read_run, run
-    from rpipe.flow.huggingface import HuggingFaceRun
-    from rpipe.structure.system.factory import SystemFactory
-    from rpipe.structure.contracts import SystemConfig
+    from rpipe.structure.make import plan
+    from rpipe.structure.artifact.readout import read_run
+    from rpipe.flow.run import run
 
     path = tensor_study / 'experiment_config.yaml'
-    config = yaml.safe_load(path.read_text())
+    config = yaml.safe_load(path.read_text(encoding='utf-8'))
     config['algorithm']['source'] = 'transformers_trainer'
     path.write_text(yaml.safe_dump(config), encoding='utf-8')
     train, evaluate = plan(tensor_study, run_root=run_root)
-    outcome = run(train, payload=HuggingFaceRun())
+    outcome = run(train)
     assert outcome.status == 'succeeded', outcome.error
-    assert read_run(train)['execute']['steps'] == 2
-    system = SystemFactory.build(SystemConfig.from_mapping({'device': 'cpu'}), train.assets_dir)
-    best = system.load_checkpoint('best')
+    assert read_run(train.ref)['execute']['steps'] == 2
+    from rpipe.structure.artifact.checkpoint import load_snapshot
+    best = load_snapshot(train.assets_dir / 'checkpoints/best.pt')
     assert best is not None
-    evaluated = run(evaluate, payload=HuggingFaceRun())
+    evaluated = run(evaluate)
     assert evaluated.status == 'succeeded', evaluated.error
-    assert read_run(evaluate)['execute']['step'] == best['step']
+    assert read_run(evaluate.ref)['execute']['step'] == best['step']
 
 
 def test_missing_hf_dependency_does_not_block_planning_or_reading(source_study, run_root, tmp_path):
@@ -45,12 +44,11 @@ class NoHF(importlib.abc.MetaPathFinder):
         if fullname.split('.')[0] in {'transformers', 'datasets', 'accelerate'}:
             raise ModuleNotFoundError('optional dependency absent: ' + fullname)
 sys.meta_path.insert(0, NoHF())
-from rpipe.api import plan, read_run, report
-from rpipe.flow.huggingface import HuggingFaceRun
+from rpipe.structure.make import plan
+from rpipe.structure.artifact.readout import read_run, report
 specs = plan(sys.argv[1], run_root=sys.argv[2])
-assert read_run(specs[0])['status'] == 'missing'
-assert specs[0].id in report(specs)
-assert HuggingFaceRun is not None
+assert read_run(specs[0].ref)['status'] == 'missing'
+assert specs[0].id in report(spec.ref for spec in specs)
 '''
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
     env['PYTHONPATH'] = str(Path(__file__).resolve().parents[3] / 'src')

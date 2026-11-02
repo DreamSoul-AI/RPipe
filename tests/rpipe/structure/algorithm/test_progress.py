@@ -11,7 +11,7 @@ pytestmark = [
 ]
 
 
-from rpipe.structure.contracts import AlgorithmConfig
+from rpipe.structure.control import AlgorithmConfig
 from rpipe.structure.algorithm.progress import checkpoint_names, crossed_percents, due_period, format_hms, infer_steps_per_epoch, parse_checkpoint_mode, remaining_seconds, resolve_budget, snapshot_name
 
 
@@ -41,17 +41,22 @@ def test_budget_step_period_counts_optimizer_steps():
     assert budget.steps_per_epoch == 3
 
 
-def test_budget_epochs_overwrite_steps_when_inferred():
-    budget = resolve_budget(
-        AlgorithmConfig.from_mapping({'mode': 'train', 'num_epochs': 20, 'num_steps': 1000}),
-        steps_per_epoch=5,
-    )
+@pytest.mark.parametrize('unit', [None, 'step', 'epoch'])
+@pytest.mark.parametrize('steps_per_epoch', [None, 2])
+def test_budget_rejects_two_explicit_budgets(unit, steps_per_epoch):
+    config = AlgorithmConfig.from_mapping({'mode': 'train', 'num_epochs': 20,
+                                          'num_steps': 2, 'progress_unit': unit})
+    with pytest.raises(ValueError, match='num_epochs.*num_steps'):
+        resolve_budget(config, steps_per_epoch=steps_per_epoch)
+
+
+def test_budget_epoch_input_derives_steps_without_second_input():
+    budget = resolve_budget(AlgorithmConfig.from_mapping({'mode': 'train', 'num_epochs': 20}),
+                            steps_per_epoch=5)
     assert budget.unit == 'step'
-    assert budget.num_steps == 100
-    assert budget.total == 100
-    assert budget.steps_from_epochs is True
-    assert budget.steps_per_epoch == 5
-    assert budget.progress(epoch=3, step=50) == 50
+    assert budget.num_epochs == 20 and budget.num_steps == 100
+    assert budget.total == 100 and budget.steps_from_epochs is True
+    assert budget.scheduler_t_max() == 100
 
 
 def test_budget_can_still_use_epoch_unit():
@@ -174,3 +179,11 @@ def test_percent_crossing_keeps_original_iterator_failure():
     with pytest.raises(OSError) as raised:
         crossed_percents(2, 4, broken(), set())
     assert raised.value is failure
+
+from rpipe.structure.algorithm.progress import due_period
+
+def test_due_eval_period_cadence():
+    assert due_period(1, 1) is True
+    assert due_period(2, 1) is False
+    assert due_period(2, 2) is True
+    assert due_period(0, 1) is False

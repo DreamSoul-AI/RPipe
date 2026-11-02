@@ -88,11 +88,11 @@ def test_discard_bad_archive_removes_partial_and_keeps_matching_md5(tmp_path: Pa
 
 
 @pytest.mark.parametrize('kind', ['model', 'data'])
-def test_domestic_origin_is_set_before_registered_builder(monkeypatch, tmp_path, kind):
-    from rpipe.structure.model.factory import Model, ModelFactory, ModelRegistry
-    from rpipe.structure.contracts import ModelConfig
-    from rpipe.structure.data.factory import Data, DataFactory, DataRegistry
-    from rpipe.structure.contracts import DataConfig
+def test_domestic_origin_is_set_before_registered_builder(monkeypatch, tmp_path, kind, model_system):
+    from rpipe.structure.model.factory import Model, build_model, ModelRegistry
+    from rpipe.structure.control import ModelConfig
+    from rpipe.structure.data.factory import Data, build_data, DataRegistry
+    from rpipe.structure.control import DataConfig
 
     monkeypatch.setenv('HF_ENDPOINT', 'https://example.invalid')
     seen = []
@@ -103,8 +103,11 @@ def test_domestic_origin_is_set_before_registered_builder(monkeypatch, tmp_path,
         return Data(name='routing-test', source='test', loaders={}, meta={})
     registry = ModelRegistry if kind == 'model' else DataRegistry
     monkeypatch.setitem(registry._items, ('routing-test', 'test'), builder)
-    factory, config = (ModelFactory, ModelConfig) if kind == 'model' else (DataFactory, DataConfig)
-    factory.build(config(name='routing-test', source='test'), tmp_path, origin='domestic')
+    if kind == 'model':
+        build_model(ModelConfig(name='routing-test', source='test'), tmp_path,
+                    data_meta=None, system=model_system, origin='domestic')
+    else:
+        build_data(DataConfig(name='routing-test', source='test'), tmp_path, origin='domestic')
     assert seen == ['https://hf-mirror.com']
 
 

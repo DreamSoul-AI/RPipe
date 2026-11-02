@@ -20,7 +20,7 @@ import unicodedata
 import uuid
 
 from rpipe import __version__
-from rpipe.structure.artifacts import _owned_stream, cache_lock
+from rpipe.structure.artifact.io import _owned_stream, cache_lock
 
 _RUNTIME_ID = uuid.uuid4().hex
 _TOKEN = re.compile(r'^\w[\w.:-]{0,127}$')
@@ -239,8 +239,7 @@ class Logger:
         self._emit('DEBUG', event, message, **fields)
 
     def info(self, message: str, *, event: str = 'operation.observed', **fields: Any) -> None:
-        aliases = {'ckpt': 'checkpoint.saved', 'resume': 'checkpoint.restored'}
-        self._emit('INFO', aliases.get(event, event), message, **fields)
+        self._emit('INFO', event, message, **fields)
 
     def warning(self, message: str, *, event: str = 'operation.degraded', **fields: Any) -> None:
         self._emit('WARNING', event, message, **fields)
@@ -253,7 +252,7 @@ class Logger:
 
     def exception(self, message: str, exc: BaseException | dict[str, Any], *, event: str = 'task.failed', **fields: Any) -> None:
         try:
-            from rpipe.structure.artifacts import safe_error_record
+            from rpipe.structure.artifact.io import safe_error_record
             error = safe_error_record(exc)
             chain = error.get('traceback', '')
             causes = list(error.get('causes', []))
@@ -312,9 +311,3 @@ class Logger:
                 self._send(self._record('WARNING', 'logging.sink_failed', 'Log retention cleanup unavailable',
                                         {'sink': 'file', 'operation': 'retention_cleanup',
                                          'drop_reason': 'cleanup_unconfirmed'}), {'stdout'})
-
-    def state_dict(self) -> dict[str, Any]:
-        return {'path': str(self.path)}
-
-    def load_state_dict(self, state: dict[str, Any] | None) -> None:
-        del state

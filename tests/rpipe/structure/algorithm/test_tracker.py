@@ -70,18 +70,20 @@ def test_checkpoint_preserves_accumulator_without_mean_round_trip(tmp_path):
     assert restored.state_dict()['splits'] == state['splits']
 
 
-def test_legacy_tracker_without_accumulator_still_loads(tmp_path):
+def test_incomplete_tracker_accumulator_is_rejected_before_mutation(tmp_path):
     tracker = AlgorithmTracker(tmp_path)
     tracker.append('train', n=3, values={'Loss': 2.0})
     state = tracker.state_dict()
     state['splits']['train']['Loss'].pop('weighted_sum')
     restored = AlgorithmTracker(tmp_path / 'restored')
-    restored.load_state_dict(state)
-    assert restored.mean('train')['Loss'] == 2.0
+    before = restored.state_dict()
+    with pytest.raises(ValueError, match='tracker accumulation'):
+        restored.load_state_dict(state)
+    assert restored.state_dict() == before
 
 
 def test_tracker_constructor_preserves_evidence_arriving_before_open(tmp_path, monkeypatch):
-    from rpipe.structure import artifacts as kinds
+    from rpipe.structure.artifact import io as kinds
 
     target = tmp_path / kinds.TRACKER_JSONL
     native = Path.open
@@ -101,7 +103,7 @@ def test_tracker_constructor_preserves_evidence_arriving_before_open(tmp_path, m
 
 
 def test_tracker_constructor_still_rejects_directory(tmp_path):
-    from rpipe.structure import artifacts as kinds
+    from rpipe.structure.artifact import io as kinds
 
     target = tmp_path / kinds.TRACKER_JSONL
     target.mkdir(parents=True)
@@ -110,7 +112,7 @@ def test_tracker_constructor_still_rejects_directory(tmp_path):
 
 
 def test_tracker_constructor_does_not_reopen_existing_evidence(tmp_path, monkeypatch):
-    from rpipe.structure import artifacts as kinds
+    from rpipe.structure.artifact import io as kinds
 
     target = tmp_path / kinds.TRACKER_JSONL
     target.parent.mkdir(parents=True)
@@ -130,7 +132,7 @@ def test_tracker_constructor_does_not_reopen_existing_evidence(tmp_path, monkeyp
 
 def test_tracker_append_initialization_keeps_checkpoint_raw_suffix_and_marker(tmp_path):
     import json
-    from rpipe.structure import artifacts as kinds
+    from rpipe.structure.artifact import io as kinds
 
     path = tmp_path / kinds.TRACKER_JSONL
     path.parent.mkdir(parents=True)

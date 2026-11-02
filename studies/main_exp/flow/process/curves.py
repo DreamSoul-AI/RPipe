@@ -86,15 +86,13 @@ def read_tracker(root):
 
 
 def checkpoint_summary(root, stem):
-    """Read committed bundle; the split JSON mirror is not authoritative."""
-    import torch
+    """Read the explicitly selected committed snapshot."""
+    from rpipe.structure.artifact.checkpoint import load_snapshot
 
     path = root / 'assets' / 'checkpoints' / f'{stem}.pt'
     if not path.is_file():
         return None
-    body = torch.load(path, map_location='cpu', weights_only=False)
-    if not isinstance(body, dict):
-        raise ValueError(f'{path}: expected checkpoint object')
+    body = load_snapshot(path)
     tracker = body.get('tracker') or {}
     return {
         'path': str(path), 'step': body.get('step'),
@@ -140,67 +138,33 @@ def read_diagnostics(root, run_id, attempt):
                     events.append(row)
         return {'format': 'jsonl', 'present': bool(events),
                 'resume_count': sum(row.get('event') == 'checkpoint.restored' for row in events), 'errors': errors}
-    legacy = folder / 'run.log'
-    try:
-        text = legacy.read_text(encoding='utf-8') if legacy.is_file() else ''
-    except (OSError, UnicodeError) as exc:
-        text = ''
-        errors.append(f'legacy diagnostics unreadable: {type(exc).__name__}')
-    return {'format': 'legacy' if text else 'missing', 'present': bool(text),
-            'resume_count': sum('[resume]' in line for line in text.splitlines()), 'errors': errors}
+    return {'format': 'missing', 'present': False, 'resume_count': 0, 'errors': errors}
 
 
-def read_execution_projection(root, result):
-    from rpipe.structure.artifacts import contained
-    from rpipe.structure.contracts import project_execution
+def inspect_run(ref, data, model, mode, *, expected_source=None):
+    from rpipe.structure.artifact.readout import read_run
 
-    busy = True
-    try:
-        owner = root / '.execution'
-        busy = owner.exists() or owner.is_symlink()
-        index = root / 'execution.json'
-        if not index.exists() and not index.is_symlink():
-            return {**result, 'status': 'unknown' if busy else 'legacy' if result else 'missing',
-                    'scientific_status': result.get('status', 'missing'), 'derived_status': 'not_run',
-                    'evidence_complete': False, 'busy': busy,
-                    'execution_status': 'legacy_unindexed' if result else 'missing'}
-        record = read_json(contained(index, root))
-        if not isinstance(record.get('identity'), dict) or record['identity'] != result.get('identity'):
-            raise ValueError('execution and scientific result identities differ')
-        attempt = record.get('attempt')
-        complete = (isinstance(attempt, str) and len(attempt) == 32
-                    and all(char in '0123456789abcdef' for char in attempt))
-        if complete:
-            outcome = read_json(contained(root / 'attempts' / attempt / 'outcome.json', root))
-            complete = (json.dumps(record, sort_keys=True, allow_nan=False)
-                        == json.dumps(outcome, sort_keys=True, allow_nan=False))
-        projection = project_execution(record, result, busy=busy, complete=complete)
-        projection['execution_status'] = projection.get('metadata_status', record.get('phase'))
-        return projection
-    except (OSError, ValueError, TypeError, RecursionError):
-        return {**project_execution({}, result, busy=busy, complete=False), 'execution_status': 'invalid'}
-
-
-def inspect_run(study, entry, data, model, mode, seed, *, expected_source=None):
-    root = study / 'runs' / str(entry['run_dir'])
-    if not root.resolve().is_relative_to((study / 'runs').resolve()):
-        raise ValueError('Run path escapes the explicit Study version')
-    result_path = root / 'result.json'
-    result = read_json(result_path) if result_path.is_file() else {}
+    root, seed = ref.run_dir, ref.seed
+    result_path = ref.result_path
+    result = read_run(ref)
     trajectory = read_tracker(root)
     errors = list(trajectory['errors'])
-    diagnostics = read_diagnostics(root, entry['id'], result.get('attempt'))
+    if result.get('metadata_status'):
+        errors.append(f"formal Run metadata is {result['metadata_status']}")
+    diagnostics = read_diagnostics(root, ref.id, result.get('attempt'))
     errors.extend(diagnostics['errors'])
-    execution = read_execution_projection(root, result)
-    if result.get('status') == 'succeeded' and not execution['evidence_complete']:
+    execution = result
+    if result.get('scientific_status') == 'succeeded' and not execution['evidence_complete']:
         errors.append('scientific result lacks complete closed execution evidence')
+    if result.get('quality') is False:
+        errors.append('scientific quality gate failed')
     execute = result.get('execute') if isinstance(result.get('execute'), dict) else {}
     metrics = result.get('metrics') or {}
-    row = {'id': entry['id'], 'seed': seed, 'data': data, 'model': model, 'mode': mode,
+    row = {'id': ref.id, 'seed': seed, 'data': data, 'model': model, 'mode': mode,
            'status': (execution['status'] if execution['status'] != 'missing'
                       else 'started' if diagnostics['present'] else 'pending'),
-           'scientific_status': result.get('status', 'missing'),
-           'derived_status': execution['derived_status'], 'execution_status': execution['execution_status'],
+           'scientific_status': result.get('scientific_status', 'missing'),
+           'derived_status': execution.get('derived_status', 'not_run'), 'execution_status': execution.get('metadata_status', execution['status']),
            'evidence_complete': execution['evidence_complete'], 'busy': execution['busy'],
            'identity': result.get('identity') or {}, 'execute': execute,
            'result_path': str(result_path), 'points': len(trajectory['x']),
@@ -218,8 +182,8 @@ def inspect_run(study, entry, data, model, mode, seed, *, expected_source=None):
     if row['scientific_status'] == 'succeeded':
         if expected_source is not None:
             identity = result.get('identity') or {}
-            if (identity.get('id') != entry['id'] or identity.get('source_digest') != expected_source
-                    or identity.get('version') != study.name):
+            if (identity.get('id') != ref.id or identity.get('source_digest') != expected_source
+                    or identity.get('version') != ref.version):
                 errors.append('result does not match the current source and research version identity')
         if not diagnostics['present']:
             errors.append('succeeded result has no matching Run diagnostics')
@@ -277,7 +241,7 @@ def threshold_gate(observed, expected, limit):
 
 
 def compare(study, reference, *, partial=False):
-    from rpipe.api import source_digest
+    from rpipe.structure.artifact.provenance import source_digest
     expected_source = source_digest(STUDY)
     contract = reference['acceptance_contract']
     report = {'schema': 'rpipe.historical_curve_comparison.v1',
@@ -293,6 +257,8 @@ def compare(study, reference, *, partial=False):
     index = read_json(index_path) if index_path.is_file() else {'experiments': []}
     if not index_path.is_file():
         report['missing_index'] = True
+    from rpipe.structure.artifact.readout import refs_from_index
+    refs = {ref.id: ref for ref in refs_from_index(study, index)} if index_path.is_file() else {}
     table = {}
     for experiment in index.get('experiments', []):
         factors = experiment['factors']
@@ -307,7 +273,7 @@ def compare(study, reference, *, partial=False):
                 report['errors'].append(f'duplicate/unsupported run factors: {key}')
                 continue
             try:
-                row = inspect_run(study, entry, data, model, mode, seed, expected_source=expected_source)
+                row = inspect_run(refs[entry['id']], data, model, mode, expected_source=expected_source)
             except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
                 row = {'id': entry.get('id'), 'data': data, 'model': model, 'mode': mode, 'seed': seed,
                        'status': 'unreadable', 'points': 0, 'optimizer_steps': [], 'accuracy_pct': [],
@@ -423,7 +389,7 @@ def plot_report(report, reference, destination):
     import matplotlib.pyplot as plt
     import uuid
 
-    from rpipe.structure.artifacts import atomic_replace
+    from rpipe.structure.artifact.io import atomic_replace
 
     tmp = destination.with_name(f'{uuid.uuid4().hex}.tmp')
     owned = False
@@ -491,7 +457,7 @@ def plot_report(report, reference, destination):
 
 
 def main(argv=None):
-    from rpipe.structure.artifacts import atomic_write_text
+    from rpipe.structure.artifact.io import atomic_write_text
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--study-root', type=Path, required=True, help='Explicit research version output root')

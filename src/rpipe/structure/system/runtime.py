@@ -4,15 +4,61 @@ from __future__ import annotations
 
 from typing import Any
 
-from rpipe.structure.contracts import SystemConfig
+from rpipe.structure.control import SystemConfig
 
 
-def check_cancelled(system: Any) -> None:
-    """Cooperative boundary; the process owner enforces hard deadlines."""
-    cancellation = getattr(system, 'cancellation', None)
-    if cancellation is not None and cancellation.is_set():
-        from concurrent.futures import CancelledError
-        raise CancelledError('scientific payload cancellation requested')
+def capture_rng() -> dict[str, Any]:
+    import random
+    import numpy as np
+    import torch
+
+    numpy_state = np.random.get_state()
+    return {'python': random.getstate(), 'numpy': (numpy_state[0], numpy_state[1].tolist(), *numpy_state[2:]),
+            'torch': torch.get_rng_state(),
+            'cuda': torch.cuda.get_rng_state_all() if torch.cuda.is_initialized() else None}
+
+
+def validate_rng(state: dict[str, Any]) -> None:
+    import random
+    import numpy as np
+    import torch
+
+    if not isinstance(state, dict) or set(state) != {'python', 'numpy', 'torch', 'cuda'}:
+        raise ValueError('invalid checkpoint RNG state')
+    random.Random().setstate(state['python'])
+    numpy_state = state['numpy']
+    if (not isinstance(numpy_state, (list, tuple)) or len(numpy_state) != 5
+            or not isinstance(numpy_state[1], list)):
+        raise ValueError('unsupported checkpoint NumPy RNG state')
+    if any(type(value) is not int or not 0 <= value < 2**32 for value in numpy_state[1]):
+        raise ValueError('invalid checkpoint NumPy RNG keys')
+    np.random.RandomState().set_state((numpy_state[0], np.asarray(numpy_state[1], dtype=np.uint32), *numpy_state[2:]))
+    if type(state['torch']) is not torch.Tensor:
+        raise ValueError('invalid checkpoint Torch RNG state')
+    torch.Generator().set_state(state['torch'].cpu())
+    cuda = state['cuda']
+    if cuda is not None and (not isinstance(cuda, list) or not torch.cuda.is_available()
+                             or len(cuda) != torch.cuda.device_count()):
+        raise ValueError('checkpoint CUDA RNG devices do not match current runtime')
+    if cuda is not None:
+        for value in cuda:
+            if type(value) is not torch.Tensor or value.dtype != torch.uint8 or value.ndim != 1:
+                raise ValueError('invalid checkpoint CUDA RNG state')
+
+
+def restore_rng(state: dict[str, Any]) -> None:
+    import random
+    import numpy as np
+    import torch
+
+    validate_rng(state)
+    random.setstate(state['python'])
+    numpy_state = state['numpy']
+    np.random.set_state((numpy_state[0], np.asarray(numpy_state[1], dtype=np.uint32), *numpy_state[2:]))
+    torch.set_rng_state(state['torch'].cpu())
+    cuda = state['cuda']
+    if cuda is not None:
+        torch.cuda.set_rng_state_all([value.cpu() for value in cuda])
 
 
 

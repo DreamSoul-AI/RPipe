@@ -13,8 +13,7 @@ pytestmark = [
 
 from pathlib import Path
 
-from rpipe.structure.data.factory import _with_recorded_stats
-from rpipe.structure.data.profile import load_stats, summarize_batches
+from rpipe.structure.data.profile import summarize_batches
 
 
 def test_summarize_batches_reports_shape_classes_and_mean():
@@ -42,19 +41,6 @@ def test_profile_retains_small_nonzero_variance_across_batches():
     assert body['pixel']['std'] == pytest.approx([0.0005], abs=1e-6)
 
 
-def test_recorded_stats_replace_the_builtin_table(tmp_path: Path):
-    path = tmp_path / 'stats.yaml'
-    path.write_text('name: MNIST\nmean: [0.1]\nstd: [0.2]\n', encoding='utf-8')
-    recorded = load_stats(path)
-    assert recorded is not None
-    spec = {'mean': (0.5,), 'std': (0.5,), 'root': 'mnist'}
-    out = _with_recorded_stats(spec, path)
-    assert out['mean'] == (0.1,)
-    assert out['std'] == (0.2,)
-    assert spec['mean'] == (0.5,)
-    assert _with_recorded_stats(spec, tmp_path / 'missing.yaml') is spec
-
-
 def test_profile_consumes_batches_incrementally_and_closes_its_data(tmp_path, monkeypatch):
     import weakref
     import torch
@@ -80,7 +66,7 @@ def test_profile_consumes_batches_incrementally_and_closes_its_data(tmp_path, mo
             self.closed = True
 
     data = OwnedData()
-    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: data)
+    monkeypatch.setattr(profile, 'build_data', lambda *args, **kwargs: data)
     source = tmp_path / 'source'
     source.mkdir()
     (source / 'study.yaml').write_text('fixed: {data: {name: Tiny}}\n', encoding='utf-8')
@@ -107,7 +93,7 @@ def test_profile_keeps_primary_error_when_owned_data_close_also_fails(tmp_path, 
         def close(self):
             raise OSError('secondary close')
 
-    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: BrokenData())
+    monkeypatch.setattr(profile, 'build_data', lambda *args, **kwargs: BrokenData())
     source = tmp_path / 'source'
     source.mkdir()
     (source / 'study.yaml').write_text('fixed: {data: {name: Tiny}}\n', encoding='utf-8')
@@ -116,21 +102,6 @@ def test_profile_keeps_primary_error_when_owned_data_close_also_fails(tmp_path, 
                               shared_data_dir=tmp_path / 'raw', profiles_dir=tmp_path / 'profiles')
     assert isinstance(caught.value.cleanup_errors[0], OSError)
     assert not (tmp_path / 'profiles' / 'Tiny' / 'stats.yaml').exists()
-
-
-@pytest.mark.parametrize('body', ['mean: [0.1]\nstd: [0]\n',
-                                 'mean: [.nan]\nstd: [0.2]\n',
-                                 'mean: [0.1, 0.2]\nstd: [0.3]\n'])
-def test_explicit_normalization_stats_must_be_valid_and_never_silently_fallback(tmp_path, body):
-    path = tmp_path / 'stats.yaml'
-    path.write_text(body, encoding='utf-8')
-    with pytest.raises(ValueError):
-        _with_recorded_stats({'mean': (0.5,), 'std': (0.5,)}, path, required=True)
-
-
-def test_missing_explicit_normalization_stats_is_not_a_builtin_fallback(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        _with_recorded_stats({'mean': (0.5,), 'std': (0.5,)}, tmp_path / 'missing.yaml', required=True)
 
 
 def test_profile_registers_iterator_with_its_data_owner_before_failure(tmp_path, monkeypatch):
@@ -152,7 +123,7 @@ def test_profile_registers_iterator_with_its_data_owner_before_failure(tmp_path,
 
     batches = Batches()
     data = Data(name='Tiny', source='test', loaders={'train': batches}, meta={})
-    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: data)
+    monkeypatch.setattr(profile, 'build_data', lambda *args, **kwargs: data)
     source = tmp_path / 'source'
     source.mkdir()
     (source / 'study.yaml').write_text('fixed: {data: {name: Tiny}}\n', encoding='utf-8')
@@ -178,7 +149,7 @@ def test_profile_uses_resolved_declared_input_and_source_once_for_repeated_runs(
             'train': [(torch.tensor([[[[0.2, 0.4]]]]), torch.tensor([0]))],
         })
 
-    monkeypatch.setattr(profile.DataFactory, 'build', build)
+    monkeypatch.setattr(profile, 'build_data', build)
     first = {'origin': 'domestic', 'seed': 0, 'data': {'name': 'MNIST', 'source': 'custom',
              'path': '../declared', 'config': {'train_size': 1, 'augment': True, 'num_workers': 2}}}
     second = copy.deepcopy(first)
@@ -201,7 +172,7 @@ def test_profile_rejects_conflicting_inputs_before_any_build_or_write(tmp_path, 
     from rpipe.structure.data import profile
 
     calls = []
-    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: calls.append(True))
+    monkeypatch.setattr(profile, 'build_data', lambda *args, **kwargs: calls.append(True))
     configs = [{'data': {'name': 'MNIST', 'path': path}} for path in ('../left', '../right')]
     with pytest.raises(ValueError, match='conflicting profile inputs'):
         profile.profile_study(tmp_path / 'source', configs=configs, shared_data_dir=tmp_path / 'raw',
@@ -213,7 +184,7 @@ def test_profile_download_flag_cannot_mutate_a_declared_input(tmp_path, monkeypa
     from rpipe.structure.data import profile
 
     calls = []
-    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: calls.append(True))
+    monkeypatch.setattr(profile, 'build_data', lambda *args, **kwargs: calls.append(True))
     with pytest.raises(ValueError, match='read-only'):
         profile.profile_study(tmp_path / 'source', configs=[{'data': {'name': 'MNIST', 'path': '../input'}}],
                               shared_data_dir=tmp_path / 'raw', profiles_dir=tmp_path / 'profiles', download=True)
@@ -226,7 +197,7 @@ def test_profile_download_flag_cannot_mutate_a_declared_input(tmp_path, monkeypa
 def test_profile_rejects_output_links_before_building_or_changing_originals(
         tmp_path, monkeypatch, target_kind, link_kind):
     from rpipe.structure.data import profile
-    from rpipe.structure.contracts import AdmissionError
+    from rpipe.structure.control import AdmissionError
 
     source, inputs, profiles = (tmp_path / name for name in ('source', 'inputs', 'profiles'))
     for path in (source, inputs, profiles):
@@ -246,7 +217,7 @@ def test_profile_rejects_output_links_before_building_or_changing_originals(
         folder.mkdir()
         (folder / 'stats.yaml').symlink_to(sentinel)
     calls = []
-    monkeypatch.setattr(profile.DataFactory, 'build', lambda *args, **kwargs: calls.append(True))
+    monkeypatch.setattr(profile, 'build_data', lambda *args, **kwargs: calls.append(True))
     with pytest.raises(AdmissionError):
         profile.profile_study(source, configs=[{'data': {'name': 'MNIST', 'path': str(inputs)}}],
                               shared_data_dir=tmp_path / 'raw', profiles_dir=profiles)

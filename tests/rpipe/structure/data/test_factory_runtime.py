@@ -10,6 +10,32 @@ pytestmark = [
     pytest.mark.result_type('categorical', detail='summary'),
 ]
 
+
+def test_data_read_capabilities_do_not_iterate_or_replace_the_owned_loader():
+    from rpipe.structure.data.factory import Data
+    dataset = object()
+    class Loader:
+        batch_size = 4
+        def __len__(self):
+            return 3
+        def __iter__(self):
+            pytest.fail('reading Data capabilities started an iterator')
+    loader = Loader()
+    loader.dataset = dataset
+    data = Data(name='fixture', source='fixture', loaders={'train': loader}, meta={})
+    assert data.has_split('train') and not data.has_split('test')
+    assert data.dataset('train') is dataset and data.dataset('test') is None
+    assert data.batch_size() == 4 and data.steps_per_epoch() == 3
+    assert data._loaders['train'] is loader
+
+
+@pytest.mark.parametrize('value', [None, 0, 'false'])
+def test_resumable_choice_requires_an_explicit_boolean(value):
+    from rpipe.structure.data.factory import Data
+    data = Data(name='fixture', source='fixture', loaders={}, meta={})
+    with pytest.raises(ValueError, match='resumable'):
+        data.iter_batches('train', resumable=value)
+
 def test_rebind_train_steps_uses_remaining_prefix():
     import torch
     from torch.utils.data import TensorDataset

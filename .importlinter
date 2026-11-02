@@ -2,40 +2,37 @@
 root_package = rpipe
 
 [importlinter:contract:mechanisms-do-not-know-flow]
-name = Structure does not depend on flow or public assembly
+name = Structure does not depend on flow
 type = forbidden
 source_modules =
     rpipe.structure
 forbidden_modules =
     rpipe.flow
-    rpipe.api
 
-[importlinter:contract:pure-contracts]
+[importlinter:contract:pure-control]
 name = Configuration contracts have no implementation dependency
 type = forbidden
 source_modules =
-    rpipe.structure.contracts
+    rpipe.structure.control
+    rpipe.structure.api
 forbidden_modules =
-    rpipe.structure.plan
-    rpipe.structure.execution
-    rpipe.structure.artifacts
-    rpipe.structure.readout
-    rpipe.structure.comparison
+    rpipe.structure.make
+    rpipe.structure.artifact
+    rpipe.structure.artifact.readout
+    rpipe.structure.artifact.comparison
     rpipe.structure.data
     rpipe.structure.model
     rpipe.structure.algorithm
     rpipe.structure.system
 
-[importlinter:contract:pure-plan]
-name = Pure planning only depends on contracts
+[importlinter:contract:planning-does-not-execute]
+name = Planning and publication do not import execution or scientific components
 type = forbidden
 source_modules =
-    rpipe.structure.plan
+    rpipe.structure.make
 forbidden_modules =
-    rpipe.structure.execution
-    rpipe.structure.artifacts
-    rpipe.structure.readout
-    rpipe.structure.comparison
+    rpipe.structure.artifact.readout
+    rpipe.structure.artifact.comparison
     rpipe.structure.data
     rpipe.structure.model
     rpipe.structure.algorithm
@@ -45,11 +42,63 @@ forbidden_modules =
 name = Readout does not acquire execution or scientific components
 type = forbidden
 source_modules =
-    rpipe.structure.readout
+    rpipe.structure.artifact.readout
 forbidden_modules =
-    rpipe.structure.execution
-    rpipe.structure.comparison
+    rpipe.structure.artifact.comparison
     rpipe.structure.data
     rpipe.structure.model
     rpipe.structure.algorithm
     rpipe.structure.system
+
+[importlinter:contract:context-has-no-execution]
+name = Context carries data without constructing or executing science
+type = forbidden
+source_modules =
+    rpipe.flow.context
+forbidden_modules =
+    rpipe.flow.run
+    rpipe.flow.worker
+    rpipe.flow.stages
+    rpipe.structure.data
+    rpipe.structure.model
+    rpipe.structure.algorithm
+    rpipe.structure.system
+
+[importlinter:contract:process-does-not-execute]
+name = Derived processing cannot construct science or launch a Run
+type = forbidden
+source_modules =
+    rpipe.flow.process
+forbidden_modules =
+    rpipe.flow.run
+    rpipe.flow.worker
+    rpipe.flow.stages
+    rpipe.structure.data
+    rpipe.structure.model
+    rpipe.structure.algorithm
+    rpipe.structure.system
+
+[importlinter:contract:algorithm-consumes-components]
+name = Algorithms consume injected components without constructing other component families
+type = forbidden
+source_modules =
+    rpipe.structure.algorithm
+forbidden_modules =
+    rpipe.structure.data.factory
+    rpipe.structure.model.factory
+    rpipe.structure.system.factory
+
+[importlinter:contract:system-primitives-do-not-construct-science]
+name = System primitives do not import scientific construction
+type = forbidden
+source_modules =
+    rpipe.structure.system.runtime
+    rpipe.structure.system.logger
+    rpipe.structure.system.origin
+    rpipe.structure.system.resources
+    rpipe.structure.system.transfers
+    rpipe.structure.system.torchvision_load
+forbidden_modules =
+    rpipe.structure.data.factory
+    rpipe.structure.model.factory
+    rpipe.structure.algorithm.factory
