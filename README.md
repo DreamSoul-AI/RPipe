@@ -4,7 +4,7 @@ RPipe（Research Pipeline，研究流水线）是用于搭建研究实验的参�
 
 RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他项目长期安装调用的通用 package 为产品目标，也不要求衍生项目持续跟随本仓接口。模板自身仍需讲清职责、保持可运行并验证示例，帮助研究者把有效配置、执行事实、科学结果和比较分析连接起来。Python 包名 `rpipe`、安装命令和打包配置是当前源码的组织与运行方式，不构成跨项目稳定 API 的承诺。仓库为 [DreamSoul-AI/RPipe](https://github.com/DreamSoul-AI/RPipe)，采用 [MIT 许可](LICENSE.md)。
 
-当前包元数据为 **0.4.1**。五批核心重构及研究接入工程验证已本地提交；main_probe在固定环境、seed0和每侧60步条件下，8格CUDA配对及Study终验通过，见[本轮运行记录](<docs/运行记录 Run Record/2026-10-30 main_probe CUDA配对验证.md>)。首轮缺历史依赖的失败保留原身份，没有回签。架构和代码结构设计各以一份完整Markdown维护当前目标，剩余工作从[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)进入。main_exp八格600步CUDA配对及039c941全新version的完整E4已按固定协议通过，证据与适用范围见[新电脑执行记录](<docs/运行记录 Run Record/2026-10-30 新电脑main_exp完整矩阵执行.md>)。测试组织、模块无环、外部资源与模型合同四项整改已完成，见[四项整改验证](<docs/运行记录 Run Record/2026-11-02 四项整改验证.md>)。后续预算冲突拒绝、完整使用说明与plan --show-config已在c4eed0f完成，616项受影响回归及该提交自身9项CI成功，见[模板使用验证](<docs/运行记录 Run Record/2026-11-02 模板使用走查.md>)。#236已合入dev，版本号不表示本轮已发布。
+当前包元数据为 **0.5.0**，正在进行发布验收，标签与正式发布状态以 GitHub Release 为准。五批核心重构及研究接入工程验证已本地提交；main_probe在固定环境、seed0和每侧60步条件下，8格CUDA配对及Study终验通过，见[本轮运行记录](<docs/运行记录 Run Record/2026-10-30 main_probe CUDA配对验证.md>)。首轮缺历史依赖的失败保留原身份，没有回签。架构和代码结构设计各以一份完整Markdown维护当前目标，剩余工作从[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)进入。main_exp八格600步CUDA配对及039c941全新version的完整E4已按固定协议通过，证据与适用范围见[新电脑执行记录](<docs/运行记录 Run Record/2026-10-30 新电脑main_exp完整矩阵执行.md>)。测试组织、模块无环、外部资源与模型合同四项整改已完成，见[四项整改验证](<docs/运行记录 Run Record/2026-11-02 四项整改验证.md>)。后续预算冲突拒绝、完整使用说明与plan --show-config已在c4eed0f完成，616项受影响回归及该提交自身9项CI成功，见[模板使用验证](<docs/运行记录 Run Record/2026-11-02 模板使用走查.md>)。#236已合入dev，版本号不表示本轮已发布。
 
 ## 文档与阅读顺序
 
@@ -22,7 +22,7 @@ RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他�
 | --- | --- |
 | [通用调研 General Research](<docs/通用调研 General Research 研究流水线.md>) | 机制、工程路线、直接来源、取舍与限制；项目历史执行只进入日期记录 |
 | [架构设计 Architecture Design](<docs/架构设计 Architecture Design 研究流水线.md>) | 单一完整正文：当前选定的实验部件、流程扩展、观测恢复及产物合同 |
-| [代码结构设计 Code Structure Design](<docs/代码结构设计 Code Structure Design 研究流水线.md>) | 依据完整架构推导的单一文档：目标目录、模块职责、接口、允许依赖及验证落点；规划/发布、生命周期、部件装配、快照读端及入口交付已实施，后续研究接入见开发计划 |
+| [代码结构设计 Code Structure Design](<docs/代码结构设计 Code Structure Design 研究流水线.md>) | 依据完整架构推导的单一文档：目标目录、模块职责、接口、允许依赖及验证落点；规划/发布、生命周期、部件装配、快照读端、入口交付及本轮研究接入已实施，验收范围见开发计划 |
 | [开发计划 Development Plan](<docs/开发计划 Development Plan 研究流水线.md>) | 实现差距、逐模块工作、旧接口清理及验收顺序；按明确目标队列连续推进，每批验证、记录并本地提交 |
 | [缺陷记录 Bug Report](<docs/缺陷记录 Bug Report 研究流水线.md>) | 活动问题与待验证事项；已关闭问题的变更和证据只从日期记录追溯 |
 | [开发记录 Development Record](<docs/开发记录 Development Record/>) | 日期记录，本轮文档调整与历史集成、分支保全的归属；不复制整份测试结果 |
