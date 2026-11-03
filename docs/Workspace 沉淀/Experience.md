@@ -4,4 +4,14 @@
 
 # 二、当前状态
 
-2026年11月4日：当前无待汇集经验。本轮链接经验和脚本建议已保存在本地提交63af4edfd1470e2ae91dad7a7a39d8615f19ff41，并汇集到workspace工作分支提交85dc2135499ae851ddab4c24cbdae3cb42b10d25，详见[issue #6](https://github.com/DreamSoul-AI/workspace/issues/6)及[Draft PR #7](https://github.com/DreamSoul-AI/workspace/pull/7)。本项目详细经验从当前队列清除，后续审阅进展由[日期记录](<../开发记录 Development Record/2026-11-04 外部路径链接落地.md>)追溯；尚未合入workspace main，不表示研发模板已正式采用。
+2026年11月4日：链接经验与脚本建议已从队列清理，原文保存在63af4ed，workspace候选为85dc213；[issue #6](https://github.com/DreamSoul-AI/workspace/issues/6)继续作为交接入口，[Draft PR #7](https://github.com/DreamSoul-AI/workspace/pull/7)仅供目标项目参考，尚未合并。后续由workspace对话接手，共用模板采用状态从[日期记录](<../开发记录 Development Record/2026-11-04 外部路径链接落地.md>)追溯。
+
+# 三、待汇集：用Issue与既有项目对话完成交接
+
+**问题**：来源项目直接替共用仓库实现并创建PR，会提前替目标项目做设计决定；只创建Issue又可能无人主动接手。
+
+**方法与工具**：来源项目先完成自身实现及验证，以Issue保存需求、理由和证据。经用户授权，用list_threads定位已有目标对话，结合标题与read_thread核对对象，再用send_message_to_thread通知负责对话。消息交代Issue、必要的来源身份、已有参考稿、验证边界及期望分工，由目标对话安排共用实现和PR，来源项目继续自己的工作。
+
+**本次证据**：用户明确授权后，已定位并向本地“workspace”对话发送issue #6及现有Draft PR #7的交接消息，工具返回成功；同时说明现有PR只是参考，不默认合并。没有新建对话、重复Issue/PR或继续修改workspace。消息发送成功不代表目标已接手、已实现或已合并，尚未确认的状态不能提前记完成。
+
+**范围**：这是实际跨项目协作经验，尚未提交为共用模板规则。发送须有用户授权，交接不扩大合并、发布或飞书同步权限；已有其他协调方式时按项目采用，不强制每个项目都有独立对话。该新经验尚未提交，暂留本队列。

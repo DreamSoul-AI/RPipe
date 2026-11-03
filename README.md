@@ -34,7 +34,7 @@ RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他�
 
 ### 项目经验与 Workspace 汇集
 
-[Workspace 沉淀／Experience.md](<docs/Workspace 沉淀/Experience.md>) 是本仓待处理经验入口，承接原“修订建议”。已有Git提交保存的条目按用户确认从队列清理，历史原文从提交与日期记录追溯；当前队列已清空；链接经验及配套脚本已汇集至workspace Draft PR，交付身份从日期记录追溯。
+[Workspace 沉淀／Experience.md](<docs/Workspace 沉淀/Experience.md>) 是本仓待处理经验入口，承接原“修订建议”。已有Git提交保存的条目按用户确认从队列清理，历史原文从提交与日期记录追溯；链接经验已清理，当前新增待汇集的“Issue与既有项目对话交接”经验，交付身份从日期记录追溯。
 
 完成实际工作后按需补充问题、解决方法、所用工具、验证依据与未确认项，详细调试过程引用日期记录。需要跨项目复用时，经核对汇入[workspace统一Experience.md](https://github.com/DreamSoul-AI/workspace/blob/main/Experience.md)的RPipe来源节；具体模板修改再按“项目经验 → 本地沉淀草案 → 审阅确认 → workspace issue → PR修改模板”推进，不要求每条经验开issue，也不把项目整改直接记为共用规则已采纳。
 
@@ -121,6 +121,18 @@ python -m rpipe.structure.system.local_paths --repo "$repoRoot" --data-root "$da
 脚本默认不写盘，--apply创建缺失的外部目录及仓内data/output符号链接；再次执行仅复用正确链接。先核两个目标都与checkout互不包含、data与output互不包含、入口已忽略且未被Git跟踪。实体目录、junction、错误或失效链接会明确拒绝，不覆盖、不移动、不删除，也不静默改用junction或复制。权限不足时保留已创建内容，解决权限后重新预览；本脚本不修改系统权限或全局设置。Windows能否创建symlink取决于实际执行身份，沙箱拒绝不等于用户环境不支持。
 
 脚本打印实际入口、真实目标及create/reuse动作；将其保存到本机记录即可，不把含个人机器路径的配置提交Git。换机重新确认并执行，Git不会携带这些链接或外部数据。脚本只建立访问入口，不自动替换Study的数据声明，也不启动实验；需要使用外部数据时在data.path及provenance.inputs显式声明对应目录/文件。链接不是写保护，输入仍须按来源和哈希核验。
+
+自定义recipe还须在数据builder中实际读取config.path；填写路径不会自动替换下节TinyCPU示例的内存数据。以包含x/y数组的合成samples.json为例，可将示例中生成x、y的两行替换为下段，后续TensorDataset、DataLoader及元信息照常保留。data.path填写该文件所在的数据集目录，并在study.yaml的provenance.inputs中固定实际输入哈希；不要把整个多项目中央数据根当作单个数据集清单。
+
+```python
+import json
+from pathlib import Path
+sample = json.loads((Path(config.path) / 'samples.json').read_text(encoding='utf-8'))
+x = torch.tensor(sample['x'], dtype=torch.float32)
+y = torch.tensor(sample['y'], dtype=torch.long)
+```
+
+这段放在已导入torch的builder内。读取代码与实际形状、类别及预处理由研究项目维护，不能因使用外部路径静默改变科学条件。全新项目副本已按此方式完成链接配置及两个CPU Run，见[本轮验证记录](<docs/运行记录 Run Record/2026-11-04 外部路径链接与CPU旅程.md>)的“新项目副本采用验收”。
 
 配置后，可从output入口取得真实运行根，再执行下节流程：
 
