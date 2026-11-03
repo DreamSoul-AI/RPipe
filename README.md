@@ -34,7 +34,7 @@ RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他�
 
 ### 项目经验与 Workspace 汇集
 
-[Workspace 沉淀／Experience.md](<docs/Workspace 沉淀/Experience.md>) 是本仓待处理经验入口，承接原“修订建议”。已有Git提交保存的条目按用户确认从队列清理，历史原文从提交与日期记录追溯；链接经验已清理，当前新增待汇集的“Issue与既有项目对话交接”经验，交付身份从日期记录追溯。
+[Workspace 沉淀／Experience.md](<docs/Workspace 沉淀/Experience.md>) 是本仓待处理经验入口，承接原“修订建议”。已有Git提交保存的条目按用户确认从队列清理，历史原文从提交与日期记录追溯；链接及对话交接经验均已提交保存并从队列清理，交付身份从日期记录追溯。
 
 完成实际工作后按需补充问题、解决方法、所用工具、验证依据与未确认项，详细调试过程引用日期记录。需要跨项目复用时，经核对汇入[workspace统一Experience.md](https://github.com/DreamSoul-AI/workspace/blob/main/Experience.md)的RPipe来源节；具体模板修改再按“项目经验 → 本地沉淀草案 → 审阅确认 → workspace issue → PR修改模板”推进，不要求每条经验开issue，也不把项目整改直接记为共用规则已采纳。
 
