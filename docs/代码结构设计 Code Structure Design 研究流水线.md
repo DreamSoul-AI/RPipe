@@ -70,6 +70,7 @@ RPipe/
       system/
         factory.py              System 与设备能力构造
         runtime.py              随机性、精度与确定性
+        local_paths.py          显式配置仓内外部数据/产出链接
         logger.py               文本日志
         resources.py            所属 OS 资源原语
         origin.py               明确来源与获取策略
@@ -167,6 +168,7 @@ AlgorithmHook 是算法循环中明确的评测、checkpoint、停止等协作�
 | --- | --- | --- |
 | factory.py | 创建 System、设备放置与实际精度上下文 | 不建优化器、不选择 best，也不负责完整快照文件协议 |
 | runtime.py | 先应用 seed、确定性和精度设置，捕获/恢复受支持 RNG | 在数据和模型建构前执行；完整数值确定性仍需实测 |
+| local_paths.py | 本机初始化脚本，显式核对checkout、中央data及项目output根，预览或创建仓内data/output符号链接 | 只依赖标准库与本机Git；configure默认只读，--apply才创建。先核全部入口、Git忽略与路径分离，保留实体目录和已有错误链接；不下载、不迁移、不清理、不启动，不被训练或导入自动调用 |
 | logger.py | 有身份、阶段和时机的文本输出与文件刷新 | 不代替 Tracker、终态或研究判断；输出失败可观察 |
 | resources.py | 本次 OS 句柄、进程、资源测量、受控读取错误码与释放原语 | flow 决定何时启动/停止，原语不私自派发实验 |
 | origin.py | 显式来源、端点与获取条件 | 计算来源可读元信息，不隐藏下载或改变全局环境 |
