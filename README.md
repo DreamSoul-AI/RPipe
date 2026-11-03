@@ -4,7 +4,7 @@ RPipe（Research Pipeline，研究流水线）是用于搭建研究实验的参�
 
 RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他项目长期安装调用的通用 package 为产品目标，也不要求衍生项目持续跟随本仓接口。模板自身仍需讲清职责、保持可运行并验证示例，帮助研究者把有效配置、执行事实、科学结果和比较分析连接起来。Python 包名 `rpipe`、安装命令和打包配置是当前源码的组织与运行方式，不构成跨项目稳定 API 的承诺。仓库为 [DreamSoul-AI/RPipe](https://github.com/DreamSoul-AI/RPipe)，采用 [MIT 许可](LICENSE.md)。
 
-当前版本 **v0.5.0 已发布**，发布提交为 a33f057940e79a5a0e19c0713855566d13e9c4ab，制品及版本说明见 [GitHub Release](https://github.com/DreamSoul-AI/RPipe/releases/tag/v0.5.0)。五批核心重构及研究接入工程验证已本地提交；main_probe在固定环境、seed0和每侧60步条件下，8格CUDA配对及Study终验通过，见[本轮运行记录](<docs/运行记录 Run Record/2026-10-30 main_probe CUDA配对验证.md>)。首轮缺历史依赖的失败保留原身份，没有回签。架构和代码结构设计各以一份完整Markdown维护当前目标，剩余工作从[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)进入。main_exp八格600步CUDA配对及039c941全新version的完整E4已按固定协议通过，证据与适用范围见[新电脑执行记录](<docs/运行记录 Run Record/2026-10-30 新电脑main_exp完整矩阵执行.md>)。测试组织、模块无环、外部资源与模型合同四项整改已完成，见[四项整改验证](<docs/运行记录 Run Record/2026-11-02 四项整改验证.md>)。后续预算冲突拒绝、完整使用说明与plan --show-config已在c4eed0f完成，616项受影响回归及该提交自身9项CI成功，见[模板使用验证](<docs/运行记录 Run Record/2026-11-02 模板使用走查.md>)。#236已合入dev，版本号不表示本轮已发布。
+当前版本 **v0.5.0 已发布**，发布提交为 a33f057940e79a5a0e19c0713855566d13e9c4ab，制品及版本说明见 [GitHub Release](https://github.com/DreamSoul-AI/RPipe/releases/tag/v0.5.0)。五批核心重构及研究接入工程验证已本地提交；main_probe在固定环境、seed0和每侧60步条件下，8格CUDA配对及Study终验通过，见[本轮运行记录](<docs/运行记录 Run Record/2026-10-30 main_probe CUDA配对验证.md>)。首轮缺历史依赖的失败保留原身份，没有回签。架构和代码结构设计各以一份完整Markdown维护当前目标，剩余工作从[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)进入。main_exp八格600步CUDA配对及039c941全新version的完整E4已按固定协议通过，证据与适用范围见[新电脑执行记录](<docs/运行记录 Run Record/2026-10-30 新电脑main_exp完整矩阵执行.md>)。测试组织、模块无环、外部资源与模型合同四项整改已完成，见[四项整改验证](<docs/运行记录 Run Record/2026-11-02 四项整改验证.md>)。后续预算冲突拒绝、完整使用说明与plan --show-config已在c4eed0f完成，616项受影响回归及该提交自身9项CI成功，见[模板使用验证](<docs/运行记录 Run Record/2026-11-02 模板使用走查.md>)。#236已合入dev，v0.5.0发布及其证据范围见本页首段与日期记录。
 
 ## 文档与阅读顺序
 
@@ -14,7 +14,7 @@ RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他�
 
 2026年10月31日已安全同步交接候选c5b12d6并保留本地草稿，独立审查已覆盖#236相对dev的完整差异。待办与停止点见[开发计划](<docs/开发计划 Development Plan 研究流水线.md>)；规范复核依据见[复核记录](<docs/运行记录 Run Record/2026-10-31 规范复核与计划重排.md>)。原科学证据保持其SHA，新工程修复不继承旧E4验收。
 
-研发协作的共用依据为 [研发用 AGENTS.md](https://dreamsoul.feishu.cn/docx/QICWdeEokobO9RxYR9zcjE6Pnyg)。采用其适用正文，并结合本仓 [AGENTS.md](AGENTS.md) 的项目约定执行。共用《研发用 AGENTS.md》与资料库根 AGENTS.md 是不同文档，不得相互替代。本地源与飞书正文需核对版本，不能以本仓规则已更新推定共用正文已同步。
+研发协作采用 workspace 的[研发用 AGENTS 模板](https://github.com/DreamSoul-AI/workspace/blob/main/templates/software-engineering/AGENTS.template.md)，对应[共用《研发用 AGENTS.md》](https://dreamsoul.feishu.cn/docx/QICWdeEokobO9RxYR9zcjE6Pnyg)。本仓 [AGENTS.md](AGENTS.md) 按该研发基线维护，并在“RPipe项目补充”集中保留本项目约定。workspace 根通用 AGENTS.md、共用研发模板和本仓适配后的 AGENTS.md 是不同角色，不能互相替代；本地同步不代表飞书正文已同步。
 
 先读本 README、共用《研发用 AGENTS.md》和本仓项目约定，再按问题进入以下唯一成果。开发与研究的计划独立维护，日期记录保存实际演进与证据，不另建同义进度、交接或验收报告。
 
@@ -32,7 +32,13 @@ RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他�
 
 项目演进、旧文档归并与兼容迁移从[开发记录](<docs/开发记录 Development Record/2026-10-27 文档重构与历史归属.md>)追溯，实际历史验证从[运行记录](<docs/运行记录 Run Record/2026-10-27 历史验证整理.md>)追溯。记录保留原提交、日期及运行身份。
 
-修订建议集中放在 [docs/修订建议/](<docs/修订建议/>)，按被修订文档分别维护，目前为[研发用 AGENTS 修订建议](<docs/修订建议/修订建议 Revision Proposals 研发用 AGENTS.md>)。项目已采用的专项规范仍须执行；共用入口不另定布局，不构成豁免专项规范的理由。建议经讨论与验证后再纳入相应正文。
+### 项目经验与 Workspace 汇集
+
+[Workspace 沉淀／Experience.md](<docs/Workspace 沉淀/Experience.md>) 是本仓待处理经验入口，承接原“修订建议”。已有Git提交保存的条目按用户确认从队列清理，历史原文从提交与日期记录追溯；链接及对话交接经验均已提交保存并从队列清理，交付身份从日期记录追溯。
+
+完成实际工作后按需补充问题、解决方法、所用工具、验证依据与未确认项，详细调试过程引用日期记录。需要跨项目复用时，经核对汇入[workspace统一Experience.md](https://github.com/DreamSoul-AI/workspace/blob/main/Experience.md)的RPipe来源节；具体模板修改再按“项目经验 → 本地沉淀草案 → 审阅确认 → workspace issue → PR修改模板”推进，不要求每条经验开issue，也不把项目整改直接记为共用规则已采纳。
+
+历史共用AGENTS候选保留原提交身份。用户于2026年11月4日在workspace对话确认：外部路径脚本只保留在RPipe，不再推进共用推广；[workspace Draft PR #7](https://github.com/DreamSoul-AI/workspace/pull/7)暂停，未合并、未同步飞书。其余历史候选不因此自动采纳。项目采用的专项规范继续执行，共用入口的概括不能豁免专项要求。
 
 ## 技术栈与目录
 
@@ -96,7 +102,46 @@ Study 至少有 `study.yaml` 和 `experiment_config.yaml`。因素轴展开为 E
 4. 当前实际执行使用解析后的真实绝对根。受监管输出树中的shared/data目录须保持实体目录，不能用指向树外的目录符号链接或junction代替；Windows输出监管会拒绝这类目录链接。因此仓内便捷入口与运行树内部链接须分别设计，不能把仓内入口直接当作已支持的监管路径。
 5. 原始文件复用优先使用明确的文件级symbolic link；现有artifact.io.link_input/reference_tree在符号链接不可用时可回退到同卷硬链接，使用前检查条件，实际类型和目标须记录。不要把整个多项目数据/模型根递归挂进Study，不静默复制大文件作为链接替代。模型后端是否支持外部权重及链接另核实际构造入口，不将文件链接能力外推为所有后端支持。
 6. 链接和硬链接都不构成写保护。共享原始输入按来源和固定哈希核验，可写派生与其分开；变更或清理前核消费者和执行占用。移除链接入口不得递归删除真实目标，未知文件、旧Run、权重及无关项目产出继续按仓库清理授权处理。
-7. 本机已实测：plan/publish将symlink/junction访问别名解析为实体运行根；output_snapshot拒绝直接目录别名而接受实体根，文件引用按身份去重；无symlink权限时同卷硬链回退，实际C/D跨卷以明确跨卷错误拒绝，未静默复制；Git忽略真实入口，静态科学配置继续保留；手工unlink/rmdir入口后真实目标及peer保全。这些用例不等于完整supervise旅程或自动清理器验收，也不证明链接具有只读保护。模型后端的外部权重路径、其他系统及实际用户目录迁移未执行，后续按实际消费者验证；没有使用真实数据或旧Run作清理fixture。
+7. 本机已实测：plan/publish将symlink/junction访问别名解析为实体运行根；output_snapshot拒绝直接目录别名而接受实体根，文件引用按身份去重；无symlink权限时同卷硬链回退，实际C/D跨卷以明确跨卷错误拒绝，未静默复制；Git忽略真实入口，静态科学配置继续保留；手工unlink/rmdir入口后真实目标及peer保全。这些用例不等于完整supervise旅程或自动清理器验收，也不证明链接具有只读保护。模型后端的外部权重路径、其他系统及实际用户目录迁移未执行，后续按实际消费者验证；没有使用真实数据或旧Run作清理fixture。上述为11月2日检查范围；11月4日另完成实际仓内data/output入口及两个Run的CPU监管旅程，见下节。
+
+### 配置本机 data/output 链接
+
+使用[本机配置脚本](src/rpipe/structure/system/local_paths.py)，无需加载Torch或安装新依赖，但本机须有Python、Git及创建目录符号链接的权限。在仓库根确认当前源码导入方式后执行。以下两个外部路径由使用者填写，不能原样执行占位符；中央data可供多个项目共用，output参数必须是本项目专用目录：
+
+```powershell
+$repoRoot = (Get-Location).Path
+$dataRoot = '<已确认的中央数据根绝对路径>'
+$outputRoot = '<已确认的项目输出根绝对路径>'
+$env:PYTHONPATH = (Resolve-Path src).Path
+python -m rpipe.structure.system.local_paths --repo "$repoRoot" --data-root "$dataRoot" --output-root "$outputRoot"
+# 核对JSON预览的两个真实目标后，显式创建：
+python -m rpipe.structure.system.local_paths --repo "$repoRoot" --data-root "$dataRoot" --output-root "$outputRoot" --apply
+```
+
+脚本默认不写盘，--apply创建缺失的外部目录及仓内data/output符号链接；再次执行仅复用正确链接。先核两个目标都与checkout互不包含、data与output互不包含、入口已忽略且未被Git跟踪。实体目录、junction、错误或失效链接会明确拒绝，不覆盖、不移动、不删除，也不静默改用junction或复制。权限不足时保留已创建内容，解决权限后重新预览；本脚本不修改系统权限或全局设置。Windows能否创建symlink取决于实际执行身份，沙箱拒绝不等于用户环境不支持。
+
+脚本打印实际入口、真实目标及create/reuse动作；将其保存到本机记录即可，不把含个人机器路径的配置提交Git。换机重新确认并执行，Git不会携带这些链接或外部数据。脚本只建立访问入口，不自动替换Study的数据声明，也不启动实验；需要使用外部数据时在data.path及provenance.inputs显式声明对应目录/文件。链接不是写保护，输入仍须按来源和哈希核验。
+
+自定义recipe还须在数据builder中实际读取config.path；填写路径不会自动替换下节TinyCPU示例的内存数据。以包含x/y数组的合成samples.json为例，可将示例中生成x、y的两行替换为下段，后续TensorDataset、DataLoader及元信息照常保留。data.path填写该文件所在的数据集目录，并在study.yaml的provenance.inputs中固定实际输入哈希；不要把整个多项目中央数据根当作单个数据集清单。
+
+```python
+import json
+from pathlib import Path
+sample = json.loads((Path(config.path) / 'samples.json').read_text(encoding='utf-8'))
+x = torch.tensor(sample['x'], dtype=torch.float32)
+y = torch.tensor(sample['y'], dtype=torch.long)
+```
+
+这段放在已导入torch的builder内。读取代码与实际形状、类别及预处理由研究项目维护，不能因使用外部路径静默改变科学条件。全新项目副本已按此方式完成链接配置及两个CPU Run，见[本轮验证记录](<docs/运行记录 Run Record/2026-11-04 外部路径链接与CPU旅程.md>)的“新项目副本采用验收”。
+
+配置后，可从output入口取得真实运行根，再执行下节流程：
+
+```powershell
+$runRoot = python -c "from pathlib import Path; print(Path('output').resolve())"
+python -m rpipe plan studies/my_study --run-root "$runRoot" --show-config
+```
+
+plan也接受该入口并在规格中解析成真实根；监管和输出监控使用真实根，运行树里的shared不能替换为指向树外的目录链接。2026年11月4日本机已完成两个symbolic link、重复配置、原生CPU两步训练及自身best独立评测，输入哈希不变、输出在外部且所属进程闭合，见[本轮验证记录](<docs/运行记录 Run Record/2026-11-04 外部路径链接与CPU旅程.md>)。本次验证时使用未提交工作树，随后已在本地63af4ed提交保存；不代表已发布v0.5.0包含该脚本，也不外推其他系统、真实数据迁移或科学质量。
 
 ### 从模板开始一个小研究
 
