@@ -141,7 +141,7 @@ $runRoot = python -c "from pathlib import Path; print(Path('output').resolve())"
 python -m rpipe plan studies/my_study --run-root "$runRoot" --show-config
 ```
 
-plan也接受该入口并在规格中解析成真实根；监管和输出监控使用真实根，运行树里的shared不能替换为指向树外的目录链接。2026年11月4日本机已完成两个symbolic link、重复配置、原生CPU两步训练及自身best独立评测，输入哈希不变、输出在外部且所属进程闭合，见[本轮验证记录](<docs/运行记录 Run Record/2026-11-04 外部路径链接与CPU旅程.md>)。本次验证时使用未提交工作树，随后已在本地63af4ed提交保存；不代表已发布v0.5.0包含该脚本，也不外推其他系统、真实数据迁移或科学质量。
+plan也接受该入口并在规格中解析成真实根；监管和输出监控使用真实根，运行树里的shared不能替换为指向树外的目录链接。2026年11月4日本机已完成两个symbolic link、重复配置、原生CPU两步训练及自身best独立评测，输入哈希不变、输出在外部且所属进程闭合，见[本轮验证记录](<docs/运行记录 Run Record/2026-11-04 外部路径链接与CPU旅程.md>)。上述实现已随#241合入dev（merge 7eb2304），本地dev已同步；已发布v0.5.0仍保持原制品，不包含该新增脚本，也不外推其他系统、真实数据迁移或科学质量。
 
 ### 从模板开始一个小研究
 
