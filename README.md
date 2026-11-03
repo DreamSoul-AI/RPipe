@@ -34,11 +34,11 @@ RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他�
 
 ### 项目经验与 Workspace 汇集
 
-[Workspace 沉淀／Experience.md](<docs/Workspace 沉淀/Experience.md>) 是本仓待处理经验入口，承接原“修订建议”。已有Git提交保存的条目按用户确认从队列清理，历史原文从提交与日期记录追溯；当前保留尚未提交的链接落地经验及workspace配套脚本建议。
+[Workspace 沉淀／Experience.md](<docs/Workspace 沉淀/Experience.md>) 是本仓待处理经验入口，承接原“修订建议”。已有Git提交保存的条目按用户确认从队列清理，历史原文从提交与日期记录追溯；当前队列已清空；链接经验及配套脚本已汇集至workspace Draft PR，交付身份从日期记录追溯。
 
 完成实际工作后按需补充问题、解决方法、所用工具、验证依据与未确认项，详细调试过程引用日期记录。需要跨项目复用时，经核对汇入[workspace统一Experience.md](https://github.com/DreamSoul-AI/workspace/blob/main/Experience.md)的RPipe来源节；具体模板修改再按“项目经验 → 本地沉淀草案 → 审阅确认 → workspace issue → PR修改模板”推进，不要求每条经验开issue，也不把项目整改直接记为共用规则已采纳。
 
-历史共用AGENTS候选保留原提交身份，清理队列不代表上游已采用；本轮尚未向workspace汇集、提issue或修改上游模板。项目采用的专项规范继续执行，共用入口的概括不能豁免专项要求。
+历史共用AGENTS候选保留原提交身份。链接经验与脚本模板已汇集至[workspace Draft PR #7](https://github.com/DreamSoul-AI/workspace/pull/7)，尚未合并；其余历史候选不因此自动采纳，也未同步飞书正文。项目采用的专项规范继续执行，共用入口的概括不能豁免专项要求。
 
 ## 技术栈与目录
 
@@ -129,7 +129,7 @@ $runRoot = python -c "from pathlib import Path; print(Path('output').resolve())"
 python -m rpipe plan studies/my_study --run-root "$runRoot" --show-config
 ```
 
-plan也接受该入口并在规格中解析成真实根；监管和输出监控使用真实根，运行树里的shared不能替换为指向树外的目录链接。2026年11月4日本机已完成两个symbolic link、重复配置、原生CPU两步训练及自身best独立评测，输入哈希不变、输出在外部且所属进程闭合，见[本轮验证记录](<docs/运行记录 Run Record/2026-11-04 外部路径链接与CPU旅程.md>)。本次是未提交工作树的工程验证，不代表已发布v0.5.0包含该脚本，也不外推其他系统、真实数据迁移或科学质量。
+plan也接受该入口并在规格中解析成真实根；监管和输出监控使用真实根，运行树里的shared不能替换为指向树外的目录链接。2026年11月4日本机已完成两个symbolic link、重复配置、原生CPU两步训练及自身best独立评测，输入哈希不变、输出在外部且所属进程闭合，见[本轮验证记录](<docs/运行记录 Run Record/2026-11-04 外部路径链接与CPU旅程.md>)。本次验证时使用未提交工作树，随后已在本地63af4ed提交保存；不代表已发布v0.5.0包含该脚本，也不外推其他系统、真实数据迁移或科学质量。
 
 ### 从模板开始一个小研究
 
