@@ -38,7 +38,7 @@ RPipe 的交付对象是可阅读、可修改的仓库起点，不以供其他�
 
 完成实际工作后按需补充问题、解决方法、所用工具、验证依据与未确认项，详细调试过程引用日期记录。需要跨项目复用时，经核对汇入[workspace统一Experience.md](https://github.com/DreamSoul-AI/workspace/blob/main/Experience.md)的RPipe来源节；具体模板修改再按“项目经验 → 本地沉淀草案 → 审阅确认 → workspace issue → PR修改模板”推进，不要求每条经验开issue，也不把项目整改直接记为共用规则已采纳。
 
-历史共用AGENTS候选保留原提交身份。链接经验与脚本模板已汇集至[workspace Draft PR #7](https://github.com/DreamSoul-AI/workspace/pull/7)，尚未合并；其余历史候选不因此自动采纳，也未同步飞书正文。项目采用的专项规范继续执行，共用入口的概括不能豁免专项要求。
+历史共用AGENTS候选保留原提交身份。用户于2026年11月4日在workspace对话确认：外部路径脚本只保留在RPipe，不再推进共用推广；[workspace Draft PR #7](https://github.com/DreamSoul-AI/workspace/pull/7)暂停，未合并、未同步飞书。其余历史候选不因此自动采纳。项目采用的专项规范继续执行，共用入口的概括不能豁免专项要求。
 
 ## 技术栈与目录
 
