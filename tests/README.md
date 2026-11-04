@@ -124,6 +124,7 @@ rpipe根下test_architecture按独立模块展开静态合同，test_main覆盖�
 | `tests/test_run_entry.py` | tests/run.py参数、环境与子进程启动 |
 | `rpipe/structure/algorithm/test_base.py` | structure.algorithm.base.Algorithm/AlgorithmHook循环合同 |
 | `rpipe/structure/artifact/test_io_external_roots.py` | make.plan/publish实体根、artifact.io输入引用、resources.output_snapshot、Git真实入口忽略 |
+| `rpipe/structure/system/test_local_paths.py` | system.local_paths.configure/main → 实际Git忽略 → 本机目录链接；预览、创建/重复使用、既有内容保全、路径分离 |
 | `rpipe/structure/data/test_stats.py` | structure.data.stats只读统计解析及缺失/损坏 |
 | `rpipe/structure/model/test_factory_shape.py` | structure.model.factory.resolve_shape正整数、元信息一致性及显式变换 |
 | `rpipe/structure/data/test_factory_stats.py` | structure.data.factory._with_recorded_stats消费已保存统计 |
