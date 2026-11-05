@@ -1,10 +1,14 @@
-# 一、范围与决定
+# 2026-10-30 main_probe CUDA配对执行
+
+[返回文档入口](../../README.md#文档导航)
+
+## 一、范围与决定
 
 执行及整理日期2026年10月30日，北京时间。用户明确确认按原预算以新version执行8格CUDA短探针；本轮固定候选f64e3d24b90dcc9dc950a85053815e808b6d5810，version为main-probe-e3-20261030-f64e3d24b90d，参考侧98648f3a5c7db7dccf3ca806410d5b6fdee9484c。
 
 重新核对源码、16项原始文件、profile及隔离依赖，引用同科学源码摘要下已通过的8格真实CPU准入。没有修改科学源码、配方、门限、数据、原环境或旧失败版本，没有使用retry。
 
-# 二、完成与文档边界
+## 二、完成与文档边界
 
 8格CUDA执行、各Run数值门和正式Study汇总终验全部通过。独立安全加载实际OBSERVATIONS复核Tensor、优化器、scheduler及RNG树；process前后41项科学文件哈希不变。资源及原始数字见[运行记录](<../运行记录 Run Record/2026-10-30 main_probe CUDA配对验证.md>)。
 
