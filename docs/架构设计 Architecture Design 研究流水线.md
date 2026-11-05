@@ -19,7 +19,7 @@ RPipe 是 research pipeline 的参考模板，提供构造研究实验的 warm-u
 实验组织以 Study → Experiment → Run 为主干。代码语义以 structure 与 flow 两柱组织：structure 说明实验由哪些部件构成，flow 说明这些部件怎样按阶段工作。artifact 是 structure 内的持久化职责，也是运行时配置、结果与文件产物的组织方式。
 
 ```mermaid
-flowchart TB
+flowchart LR
     Study[Study 研究与编排] --> Experiment[Experiment 比较条件]
     Experiment --> Run[Run 一次 seed 下的运行]
     Run --> Structure[structure 实验组成]
@@ -185,7 +185,7 @@ make 读取 Study 声明与基底配置，将因素轴展开为 Experiment，再
 早期设计中的 Registry 表示“声明选择对应哪种建构规则”，Factory 表示“按有效配置调用规则，交出运行对象”。二者是不同职责，不意味着每个部件都必须有同名基类或注册表；system 可以按明确配置直接建构。模板不要求自动发现插件或第三方安装协议。
 
 ```mermaid
-flowchart LR
+flowchart TB
     Declaration[配置声明] --> Selection[部件接口与来源选择]
     Selection --> Construction[建构规则]
     Construction --> ThirdParty[第三方或研究自有实现]
@@ -235,7 +235,7 @@ AlgorithmHook 表示训练循环中明确的插入点，例如周期评测、che
 flow 服务 Study 的执行，对每个选定 Run 使用同一套阶段语义。cli 将命令转为计划、执行、查询或汇总请求，不在参数解析处重复实现计算。
 
 ```mermaid
-flowchart LR
+flowchart TB
     Declare[Study 声明] --> Make[make 展开配置与清单]
     Make --> prepare
     prepare --> execute

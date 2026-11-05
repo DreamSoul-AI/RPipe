@@ -2,6 +2,8 @@
 
 从当前 checkout 开始，完成一次 CPU 训练、独立评测和结果查看。使用已有隔离环境，先确认实际导入的源码。
 
+首次使用的顺序是：准备下方环境 → 跳到 [CPU 最小研究](#从模板开始一个小研究) → 填写该步骤要求的外部输出路径并执行。仓内 data/output 符号链接是便捷入口，可在需要时配置，不是 CPU 合成示例的前置条件。其余命令合同与资源限制供后续查阅。
+
 [返回 README](../README.md) · [CPU 最小研究](#从模板开始一个小研究) · [外部路径](#外部数据与输出) · [命令与执行](#计划发布与执行) · [资源限制](#资源监管与当前限制) · [测试](#测试与验证)
 
 ## 安装与源码导入
@@ -14,7 +16,7 @@ python -m rpipe --help
 python -m rpipe --version
 ```
 
-安装后 `rpipe` 与 `python -m rpipe` 同走 [flow/cli.py](../src/rpipe/flow/cli.py) 的 main()，模块入口为 [__main__.py](../src/rpipe/__main__.py)，规划与发布直接使用 [structure.make](../src/rpipe/structure/make.py) 的 plan/expand/publish；单次执行使用 [flow.run.run](../src/rpipe/flow/run.py)，批次使用 [flow.supervision](../src/rpipe/flow/supervision.py)，派生使用 [flow.process](../src/rpipe/flow/process.py)；正式读取使用 [artifact.readout](../src/rpipe/structure/artifact/readout.py) 的 RunRef 接口，比较使用 [artifact.comparison](../src/rpipe/structure/artifact/comparison.py) 的明确对象接口。HF/TensorBoard 功能另需相应依赖。只读路径延迟导入科学栈，不等于安装元数据没有科学依赖。
+安装后 `rpipe` 与 `python -m rpipe` 同走 [flow/cli.py](../src/rpipe/flow/cli.py) 的 main()，模块入口为 [`__main__.py`](../src/rpipe/__main__.py)，规划与发布直接使用 [structure.make](../src/rpipe/structure/make.py) 的 plan/expand/publish；单次执行使用 [flow.run.run](../src/rpipe/flow/run.py)，批次使用 [flow.supervision](../src/rpipe/flow/supervision.py)，派生使用 [flow.process](../src/rpipe/flow/process.py)；正式读取使用 [artifact.readout](../src/rpipe/structure/artifact/readout.py) 的 RunRef 接口，比较使用 [artifact.comparison](../src/rpipe/structure/artifact/comparison.py) 的明确对象接口。HF/TensorBoard 功能另需相应依赖。只读路径延迟导入科学栈，不等于安装元数据没有科学依赖。
 
 已有环境可显式使用本仓源码，PowerShell 示例：
 
@@ -169,7 +171,7 @@ def register(ctx):
 
 自己的数据、模型、算法实现可分别落在 Study 的 structure/data、structure/model、structure/algorithm，再由 recipe 显式连接实际构造点。模型使用 model.factory.ModelRegistry，算法使用 algorithm.factory.AlgorithmRegistry，循环合同在 algorithm.base。可以直接修改本仓主体，无需先包装成插件或保留跨项目稳定接口。目录骨架本身不会自动注册实现。
 
-仅在需要阶段协作时，于 study.yaml 显式设置 flow: {study_phases: true}，再在 flow/<阶段>/__init__.py 提供 run(ctx)，或采用同名 flow/<阶段>.py。prepare 可另提供 before(ctx)，在科学部件装配前执行。不要为启用而填满六个空 hook，也不要在研究 hook 另开正式结果写端，具体边界见两份设计。
+仅在需要阶段协作时，于 study.yaml 显式设置 flow: {study_phases: true}，再在 `flow/<阶段>/__init__.py` 提供 run(ctx)，或采用同名 `flow/<阶段>.py`。prepare 可另提供 before(ctx)，在科学部件装配前执行。不要为启用而填满六个空 hook，也不要在研究 hook 另开正式结果写端，具体边界见两份设计。
 
 4. 填入已确认、与源码和输入分离的真实绝对输出根。下面的占位符须替换，不能原样执行：
 
@@ -190,11 +192,11 @@ plan --show-config 是只读有效配置预览，先核两个 Run、train_id、f
 
 | 位置 | 查看什么 |
 | --- | --- |
-| index.json、runs/<id>/config.yaml | 正式清单、train_id 及保存的有效配置 |
-| runs/<id>/execution.json | 当前 attempt、执行与收尾事实，不用日志猜终态 |
-| runs/<id>/result.json | status、quality、evidence_complete、metrics 和 execute。train 的 execute.steps 应为2，eval 的 execute.resume_path 应指向对应训练的 best.pt |
-| runs/<id>/assets/checkpoints/、assets/tracker/scalars.jsonl | 实际 best/latest 快照及有效数字轨迹 |
-| runs/<id>/assets/logs/events.jsonl | 带 Run/attempt/PID 的结构化事件 |
+| `index.json`、`runs/<id>/config.yaml` | 正式清单、train_id 及保存的有效配置 |
+| `runs/<id>/execution.json` | 当前 attempt、执行与收尾事实，不用日志猜终态 |
+| `runs/<id>/result.json` | status、quality、evidence_complete、metrics 和 execute。train 的 execute.steps 应为2，eval 的 execute.resume_path 应指向对应训练的 best.pt |
+| `runs/<id>/assets/checkpoints/`、`runs/<id>/assets/tracker/scalars.jsonl` | 实际 best/latest 快照及有效数字轨迹 |
+| `runs/<id>/assets/logs/events.jsonl` | 带 Run/attempt/PID 的结构化事件 |
 
 process 输出 Study 派生摘要，需要曲线时显式 process --figures。科学结果、执行成功与质量判断分别核对，进程退出0不能单独证明研究完成。修改数据、模型、算法或源码后使用明确的新 version，重新 plan/make/run，不给已成功的旧 Run 原地换来源。status/report/logs 可显式 --version first-cpu-v1 查看旧记录。扩大数据、步数或设备前先更新研究计划及实际准入条件。
 

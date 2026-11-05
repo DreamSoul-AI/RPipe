@@ -2,7 +2,7 @@
 
 **从一个可运行、可修改的研究流水线开始你的课题。**
 
-RPipe（Research Pipeline）提供实验声明、科学部件、执行流程和结果记录的参考组织方式。复制或 fork 本仓，先跑通一个小实验，再直接修改代码适应研究问题。后续项目自行维护，不要求持续跟随上游接口。
+RPipe（Research Pipeline）是一个研究项目的代码起点：用配置描述实验条件，连接数据、模型和训练方法，再执行实验、保存结果并做比较。你可以复制或 fork 本仓，先跑通小实验，再直接修改代码适应自己的课题，后续由该项目自行维护。
 
 [开始使用](#开始使用) · [设计](#两柱设计) · [文档](#文档导航) · [参与开发](#参与开发)
 
@@ -10,26 +10,26 @@ RPipe（Research Pipeline）提供实验声明、科学部件、执行流程和�
 
 ## 开始使用
 
-需要 **Python 3.10+** 和满足 [pyproject.toml](pyproject.toml) 的独立环境。核心依赖包括 PyTorch、torchvision、NumPy 和 PyYAML。安装可能联网下载依赖，请先核对机器环境。
+1. 复制或 fork 本仓，在本地打开仓库目录
+2. 准备 **Python 3.10+** 的独立环境，按 [pyproject.toml](pyproject.toml) 安装依赖
+3. 按下方 CPU 示例完成训练和评测，再换成自己的数据与方法
+
+在仓库根目录安装并查看命令。安装可能联网下载 PyTorch 等依赖，先核对已有环境：
 
 ```console
 python -m pip install -e ".[dev]"
 python -m rpipe --help
 ```
 
-**第一次运行：** 按[使用指南：CPU 最小研究](<docs/使用指南 Usage Guide 研究流水线.md#从模板开始一个小研究>)复制模板，替换两份配置并添加小型数据 recipe，即可完成无下载的两步训练、对应 best 的独立评测和结果查看。指南保留完整代码与命令。
+**第一次运行从 [CPU 最小研究](<docs/使用指南 Usage Guide 研究流水线.md#从模板开始一个小研究>)开始。** 指南提供两份完整配置和数据构造代码，用 8 个合成样本训练两步，再单独加载该训练选出的最佳模型进行评测。依赖就绪后，示例不需要下载数据或使用 GPU。
 
 `studies/_template` 原始配置是 **MNIST / CUDA / 20 epoch**，直接运行它会进入不同的实验。先完成 CPU 示例，再按自己的研究计划准备真实数据和设备。
 
 ### Study 使用与执行边界
 
-一个 Study 用 `study.yaml` 描述条件和 seed，用 `experiment_config.yaml` 保存基底配置。先只读预览有效配置，再决定执行：
+一个 **Study** 是一组相关实验，`study.yaml` 描述比较条件和随机种子（seed），`experiment_config.yaml` 保存基础参数。同一组条件下，每个 seed 对应一次独立运行（Run）。
 
-```console
-python -m rpipe plan studies/_template --run-root <external-run-root> --show-config
-```
-
-将 `<external-run-root>` 换成已确认的、位于源码和输入目录之外的绝对路径。`plan` 不加载 recipe、不下载数据、不训练，也不写运行产物。
+CPU 示例会带你设置源码与输入目录之外的绝对输出路径，再用 `plan --show-config` 预览每次运行的有效配置。预览不加载研究代码、不下载数据、不训练，也不写运行产物。核对配置后再执行。
 
 完成 CPU 示例配置后，常用流程是：
 
