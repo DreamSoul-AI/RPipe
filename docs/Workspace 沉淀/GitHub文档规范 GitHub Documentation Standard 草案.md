@@ -101,7 +101,7 @@ README 开头应能回答“是什么、能做什么、从哪里开始”。实�
 
 ## 公式、图示与图片
 
-行内公式用 `$...$`。较长公式可用独立行的 `$$` 包围，推导保持可读的多行源码，不继承飞书单物理行限制。公式附近解释符号、单位和适用条件，避免用截图替代可编辑数学内容。GitHub 支持相应数学表达式语法，其他预览器可能不同。[数学表达式](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/writing-mathematical-expressions)。
+行内公式用 `$...$`；公式含下划线等与 Markdown 冲突的字符时，采用美元符号与反引号共同包围的行内写法，避免被解析为强调。较长公式可用独立行的 `$$` 包围，推导保持可读的多行源码，不继承飞书单物理行限制。公式附近解释符号、单位和适用条件，避免用截图替代可编辑数学内容。GitHub 支持相应数学表达式语法，其他预览器可能不同。[数学表达式](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/writing-mathematical-expressions)。
 
 流程与架构图优先保留 Mermaid 围栏源，文字说明应让读者在图未渲染时仍理解主要关系。科学曲线保留实际生成数据、方法和必要导出，不用示意图冒充测量。图片提供有意义的替代文字，说明来源和单位；PNG 或 SVG 等按目标显示与导出效果选用，不沿用飞书的统一禁传 SVG 条款。Mermaid 语法须按 GitHub 实际支持版本核验。[Mermaid 支持](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/creating-diagrams#creating-mermaid-diagrams)。
 
