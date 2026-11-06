@@ -230,6 +230,8 @@ supervision 的私有活进度除 request nonce、Run 身份、当前项与完�
 
 Windows 普通 worker 复用 system.resources 的 WindowsJob，以本次启动唯一随机名字定位专属容器，启动器和实际 worker 分别核身份与退出；实际 worker 在科学模块及研究代码执行前入组，以本次 request、Run identity、attempt 和实际 PID 交接 ready，父端核成员后才通过私有输入管道放行。
 
+计算等待与协作取消收尾采用相同的实际worker存活判断；启动器退出不能代替实际worker退出。协作等待仍受既有清理预算和硬截止约束，剩余后代、查询失败或无法确认退出继续按原失败／unknown合同处理。
+
 Job 句柄不传给启动器；实际 worker 以明确名字打开、入组后关闭自己的非继承句柄，避免启动器或后代持有副本而拖延 kill-on-close。命名冲突拒绝，不接管既有 Job。普通 Run 的 Job 可嵌套在 supervision 的所属 Job 内，入组失败不绕过准入。worker.close 独立核树空，残留即记录清理失败并有界回收，查询、回收或句柄关闭不确定均保留 unknown 与 owner；首错与清理错分开。
 
 仅根退出或 science_closed 响应不足以发布成功。现有 Windows 扩展/可生子后端的硬 timeout 拒绝范围保持，不把新增闭合机制宣称为新资源配额能力。
