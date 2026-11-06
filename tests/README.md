@@ -1,4 +1,10 @@
-# 一、测试范围与入口
+# RPipe 测试说明
+
+[返回 README](../README.md#参与开发)
+
+<a id="一测试范围与入口"></a>
+
+## 测试范围与入口
 
 采用[测试规范 代码](https://dreamsoul.feishu.cn/docx/KE4IdW6EWoKdvExSkdvcjTJFnsf)。项目执行命令及资源边界从[README](../README.md)进入，当前整改与验收从[开发计划](<../docs/开发计划 Development Plan 研究流水线.md>)进入。这里维护实际镜像、目标映射与例外，不复制研发计划。
 
@@ -11,14 +17,18 @@
 
 rpipe根下test_architecture按独立模块展开静态合同，test_main覆盖外部命令入口。可选MNIST旅程以公共CLI为入口，位于rpipe根，原声明留在_data/studies中，不再建立不存在的独立Study镜像。run_artifacts旅程由flow.run启动，readout_lifecycle以正式读端为验证对象；二者共用合成准备过程，按实际合同分别落位。
 
-# 二、骨架及排除登记
+<a id="二骨架及排除登记"></a>
+
+## 骨架及排除登记
 
 - src布局外壳不是Python程序层级，镜像从rpipe包开始，包初始化与无独立行为的命名空间不要求空用例
 - Study main_exp的structure/api、structure/model仅有初始化/注册接入，未建独立测试目录，实际构建与注册通过recipe及prepare旅程验证。main_probe的flow/collect、execute、summarize目前通过完整合成旅程及paired合同验证，尚无独立目录用例，此处登记骨架缺项，不称独立覆盖已完成
 - studies/_template只有声明模板，按模板发布与配置旅程覆盖，不复制科学源码或空测试壳
 - 排除__pycache__、build、dist、egg-info、.tmp、虚拟环境、外部依赖、生成输出/缓存、外部证据及旧Run。测试程序的镜像范围只含前述三个执行文件，共享conftest与fixture数据不递归建立镜像
 
-# 三、逐文件目标索引
+<a id="三逐文件目标索引"></a>
+
+## 逐文件目标索引
 
 下表按实际导入和调用合同定位，模块参数化的每个目标产生独立nodeid。标记及预算沿pyproject.toml和统一执行器，不由文件名推断成本、层级或质量。
 

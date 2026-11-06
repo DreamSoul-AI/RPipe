@@ -268,3 +268,6 @@ Desktop.ini
 ~$*.ppt*
 *.xlk
 *.bak
+
+# Local personal context; never distribute actual user information
+/USER.md
