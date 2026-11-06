@@ -6,7 +6,7 @@ RPipe（Research Pipeline）是一个研究项目的代码起点：用配置描�
 
 [开始使用](#开始使用) · [设计](#两柱设计) · [文档](#文档导航) · [参与开发](#参与开发)
 
-最新正式发布为 [v0.5.0](https://github.com/DreamSoul-AI/RPipe/releases/tag/v0.5.0)。仓库 main 另包含外部 data/output 链接配置等后续改进，旧发布制品保留原内容。Python 包是本模板的安装和运行方式，不承诺跨项目稳定 API。
+本轮版本为 **v0.5.1**，包含外部 data/output 链接配置、GitHub 文档整理和研发约定更新。[发布状态与附件](https://github.com/DreamSoul-AI/RPipe/releases)从 GitHub Releases 核对；旧发布制品保留原内容。Python 包是本模板的安装和运行方式，不承诺跨项目稳定 API。
 
 ## 开始使用
 
@@ -86,11 +86,11 @@ docs/           # 使用、设计、计划及日期记录
 
 ## 参与开发
 
-从 [AGENTS.md](AGENTS.md) 读取本仓约定与共用研发资料入口。本仓采用 workspace 的[研发用模板](https://github.com/DreamSoul-AI/workspace/blob/main/templates/software-engineering/AGENTS.template.md)，对应[《研发用 AGENTS.md》](https://dreamsoul.feishu.cn/docx/QICWdeEokobO9RxYR9zcjE6Pnyg)，不能用 workspace 根通用 AGENTS.md 替代。飞书资料需要相应访问权限。
+从 [AGENTS.md](AGENTS.md) 读取本仓约定与共用研发资料入口。本仓采用 workspace 的[研发用模板](https://github.com/DreamSoul-AI/workspace/blob/main/templates/software-engineering/AGENTS.template.md)，对应[《研发用 AGENTS.md》](https://dreamsoul.feishu.cn/docx/QICWdeEokobO9RxYR9zcjE6Pnyg)，不能用 workspace 根通用 AGENTS.md 替代。飞书资料需要相应访问权限。仓库 Markdown 按 workspace 的[GitHub 文档规范](https://github.com/DreamSoul-AI/workspace/blob/main/%E6%96%87%E6%A1%A3/%E8%A7%84%E8%8C%83/%E7%A0%94%E5%8F%91/%E5%BC%80%E5%8F%91/GitHub%20%E6%96%87%E6%A1%A3%E8%A7%84%E8%8C%83.md)维护，平台展示与实际执行分别验证。
 
 测试统一入口为 `python tests/run.py`，选择与改动有关的检查，输出和各进程临时目录放在 checkout 外。[测试说明](tests/README.md)维护实际组织，[使用指南](<docs/使用指南 Usage Guide 研究流水线.md#测试与验证>)提供命令和验证边界。现有 CI 覆盖 Ubuntu / Windows、Python 3.10 / 3.13 的 CPU 检查，以及两平台打包安装，不承担 GPU 科学验收。
 
-工作分支经 PR 进入 dev，main 只接受 dev 的集成 PR。合并、发布和下游同步按各自授权执行。项目经验进入 [Workspace 沉淀](<docs/Workspace 沉淀/Experience.md>)，详细过程归日期记录。
+工作分支经 PR 进入 dev，main 只接受 dev 的集成 PR。合并、发布和下游同步按各自授权执行。项目经验进入 [Workspace 沉淀](<docs/Workspace 沉淀/Experience.md>)，详细过程归日期记录。个人配置可从 workspace 的[空白模板](https://github.com/DreamSoul-AI/workspace/blob/main/USER.template.md)创建本地 `USER.md`，按 AGENTS.md 核对后使用；该文件已忽略，不提交或打包个人信息。
 
 已有下游的固定源码副本保留各自历史身份。同步须另行确认，保留完整上游 SHA、成员哈希和 MIT 许可，不逐文件补丁后冒充同一来源。
 

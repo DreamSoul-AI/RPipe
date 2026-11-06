@@ -1,6 +1,6 @@
 # GitHub 文档规范
 
-状态：项目沉淀草案，待审阅。整理日期：2026年11月5日。适用于以 GitHub 为主要阅读入口的 README 和仓库 Markdown，供后续 workspace 汇集与规范修订参考。本文尚未成为 workspace 共用规范，也不改变飞书文档规范。
+状态：历史来源草案，已由 workspace 于2026年11月6日承接。当前采用 [workspace 的 GitHub 文档规范](https://github.com/DreamSoul-AI/workspace/blob/main/%E6%96%87%E6%A1%A3/%E8%A7%84%E8%8C%83/%E7%A0%94%E5%8F%91/%E5%BC%80%E5%8F%91/GitHub%20%E6%96%87%E6%A1%A3%E8%A7%84%E8%8C%83.md)，以下保留试用来源，不另行维护共用要求。
 
 目标是让读者快速找到用途、操作、设计和依据，同时让 Markdown 源码便于维护。以下“应”表示本草案建议采用的基本要求，“建议”允许按文档规模裁剪。平台能力来自 GitHub 官方说明，文档分工与阅读取舍是本项目提出的编辑约定。
 
@@ -205,4 +205,4 @@ README 开头应能回答“是什么、能做什么、从哪里开始”。实�
 - 平台依据：本文就近引用的 GitHub 官方文档，查阅日期为2026年11月5日
 - 项目试用：RPipe 的 README、使用指南和其余 docs 已在本地文档分支试整理，AGENTS.md 继承正文保持不变，具体问题、方法和核验范围见[日期记录](<../开发记录 Development Record/2026-11-05 GitHub文档阅读整理.md>)
 - 当前证据：README 精简、代码块保留和本地链接／章节解析检查；整套 docs 已首轮应用，代表页面、四幅架构图和修正后的公式已在 GitHub 原生页面核验，见[11月6日记录](<../开发记录 Development Record/2026-11-06 文档收尾计划调整.md#github-原生页面复核>)。未逐页视觉验收全部历史文件，未做飞书转换复验
-- 后续路径：项目试用与审阅后，再决定是否提出 workspace Issue 和修改共用模板，本草案不自动产生跨项目修改、提交推送或发布授权
+- 采用结果：workspace 已发布共用规范及研发模板入口，来源与限制见其 [Experience.md](https://github.com/DreamSoul-AI/workspace/blob/main/Experience.md)。本草案保留历史身份；后续修订回到共用正文，本仓按实际授权同步。
