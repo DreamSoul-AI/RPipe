@@ -298,3 +298,39 @@ def test_windows_worker_cleanup_uncertainty_keeps_owner_and_attempts_handle_clos
         assert ctx.state['unknown_resources'] and not ctx.state['science_closed']
         assert ctx.state['cleanup_error_records']
     assert calls == ['close']
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows actual-worker exit window')
+def test_cancellation_waits_for_actual_worker_after_launcher_exit(
+        source_study, run_root, monkeypatch):
+    """A finishing actual worker is not an orphan merely because its launcher exited."""
+    from types import SimpleNamespace
+    from rpipe.flow import worker
+    from rpipe.flow.context import Cancellation, RunContext
+    from rpipe.structure.make import plan
+
+    token = Cancellation()
+    token.request()
+    ctx = RunContext(plan(source_study, run_root=run_root)[0], token, None)
+    calls, observations = [], []
+    def request_cancel(context):
+        assert context is ctx
+        calls.append('cancel')
+    monkeypatch.setattr(worker, '_request_cancel', request_cancel)
+    def pids():
+        observations.append(bool(calls))
+        return () if calls and len(observations) > 2 else (123,)
+    def terminate():
+        pytest.fail('cooperative actual worker was mistaken for an orphan')
+    job = SimpleNamespace(pids=pids, terminate=terminate,
+                          wait_empty=lambda timeout: not pids(), close=lambda: calls.append('close'))
+    ctx.state.update(attempt='a' * 32, worker_pid=123, worker_job=job,
+                     child=SimpleNamespace(poll=lambda: 0, stdin=None),
+                     worker_response_verified=True, worker_response={'science_closed': True},
+                     worker_response_attempted=True)
+
+    worker.close(ctx)
+
+    assert calls == ['cancel', 'close']
+    assert ctx.state['science_closed'] and not ctx.state['unknown_resources']
+    assert not ctx.state['cleanup_error_records']
