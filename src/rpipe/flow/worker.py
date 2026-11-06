@@ -203,6 +203,12 @@ def _start_windows_worker(ctx, command, env, options, folder, deadline):
     return child
 
 
+def _worker_running(ctx):
+    job = ctx.state.get('worker_job')
+    return (ctx.state['child'].poll() is None
+            or job is not None and ctx.state.get('worker_pid') in job.pids())
+
+
 def compute(ctx: RunContext, budget: Budget) -> dict:
     """Dispatch one owned child and return only its validated scientific draft."""
     ctx.state['worker_may_have_descendants'] = validate_budget(ctx.spec, budget)
@@ -245,8 +251,7 @@ def compute(ctx: RunContext, budget: Budget) -> dict:
         child = subprocess.Popen(command, cwd=ctx.study_dir, env=env, stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, **options)
         ctx.state['child'] = child
-    while child.poll() is None or (ctx.state.get('worker_job') is not None
-                                   and ctx.state.get('worker_pid') in ctx.state['worker_job'].pids()):
+    while _worker_running(ctx):
         _check_wait(ctx, deadline)
         time.sleep(0.02)
     response = _receive_response(ctx)
@@ -279,14 +284,15 @@ def _close(ctx: RunContext) -> None:
     hard_deadline = ctx.state.get('worker_deadline')
     hard_timeout = bool(ctx.state.get('worker_hard_timeout')) or (
         hard_deadline is not None and started >= hard_deadline)
-    if child.poll() is None and ctx.cancellation.is_set() and not hard_timeout:
+    if ctx.cancellation.is_set() and not hard_timeout:
         try:
-            _request_cancel(ctx)
-            cooperative_until = started + ctx.cleanup_seconds / 2
-            if hard_deadline is not None:
-                cooperative_until = min(cooperative_until, hard_deadline)
-            while child.poll() is None and time.monotonic() < cooperative_until:
-                time.sleep(min(0.02, max(0.0, cooperative_until - time.monotonic())))
+            if _worker_running(ctx):
+                _request_cancel(ctx)
+                cooperative_until = started + ctx.cleanup_seconds / 2
+                if hard_deadline is not None:
+                    cooperative_until = min(cooperative_until, hard_deadline)
+                while _worker_running(ctx) and time.monotonic() < cooperative_until:
+                    time.sleep(min(0.02, max(0.0, cooperative_until - time.monotonic())))
         except BaseException as error:
             cleanup.append(safe_error_record(error))
     if child.poll() is None:

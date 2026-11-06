@@ -6,7 +6,7 @@ RPipe（Research Pipeline）是一个研究项目的代码起点：用配置描�
 
 [开始使用](#开始使用) · [设计](#两柱设计) · [文档](#文档导航) · [参与开发](#参与开发)
 
-本轮版本为 **v0.5.1**，包含外部 data/output 链接配置、GitHub 文档整理和研发约定更新。[发布状态与附件](https://github.com/DreamSoul-AI/RPipe/releases)从 GitHub Releases 核对；旧发布制品保留原内容。Python 包是本模板的安装和运行方式，不承诺跨项目稳定 API。
+本轮版本为 **v0.5.1**，包含外部 data/output 链接配置、Windows 取消收尾修复、GitHub 文档整理和研发约定更新。[发布状态与附件](https://github.com/DreamSoul-AI/RPipe/releases)从 GitHub Releases 核对；旧发布制品保留原内容。Python 包是本模板的安装和运行方式，不承诺跨项目稳定 API。
 
 ## 开始使用
 

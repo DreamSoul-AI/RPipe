@@ -107,7 +107,7 @@ def test_real_worker_cancellation_preserves_first_error_and_only_owned_resources
             if behavior == 'foreign-marker':
                 assert any(error['type'] == 'AdmissionError' for error in report.cleanup_errors)
         else:
-            assert report.status == ('failed' if behavior == 'primary' else 'cancelled')
+            assert report.status == ('failed' if behavior == 'primary' else 'cancelled'), report
             assert (specs[0].assets_dir / 'closed').read_bytes() == b'science resource closed'
             assert not (specs[0].run_dir / '.execution').exists()
         assert report.error['type'] == ('ValueError' if behavior == 'primary' else 'Cancelled')
