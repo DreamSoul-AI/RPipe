@@ -79,8 +79,8 @@ docs/           # 使用、设计、计划及日期记录
 | [代码结构设计](<docs/代码结构设计 Code Structure Design 研究流水线.md>) | 目录、接口和依赖如何对应架构？ |
 | [开发计划](<docs/开发计划 Development Plan 研究流水线.md>) | 当前工程工作、依赖和验收是什么？ |
 | [缺陷记录](<docs/缺陷记录 Bug Report 研究流水线.md>) | 哪些已确认的问题仍待处理？ |
-| [通用调研](<docs/通用调研 General Research 研究流水线.md>) | 工程机制、方案和来源是什么？ |
-| [文献调研](<docs/文献调研 Literature Review 研究流水线.md>) | 已有研究和证据支持什么？ |
+| [通用调研](<docs/调研 Search/通用调研 General Search/通用调研 General Research 研究流水线.md>) | 工程机制、方案和来源是什么？ |
+| [文献调研](<docs/调研 Search/文献调研 Literature Search/文献调研 Literature Review 研究流水线.md>) | 已有研究和证据支持什么？ |
 | [研究计划](<docs/研究计划 Research Plan 研究流水线.md>) | 科学问题、实验协议和判据是什么？ |
 | [开发记录](<docs/开发记录 Development Record/>) / [运行记录](<docs/运行记录 Run Record/>) | 具体版本改过什么、实际运行结果和限制是什么？ |
 
