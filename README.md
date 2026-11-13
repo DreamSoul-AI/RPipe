@@ -68,6 +68,8 @@ docs/           # 使用、设计、计划及日期记录
 
 ## 文档导航
 
+维护入口见 [仓库约定](REPO.md) 和 [研发文档导航](docs/README.md)。
+
 按你当前的问题选读，不必从头遍读研发历史。
 
 | 文档 | 回答的问题 |
@@ -77,8 +79,8 @@ docs/           # 使用、设计、计划及日期记录
 | [代码结构设计](<docs/代码结构设计 Code Structure Design 研究流水线.md>) | 目录、接口和依赖如何对应架构？ |
 | [开发计划](<docs/开发计划 Development Plan 研究流水线.md>) | 当前工程工作、依赖和验收是什么？ |
 | [缺陷记录](<docs/缺陷记录 Bug Report 研究流水线.md>) | 哪些已确认的问题仍待处理？ |
-| [通用调研](<docs/通用调研 General Research 研究流水线.md>) | 工程机制、方案和来源是什么？ |
-| [文献调研](<docs/文献调研 Literature Review 研究流水线.md>) | 已有研究和证据支持什么？ |
+| [通用调研](<docs/调研 Search/通用调研 General Search/通用调研 General Research 研究流水线.md>) | 工程机制、方案和来源是什么？ |
+| [文献调研](<docs/调研 Search/文献调研 Literature Search/文献调研 Literature Review 研究流水线.md>) | 已有研究和证据支持什么？ |
 | [研究计划](<docs/研究计划 Research Plan 研究流水线.md>) | 科学问题、实验协议和判据是什么？ |
 | [开发记录](<docs/开发记录 Development Record/>) / [运行记录](<docs/运行记录 Run Record/>) | 具体版本改过什么、实际运行结果和限制是什么？ |
 
@@ -90,7 +92,7 @@ docs/           # 使用、设计、计划及日期记录
 
 测试统一入口为 `python tests/run.py`，选择与改动有关的检查，输出和各进程临时目录放在 checkout 外。[测试说明](tests/README.md)维护实际组织，[使用指南](<docs/使用指南 Usage Guide 研究流水线.md#测试与验证>)提供命令和验证边界。现有 CI 覆盖 Ubuntu / Windows、Python 3.10 / 3.13 的 CPU 检查，以及两平台打包安装，不承担 GPU 科学验收。
 
-工作分支经 PR 进入 dev，main 只接受 dev 的集成 PR。合并、发布和下游同步按各自授权执行。项目经验进入 [Workspace 沉淀](<docs/Workspace 沉淀/Experience.md>)，详细过程归日期记录。个人配置可从 workspace 的[空白模板](https://github.com/DreamSoul-AI/workspace/blob/main/USER.template.md)创建本地 `USER.md`，按 AGENTS.md 核对后使用；该文件已忽略，不提交或打包个人信息。
+工作分支经 PR 进入 dev，main 只接受 dev 的集成 PR。合并、发布和下游同步按各自授权执行。项目经验进入 [Workspace 沉淀](<docs/经验 Learnings/Experience.md>)，详细过程归日期记录。个人配置可从 workspace 的[空白模板](https://github.com/DreamSoul-AI/workspace/blob/main/USER.template.md)创建本地 `USER.md`，按 AGENTS.md 核对后使用；该文件已忽略，不提交或打包个人信息。
 
 已有下游的固定源码副本保留各自历史身份。同步须另行确认，保留完整上游 SHA、成员哈希和 MIT 许可，不逐文件补丁后冒充同一来源。
 
