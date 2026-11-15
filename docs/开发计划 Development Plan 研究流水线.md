@@ -51,7 +51,7 @@
 
 原30分钟计划已结束，见[原安排与本轮收拢依据](<开发记录 Development Record/2026-11-06 文档收尾计划调整.md#已结束的30分钟计划原文>)。
 
-[GitHub 文档规范草案](<Workspace 沉淀/GitHub文档规范 GitHub Documentation Standard 草案.md>)维护本轮编辑约定；[使用指南](<使用指南 Usage Guide 研究流水线.md>)维护操作；科学问题与协议从独立[研究计划](<研究计划 Research Plan 研究流水线.md>)进入。
+[GitHub 文档规范草案](https://github.com/DreamSoul-AI/RPipe/blob/e5ac94fbb416651b66cf144c4cc527f6da7f1c24/docs/Workspace%20%E6%B2%89%E6%B7%80/GitHub%E6%96%87%E6%A1%A3%E8%A7%84%E8%8C%83%20GitHub%20Documentation%20Standard%20%E8%8D%89%E6%A1%88.md)维护本轮编辑约定；[使用指南](<使用指南 Usage Guide 研究流水线.md>)维护操作；科学问题与协议从独立[研究计划](<研究计划 Research Plan 研究流水线.md>)进入。
 
 已完成批次、SHA、历史准入与验收见[本轮记录和原计划快照](<开发记录 Development Record/2026-11-05 GitHub文档阅读整理.md#原开发计划快照>)，原始运行依据仍由相应日期记录承接。
 
