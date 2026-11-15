@@ -1,20 +1,5 @@
 # RPipe 项目经验
 
-[返回文档入口](../../README.md#文档导航)
+当前没有待汇集的新经验。已采用内容从 [workspace 研发模板](https://github.com/DreamSoul-AI/workspace/blob/main/templates/software-engineering/AGENTS.template.md) 和正式规范取得。
 
-<a id="一维护方式"></a>
-
-## 维护方式
-
-本文件只维护尚待整理或汇集的项目经验。已有 Git 提交保存后按用户确认从队列清理，原文从提交与日期记录追溯；清理与 workspace 接收、模板采纳分别判断。
-
-<a id="二当前状态"></a>
-<a id="本轮试用补充"></a>
-
-## 当前状态
-
-2026年11月6日，当前无未保存的经验条目。GitHub 文档试用经验已保存于 `98146a7`、`0a73828` 与 `733b235`，本队列不再重复保留原文。[规范草案](<GitHub文档规范 GitHub Documentation Standard 草案.md>)保留供项目试用与审阅，未汇入 workspace 或改动共用正文。
-
-本轮包含 README 与历史分工、路径占位符／下划线文件名、架构图布局及公式渲染的实际问题；方法、工具、修正和验证范围见[11月5日记录](<../开发记录 Development Record/2026-11-05 GitHub文档阅读整理.md>)与[11月6日记录](<../开发记录 Development Record/2026-11-06 文档收尾计划调整.md#github-原生页面复核>)。区分本地近似预览与 GitHub 原生页面；未逐页视觉核验全部历史文档，未做飞书转换，不改 AGENTS.md。
-
-此前链接脚本与对话交接经验分别保存在 `63af4ed`、`2c0ef68`。外部路径脚本仅保留在 RPipe，共用推广已取消；workspace Issue #6 与 Draft PR #7 不再作为本仓待办。依据见[11月4日记录](<../开发记录 Development Record/2026-11-04 外部路径链接落地.md>)，本轮不代改 workspace。
+清理前的项目案例与来源保留在 [固定提交](https://github.com/DreamSoul-AI/RPipe/blob/3c11d87df2637d224d70aef867de773478cdebdd/docs/Workspace%20%E6%B2%89%E6%B7%80/Experience.md)，后续新经验继续在此登记。
