@@ -90,7 +90,7 @@ docs/           # 使用、设计、计划及日期记录
 
 测试统一入口为 `python tests/run.py`，选择与改动有关的检查，输出和各进程临时目录放在 checkout 外。[测试说明](tests/README.md)维护实际组织，[使用指南](<docs/使用指南 Usage Guide 研究流水线.md#测试与验证>)提供命令和验证边界。现有 CI 覆盖 Ubuntu / Windows、Python 3.10 / 3.13 的 CPU 检查，以及两平台打包安装，不承担 GPU 科学验收。
 
-工作分支经 PR 进入 dev，main 只接受 dev 的集成 PR。合并、发布和下游同步按各自授权执行。项目经验进入 [Workspace 沉淀](<docs/Workspace 沉淀/Experience.md>)，详细过程归日期记录。
+工作分支经 PR 进入 dev，main 只接受 dev 的集成 PR。合并、发布和下游同步按各自授权执行。项目经验进入 [Workspace 沉淀](https://github.com/DreamSoul-AI/RPipe/blob/a9a73759565fe6deb1abcfd830d9e10168e01cf8/docs/Workspace%20%E6%B2%89%E6%B7%80/Experience.md)，详细过程归日期记录。
 
 已有下游的固定源码副本保留各自历史身份。同步须另行确认，保留完整上游 SHA、成员哈希和 MIT 许可，不逐文件补丁后冒充同一来源。
 
