@@ -9,7 +9,7 @@
 | 使用指南 | [使用指南 Usage Guide 研究流水线.md](<使用指南 Usage Guide 研究流水线.md>) |
 | 开发记录 | [开发记录 Development Record](<开发记录 Development Record/>) |
 | 运行记录 | [运行记录 Run Record](<运行记录 Run Record/>) |
-| 经验与待跟进 | [Experience.md](<经验 Learnings/Experience.md>) |
+| 经验与待跟进 | [Experience.md](https://github.com/DreamSoul-AI/RPipe/blob/2241cb0f0020160cbdf96a7d761da72c1693ba3d/docs/%E7%BB%8F%E9%AA%8C%20Learnings/Experience.md) |
 | 调研与证据 | [调研与证据](<调研 Search/README.md>) |
 | 设计与合同 | [设计与合同](<设计 Design/README.md>) |
 | 计划与缺陷 | [计划与缺陷](<计划 Plans/README.md>) |
