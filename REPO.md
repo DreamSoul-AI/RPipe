@@ -27,3 +27,11 @@
 - 提交对应一项完整、已验证的改动，PR 对应一个可独立评审的里程碑。分支和交付按本项目约定执行。
 - 经验按主题记录问题、做法、适用条件与证据，沿用项目现有入口。新项目可按需使用 `docs/经验 Learnings/`。
 - 新增双语调研文档采用“通用调研 General Search”和“文献调研 Literature Search”。需要集中维护正文、大纲和索引时，按课题组织到现有入口或 `docs/调研 Search/`。既有文件按项目约定维护。
+
+## 共享资源入口
+
+- 使用共享资源时，从 [Knowledge](https://github.com/DreamSoul-AI/knowledge) 查找共享资源工具，按 Workspace 配套示例将数据、模型与项目产物接入 `.local/`。本机路径从个人配置读取，实际链接与消费者按项目核对。
+
+## Workspace 采用记录
+
+- 来源 [Workspace 098bd2e](https://github.com/DreamSoul-AI/workspace/tree/098bd2eccf23eb1e6d77a3eec6db51e6bc387daf)。采用范围为Learnings 命名与分发、文档规范配置、长作业检查点与恢复、调研、研究计划与研究结论归档、发布前分支对齐、可选共享资源入口。项目专用流程见本文件。
