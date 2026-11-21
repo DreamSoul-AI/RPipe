@@ -43,8 +43,8 @@
 - 对话命名或其他个人习惯：【填写，可留空】
 
 ## 文档规范
-- 默认文档规范：[飞书文档规范](https://dreamsoul.feishu.cn/docx/DdmxdrNvBo9AMXxkAYmc4EJ6nwe) 【可替换为自己选择的规范名称与链接或路径】
-- GitHub 文档默认规范：[GitHub 文档规范](https://dreamsoul.feishu.cn/docx/V3uPd2zg0onhaExj2FYcAUIlnjf) 【可按本人或项目约定调整】
+- 默认文档规范：[通用文档规范](https://dreamsoul.feishu.cn/docx/UWJ0dWNHzohVkaxUYNdchviznqt) 【可替换为自己选择的规范名称与链接或路径】
+- GitHub 文档默认规范：[通用文档规范](https://dreamsoul.feishu.cn/docx/UWJ0dWNHzohVkaxUYNdchviznqt) 中的“GitHub 专用要求”【可按本人或项目约定调整】
 - 项目或发布场景的补充约定：【填写适用项目、平台及对应规范，可留空】
 
 首次接入先提供上述默认值，由使用者确认或修改。更新时保留本人已选择的规范。
