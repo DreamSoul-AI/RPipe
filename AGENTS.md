@@ -17,7 +17,7 @@
 - 创建新对话时，明确目标项目、工作目录和侧栏分区。本次指定优先，其次参考 USER.md 的已有配置；未配置时，由创建方结合任务、当前项目和已有分区主动判断，无法确定时再询问。立即开展的任务放置顶区，其他任务选择合适的已有分区，避免落入“最近”或无关的默认项目、系统目录。创建后核对实际项目、目录和分区
 
 ## 仓库专用配置
-- 新建研发仓库、首次克隆接入或首次引入共享资源时，主动核对数据、模型与产物的共享需求。需要共享时读取 USER.md 的共享根及项目已有配置，按 [共享资源接入示例](https://github.com/DreamSoul-AI/workspace/tree/main/templates/software-engineering/examples/shared-resources) 使用 Knowledge 工具先预览，再按当前授权接入，并核对实际下载和读取路径。数据按数据集、模型按模型组织，产物按仓库隔离；没有共享需求时沿用项目布局。
+- 新建研发仓库、首次克隆接入或首次引入共享资源时，主动核对数据、模型与产物的共享需求。需要共享时读取 USER.md 的共享根及项目已有配置，按 [共享资源接入示例](https://github.com/DreamSoul-AI/workspace/tree/main/templates/software-engineering/examples/shared-resources) 使用 Knowledge 工具先预览，再按当前授权接入，并核对实际下载和读取路径。仓内共享入口推荐 `.shared/data`、`.shared/models`、`.shared/artifacts`，类型和路径可配置。数据按数据集、模型按模型组织，产物按项目隔离或显式配置；没有共享需求时沿用项目布局。
 - REPO.md 是正在开发的 Git 代码或研究仓库的专用配置，例如某个 GitHub 项目的本地仓库。它放在该项目根目录，记录该项目的工作方式、命名与结构、环境、验证要求及资料入口
 - 接入或维护项目配置时，可从配套的 REPO.template.md 建立仓库根 REPO.md。已有同类文件先比较合并，仅将 README 或原 AGENTS.md 中已确认的仓库专用指令迁入，核对内容与入口后再移除重复项。REPO.md 通过本入口要求 Agent 主动读取，不因文件名自动加载，不为无专有内容的项目创建空壳
 - 团队可共享的 REPO.md 可以随仓库维护，公开仓库先核对内容的公开范围。身份、账号和个人路径继续留在本地 USER.md，凭据不写入这些文件
