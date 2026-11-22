@@ -30,7 +30,7 @@
 
 ## 共享资源入口
 
-- 使用共享资源时，从 [Knowledge](https://github.com/DreamSoul-AI/knowledge) 查找共享资源工具，按 Workspace 配套示例将数据、模型与项目产物接入 `.local/`。本机路径从个人配置读取，实际链接与消费者按项目核对。
+- 使用共享资源时，从 [Knowledge](https://github.com/DreamSoul-AI/knowledge) 查找共享资源工具，按 Workspace 配套示例将数据、模型与项目产物接入 `.shared/`。本机路径从个人配置读取，实际链接与消费者按项目核对。
 
 ## Workspace 采用记录
 
