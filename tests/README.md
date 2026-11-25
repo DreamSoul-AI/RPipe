@@ -34,11 +34,13 @@ python tests/run.py --offline --timeout-seconds 1200
 
 本地影响入口为小型 CPU 用例设置 OMP、MKL、OpenBLAS 各一个线程。直接调用 `tests/run.py` 采用调用环境。TensorBoard 真实事件读回带 external 标记，有依赖时按既有单项命令验证。发布、构建依赖或公共执行合同变化时，继续执行完整回归、实际 wheel/sdist 安装与严格来源验证。研究实验按研究计划安排。
 
-### 自动 CI 本地改稿
+<a id="自动-ci-本地改稿"></a>
 
-**候选工作流已接入选择策略，线上结果从运行记录核对**。`tests/ci.py` 为两个工作流选择范围、核验已通过证据，并生成与实际文件树绑定的回执。文档路径只使用 Python 标准库，不安装 PyTorch，也不运行打包任务。
+### 自动 CI 选择与证据复用
 
-| 触发或改动 | 改稿的实际选择 |
+**选择与证据复用已合入dev**，见[#269](https://github.com/DreamSoul-AI/RPipe/pull/269)。实际运行结果从[本轮记录](<../docs/运行记录 Run Record/2026-11-26 本地测试选择与耗时对比.md#真实-ci-与合并后复用>)核对。`tests/ci.py` 为两个工作流选择范围、核验已通过证据，并生成与实际文件树绑定的回执。文档路径只使用 Python 标准库，不安装 PyTorch，也不运行打包任务。
+
+| 触发或改动 | 执行选择 |
 | --- | --- |
 | dev PR，仅 Markdown | 文档文件引用与编码检查；两个必需汇总门正常完成 |
 | dev PR，algorithm、data、model 或已知测试文件 | 受影响离线用例，Ubuntu/Python3.10 与 Windows/Python3.13；改动 src 时另跑两平台严格打包验证 |
@@ -49,9 +51,9 @@ python tests/run.py --offline --timeout-seconds 1200
 
 dev 复用要求同时成立：本次提交关联已合并至 dev 的 PR；最新对应 PR 工作流成功；回执未过期，仓库、PR、head、目标基线、实际文件树、选择指纹、运行及重跑编号全部匹配。测试合并提交与实际合并提交可以 SHA 不同，但文件树必须相同。回执保留原测试提交与运行身份。API 不可用、回执缺失／过期或新基线不匹配时，恢复完整检查；最新失败或取消不能改用旧绿项。首次采用新工作流时若没有有效回执，同样完整执行。
 
-`Unit tests`、`Build package` 名称保留，`Branch flow` 沿用原配置。工作流不采用 paths 过滤；汇总门使用 `always()`，检查计划成功及被选任务成功，合法未选任务才允许 skipped。失败、取消和意外跳过不能生成成功回执。此设计依据 GitHub 的[任务依赖行为](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-jobs)，远端实际调度仍待采用后验收。保护规则保持原状。
+`Unit tests`、`Build package` 名称保留，`Branch flow` 沿用原配置。工作流不采用 paths 过滤；汇总门使用 `always()`，检查计划成功及被选任务成功，合法未选任务才允许 skipped。失败、取消和意外跳过不能生成成功回执。此设计依据 GitHub 的[任务依赖行为](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-jobs)，实际平台调度与阻断结果由本轮记录分别维护。保护规则保持原状。
 
-完整 CPU 在一个离线批次中执行原 core 与 integration/e2e 集合，TensorBoard 真实读回仍单独运行。两平台 wheel／sdist 安装、严格来源哈希及 CLI 合同保留。完整矩阵可由手动触发补跑，发布路径始终完整执行。
+完整 CPU 在一个离线批次中执行原 core 与 integration/e2e 集合，TensorBoard 真实读回仍单独运行。两平台 wheel／sdist 安装、严格来源哈希及 CLI 合同保留。发布路径始终完整执行。手动完整矩阵规则已定义，但[GitHub要求默认分支具有workflow_dispatch入口](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)。本次不改main，其旧工作流尚未声明该事件，不宣称手动按钮已可用；本地完整入口和按规则选中的完整PR检查继续可用。
 
 本地合同验证：
 
@@ -59,7 +61,7 @@ dev 复用要求同时成立：本次提交关联已合并至 dev 的 PR；最�
 python tests/run.py --offline -- tests/tests/test_ci.py tests/tests/test_impact.py tests/tests/test_run_entry.py
 ```
 
-已有约27分钟是旧线上 PR 与 dev 两轮的基线；新稿尚无线上耗时实测，不承诺13分钟或文档1分钟。实际结果与采用后的验收项见[运行记录](<../docs/运行记录 Run Record/2026-11-26 本地测试选择与耗时对比.md#自动-ci-本地改稿验证>)。
+本次完整代码PR实际806秒，dev复用检查21秒，两轮CI合计827秒（13分47秒，不含人工间隔）。完整PR并未显示明显提速，主要收益是dev不再重复完整矩阵。旧约27分钟来自不同候选，只作历史参照。实际结果与适用范围见[运行记录](<../docs/运行记录 Run Record/2026-11-26 本地测试选择与耗时对比.md#自动-ci-本地改稿验证>)。
 
 采用[测试规范 代码](https://dreamsoul.feishu.cn/docx/KE4IdW6EWoKdvExSkdvcjTJFnsf)。项目执行命令及资源边界从[README](../README.md)进入，当前整改与验收从[开发计划](<../docs/开发计划 Development Plan 研究流水线.md>)进入。这里维护实际镜像、目标映射与例外，不复制研发计划。
 
