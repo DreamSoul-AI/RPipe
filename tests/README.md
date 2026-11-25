@@ -38,7 +38,7 @@ python tests/run.py --offline --timeout-seconds 1200
 
 ### 自动 CI 选择与证据复用
 
-**选择与证据复用已通过#269合入dev**。实际运行结果从[本轮记录](<../docs/运行记录 Run Record/2026-11-26 本地测试选择与耗时对比.md#真实-ci-与合并后复用>)核对。`tests/ci.py` 为两个工作流选择范围、核验已通过证据，并生成与实际文件树绑定的回执。文档路径只使用 Python 标准库，不安装 PyTorch，也不运行打包任务。
+**选择与证据复用已合入dev**，见[#269](https://github.com/DreamSoul-AI/RPipe/pull/269)。实际运行结果从[本轮记录](<../docs/运行记录 Run Record/2026-11-26 本地测试选择与耗时对比.md#真实-ci-与合并后复用>)核对。`tests/ci.py` 为两个工作流选择范围、核验已通过证据，并生成与实际文件树绑定的回执。文档路径只使用 Python 标准库，不安装 PyTorch，也不运行打包任务。
 
 | 触发或改动 | 执行选择 |
 | --- | --- |
@@ -61,7 +61,7 @@ dev 复用要求同时成立：本次提交关联已合并至 dev 的 PR；最�
 python tests/run.py --offline -- tests/tests/test_ci.py tests/tests/test_impact.py tests/tests/test_run_entry.py
 ```
 
-已有约27分钟是旧线上 PR 与 dev 两轮的基线；新稿尚无线上耗时实测，不承诺13分钟或文档1分钟。实际结果与采用后的验收项见[运行记录](<../docs/运行记录 Run Record/2026-11-26 本地测试选择与耗时对比.md#自动-ci-本地改稿验证>)。
+本次完整代码PR实际806秒，dev复用检查21秒，两轮CI合计827秒（13分47秒，不含人工间隔）。完整PR并未显示明显提速，主要收益是dev不再重复完整矩阵。旧约27分钟来自不同候选，只作历史参照。实际结果与适用范围见[运行记录](<../docs/运行记录 Run Record/2026-11-26 本地测试选择与耗时对比.md#自动-ci-本地改稿验证>)。
 
 采用[测试规范 代码](https://dreamsoul.feishu.cn/docx/KE4IdW6EWoKdvExSkdvcjTJFnsf)。项目执行命令及资源边界从[README](../README.md)进入，当前整改与验收从[开发计划](<../docs/开发计划 Development Plan 研究流水线.md>)进入。这里维护实际镜像、目标映射与例外，不复制研发计划。
 
