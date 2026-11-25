@@ -83,10 +83,19 @@ def _cancel_check(folder, spec, attempt, request):
     marker = folder / 'worker-cancel.json'
 
     def check():
-        try:
-            body = read_json(contained(marker, folder))
-        except FileNotFoundError:
-            return
+        for attempt_index in range(6):
+            try:
+                body = read_json(contained(marker, folder))
+                break
+            except FileNotFoundError:
+                return
+            except PermissionError as error:
+                # Python's CRT file open can lose the Windows sharing error code.
+                code = getattr(error, 'winerror', None)
+                sharing = code in (32, 33) or os.name == 'nt' and code is None and error.errno == 13
+                if not sharing or attempt_index == 5:
+                    raise
+                time.sleep(.01)
         if any(body.get(name) != expected[name] for name in ('request', 'identity', 'attempt')):
             return
         if type(body.get('schema')) is not int or body != expected:
