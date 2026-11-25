@@ -202,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--module', help='module_* marker without prefix, e.g. control')
     parser.add_argument('--fast', action='store_true', help='unit + p1 + c1, exclude slow/external/gpu')
     parser.add_argument('--core', action='store_true', help='unit c1 and c2, exclude slow/external/gpu')
+    parser.add_argument('--offline', action='store_true', help='unit/integration/e2e c1/c2 in one batch, exclude slow/external/gpu')
     parser.add_argument('--all', action='store_true', help='select every collected test')
     parser.add_argument('--results-root', help='external directory for test evidence')
     parser.add_argument('--plan-id')
@@ -222,7 +223,12 @@ def main(argv: list[str] | None = None) -> int:
     if extra and extra[0] == '--':
         extra = extra[1:]
     parts, cost_classes = [], list(args.cost_class)
-    if args.fast:
+    if args.offline:
+        if args.fast or args.core or args.all:
+            parser.error('--offline cannot be combined with --fast/--core/--all')
+        parts.append('(unit or integration or e2e) and not slow and not external and not gpu')
+        cost_classes = cost_classes or ['c1', 'c2']
+    elif args.fast:
         parts.append('unit and p1 and not slow and not external and not gpu')
         cost_classes = cost_classes or ['c1']
     elif args.core:
@@ -251,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True)
     budget = args.budget_seconds or args.timeout_seconds * (args.retries + 1)
     plan = {
-        'plan_id': args.plan_id or ('fast' if args.fast else 'core' if args.core else 'all' if args.all else 'ad_hoc'),
+        'plan_id': args.plan_id or ('offline' if args.offline else 'fast' if args.fast else 'core' if args.core else 'all' if args.all else 'ad_hoc'),
         'required': args.required, 'selection': {'markexpr': expr, 'cost_class': cost_classes,
                                               'result_type': args.result_type, 'pytest_args': extra},
         'environment_id': args.environment_id, 'timeout_seconds': args.timeout_seconds,

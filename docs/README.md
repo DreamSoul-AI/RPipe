@@ -9,10 +9,12 @@
 | 使用指南 | [使用指南 Usage Guide 研究流水线.md](<使用指南 Usage Guide 研究流水线.md>) |
 | 开发记录 | [开发记录 Development Record](<开发记录 Development Record/>) |
 | 运行记录 | [运行记录 Run Record](<运行记录 Run Record/>) |
-| 经验与待跟进 | [Experience.md](https://github.com/DreamSoul-AI/RPipe/blob/2241cb0f0020160cbdf96a7d761da72c1693ba3d/docs/%E7%BB%8F%E9%AA%8C%20Learnings/Experience.md) |
+| 经验与待跟进 | [Workspace 经验建议](<经验 Learnings/workspace.md>) |
 | 调研与证据 | [调研与证据](<调研 Search/README.md>) |
 | 设计与合同 | [设计与合同](<设计 Design/README.md>) |
 | 计划与缺陷 | [计划与缺陷](<计划 Plans/README.md>) |
 | 开发与验证 | [开发与验证](<开发 Development/README.md>) |
 
 现行设计与计划从对应入口维护。历史开发、运行证据和研究素材按原有记录定位，保留实际日期、版本及证据来源。
+
+此前经验从[固定历史归档](https://github.com/DreamSoul-AI/RPipe/blob/2241cb0f0020160cbdf96a7d761da72c1693ba3d/docs/%E7%BB%8F%E9%AA%8C%20Learnings/Experience.md)追溯，不作为当前待跟进队列。

@@ -10,14 +10,53 @@ on:
       - dev
       - main
 
+  workflow_dispatch:
+
 permissions:
   contents: read
 
 env:
   MPLBACKEND: Agg
+  OMP_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
 
 jobs:
+  plan:
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      package: ${{ steps.plan.outputs.package }}
+      plan: ${{ steps.plan.outputs.plan }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - id: plan
+        name: Select checks and verify prior evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tests/ci.py plan --kind package
+      - name: Retain selection evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rpipe-ci/plan.json
+          if-no-files-found: error
+          retention-days: 7
+
   build-package:
+    needs: plan
+    if: needs.plan.outputs.package == 'true'
     name: Build package (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -29,6 +68,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -91,9 +132,26 @@ jobs:
 
   package-gate:
     name: Build package
-    needs: build-package
+    needs: [plan, build-package]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Require every distribution matrix job to succeed
-        run: test "${{ needs.build-package.result }}" = success
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Require selected checks and bind success to the tested tree
+        env:
+          PLAN_JSON: ${{ needs.plan.outputs.plan }}
+          PLAN_RESULT: ${{ needs.plan.result }}
+          JOB_RESULT: ${{ needs.build-package.result }}
+        run: python tests/ci.py gate --kind package
+      - name: Retain successful validation receipt
+        uses: actions/upload-artifact@v7
+        with:
+          name: rpipe-package-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rpipe-ci/receipt.json
+          if-no-files-found: error
+          retention-days: 7

@@ -188,7 +188,7 @@ AlgorithmHook 是算法循环中明确的评测、checkpoint、停止等协作�
 | transfers.py | 实际 SDK/HTTP 流的内部协作 | 关闭所属流，不成为全局网络框架 |
 | torchvision_load.py | 科学库的按需装载与可定位导入错误 | 只在明确科学用例中调用，不吞任意异常 |
 
-取消请求由 flow 拥有，算法通过注入的只读检查器协作停止，不从 structure 反向导入流程。 CLI 仅在执行命令的作用域临时处理 SIGINT，请求同一 Cancellation，并在结束时恢复原 handler。父进程通过本 attempt 中绑定 request nonce、身份和 attempt 的取消标记通知科学进程；ScienceContext 只持只读 cancel_check，不接父进程的可变 Event。
+取消请求由 flow 拥有，算法通过注入的只读检查器协作停止，不从 structure 反向导入流程。 CLI 仅在执行命令的作用域临时处理 SIGINT，请求同一 Cancellation，并在结束时恢复原 handler。父进程通过本 attempt 中绑定 request nonce、身份和 attempt 的取消标记通知科学进程；ScienceContext 只持只读 cancel_check，不接父进程的可变 Event。取消标记读端对 Windows 瞬时共享／锁冲突执行有界重读，最多六次、间隔10毫秒；Python文件打开只提供errno=13时也在Windows按此范围处理。持续拒绝读取保留原异常，成功读入后再核身份与完整请求。
 
 worker 统一核验最终响应，取消先在明确清理时限内协作收尾，不能确认关闭时只停止所属资源并保留 unknown。硬超时不延长为合作宽限，supervise 的 worker 清理时限受既有外层 cleanup_seconds 约束。System 和 Data 等有实际资源的对象提供关闭能力；没有资源的计算对象不为对称性增加无操作 close。
 
@@ -438,6 +438,8 @@ process 采用真实 step/epoch 坐标、明确清单和逐点样本量，缺项
 tests/rpipe 按实际实现职责组织测试，tests/studies 验研究实例的装配与判据；不为目标树中的每个叶文件生成占位测试。每个测试进程使用独立临时目录，合成输入可重建，不拿真实 Study 或已有 Run 作为清理 fixture。
 
 pytest 采用 importlib 导入模式，按完整测试路径加载；镜像目录中允许职责相同的文件采用相同基本名，不能因默认顶层模块名冲突漏收测试。不通过改乱镜像结构或忽略失败文件绕过收集问题。
+
+`tests/run.py` 承接统一执行及证据，`tests/impact.py` 负责本地差异选择与文档文件检查，`tests/ci.py` 负责 CI 事件选择、成功回执和汇总门。后两者只使用标准库，不导入业务执行器或科学部件；工具合同用例归 `tests/tests/`。具体触发规则与启用状态从[测试说明](../tests/README.md#自动-ci-本地改稿)核对。
 
 | 范围 | 有意义的验证 |
 | --- | --- |

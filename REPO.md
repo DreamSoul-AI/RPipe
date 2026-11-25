@@ -1,29 +1,81 @@
 # RPipe 仓库约定
 
+
+
 研发流水线模板与两柱结构宿主。源码职责、固定依赖和 Study 执行入口从项目文档取得。
+
+
 
 ## 研发入口
 
+
+
 - [项目首页](README.md) 维护用途、安装和使用方式。
+
 - [研发文档导航](docs/README.md) 定位现行设计、计划与历史记录。
+
+
 
 ## 九、RPipe项目补充
 
+
+
 - 新对话使用简短、清晰的主题名，只保留主题与必要限定，保留用户手动设定的标题
+
 - RPipe是研究者可直接修改的research pipeline模板和starting point，本仓源码、能力状态、使用命令、两柱设计及成果入口从[README](README.md)进入；保持structure／flow方向，具体职责和实现约束以本仓两份设计为准，不为旧studies或下游重建兼容层
+
 - 本仓设计正文呈现当前目标及必要取舍，实现差距进入开发计划；旧接口清理步骤归计划，实际调用取证和演进归日期记录。每类设计保持唯一完整Markdown，研究计划与开发计划独立
+
 - 架构任务另读关联资料中的“软件架构设计 Software Architecture Design”通用调研、大纲、端侧智能体案例及来源索引，从质量场景推导职责、接口、状态与依赖，按本仓规模裁剪。自动执行研究另定位自动化研究规范草稿、AutoResearch README和巡检规则，读取资料不构成自动启动授权
-- 项目经验维护在`docs/经验 Learnings/Experience.md`，按本次实际工作记录问题、方法、工具、验证和未确认项；详细经过引用开发／运行记录。本仓经验条目已有Git提交保存后按用户确认从队列清理，历史从提交和日期记录追溯；清理与workspace接收或规则采纳分别判断，是否汇集及提出issue／PR按实际授权执行
+
+- 项目经验维护在`docs/经验 Learnings/<接收仓库名>.md`，按本次实际工作记录问题、方法、工具、验证和未确认项；详细经过引用开发／运行记录。本仓经验条目已有Git提交保存后按用户确认从队列清理，历史从提交和日期记录追溯；清理与workspace接收或规则采纳分别判断，是否汇集及提出issue／PR按实际授权执行
+
 - 实验按本仓研究计划先准入再扩大，逐项记录数据、模型／规模、算法、指标、设备、实际精度、依赖、seed、来源和预算。流程变动采用新version／Run ID，保留失败和重复结果，不以退出码、通过数、同seed或短探针替代科学质量，不挑成功重复代替验收
+
 - 当前用户已授权本项目计划内的硬件自适应预算：按研究计划准入、实测估算和停止规则自主决定常规墙钟、内存及磁盘预算；科学协议变化、付费与发布仍按各自授权处理。本项目授权不自动推广为共用研发规则
+
 - 每个测试进程使用独立临时目录，不拿真实输入或旧Run作清理fixture。临时脚本、缓存及核验输出放忽略的任务目录，运行物和大报告放调用方明确的外部根；科学参数、静态输入、schema、来源元数据和许可证按用途保留，不按扩展名删除
+
 - 读取不启动、不清理、不发布。执行完成、科学质量和证据完整分别判断，日志不替代正式状态；取消只处理本次拥有且可核验的资源，保留首错及清理异常。清理前核用途、消费者、执行占用、来源保全及授权，不删除不明文件或其他任务成果，不强推共享历史
+
 - dayan、SD、量化内嵌的固定`src/rpipe/`副本保留其历史身份，不私改或自动迁移。修复先在RPipe验证，另获授权后才按完整提交、成员／哈希及MIT许可整套同步和验收，不以逐文件补丁冒充同一来源；这不改变本仓自身`src/rpipe/`的合法源码职责
+
 - 本仓工作分支经PR进入dev，发布由dev经发布PR进入main；按当前阶段授权核规定审查与必需检查，自检不冒充独立Approve。Draft、合并、autoMerge、发布、付费及下游同步分别遵守当前授权，具体停止点由开发计划与用户最新要求维护，不将历史阶段禁令永久堆入本文件
+
+
 
 ## 共用协作约定
 
+
+
 - 按读者任务和现有结构确定文档改动范围。现有结构满足要求时局部修改，需要改变组织方式时重排相关部分。保留有效事实和引用，核对入口及锚点。
+
 - 提交对应一项完整、已验证的改动，PR 对应一个可独立评审的里程碑。分支和交付按本项目约定执行。
+
 - 经验按主题记录问题、做法、适用条件与证据，沿用项目现有入口。新项目可按需使用 `docs/经验 Learnings/`。
+
 - 新增双语调研文档采用“通用调研 General Search”和“文献调研 Literature Search”。需要集中维护正文、大纲和索引时，按课题组织到现有入口或 `docs/调研 Search/`。既有文件按项目约定维护。
+
+
+
+## 共享资源入口
+
+
+
+- 使用共享资源时，从 [Knowledge](https://github.com/DreamSoul-AI/knowledge) 查找共享资源工具，按 Workspace 配套示例将数据、模型与项目产物接入 `.shared/`。本机路径从个人配置读取，实际链接与消费者按项目核对。
+
+
+
+## Workspace 采用记录
+
+
+
+- 来源 [Workspace 098bd2e](https://github.com/DreamSoul-AI/workspace/tree/098bd2eccf23eb1e6d77a3eec6db51e6bc387daf)。采用范围为Learnings 命名与分发、文档规范配置、长作业检查点与恢复、调研、研究计划与研究结论归档、发布前分支对齐、可选共享资源入口。项目专用流程见本文件。
+
+- 单项更新：[Workspace 65657c5](https://github.com/DreamSoul-AI/workspace/tree/65657c50cf6d98ac1898ae0183cb9ca98498e0a9)。采用旧对话重读、新对话定位、文档主动补链接、浏览器收尾、飞书专节及 CLI 任务临时目录、共享资源主动检查；保留项目专有约定和原整版基线。共享 data/models 直接复用，仅 artifacts 按仓库隔离，接入示例见 [Workspace 教程](https://github.com/DreamSoul-AI/workspace/blob/main/templates/software-engineering/examples/shared-resources/README.md)。
+
+- 单项更新：[Workspace f01fab8](https://github.com/DreamSoul-AI/workspace/tree/f01fab8598f570a45eca8320e546d636268b700a)。采用通用文档规范及飞书/GitHub 平台章节入口、首次接入默认值和已有选择保留、代码架构设计与代码结构设计并列命名；图表简洁要求随通用规范读取。保留本项目专有约定、既有文档路径及原整版基线。[规范分发副本](https://github.com/DreamSoul-AI/workspace/blob/f01fab8598f570a45eca8320e546d636268b700a/%E6%96%87%E6%A1%A3/%E8%A7%84%E8%8C%83/%E9%80%9A%E7%94%A8/%E9%80%9A%E7%94%A8%E6%96%87%E6%A1%A3%E8%A7%84%E8%8C%83.md)。
+- 单项更新：[Workspace 823d496](https://github.com/DreamSoul-AI/workspace/tree/823d4965035899d66a2d57751f1d28fbf934f99a)。采用临时产物与共享入口分工、资料根定位、目录升级检查、双端文档先改本地及面向读者的汇报；源码、测试、项目 docs 与专有约定保留，原整版基线继续沿用。
+- 单项更新：[Workspace ea16de5](https://github.com/DreamSoul-AI/workspace/tree/ea16de5eda676aadaeefc1897ce0b83c062de2b6)。采用常规问题直接处理、结合目标和进度主动建议下一步；Knowledge 能力更新沿 [Workspace 教程](https://github.com/DreamSoul-AI/workspace/blob/main/资料/教程和工具/使用教程.md#workspace-与-knowledge-更新) 默认接入，保留通用与个人来源、项目专有约定和原整版基线。
+- 单项更新：[Workspace f020aa5](https://github.com/DreamSoul-AI/workspace/tree/f020aa5b6965766f7308fa31b0836e478c9da914)。采用加粗只包文字、所有标点放在外面的统一写法，移除未采用的本机配置默认目录及专门忽略项；配置位置和相应保护沿用项目约定，保留其他规则及原整版基线。
+- 单项更新：[Workspace a9da11e](https://github.com/DreamSoul-AI/workspace/tree/a9da11e30412aa3ec52a88cf76150da129b5063b)。文档按用途和目标读者组织正文，补齐独立阅读所需的背景与依据；保留原整版采用基线及项目约定。

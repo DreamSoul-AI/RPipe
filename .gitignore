@@ -271,3 +271,6 @@ Desktop.ini
 
 # Local personal context; never distribute actual user information
 /USER.md
+
+/.local/
+/.shared/
