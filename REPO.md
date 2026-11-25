@@ -79,3 +79,4 @@
 - 单项更新：[Workspace ea16de5](https://github.com/DreamSoul-AI/workspace/tree/ea16de5eda676aadaeefc1897ce0b83c062de2b6)。采用常规问题直接处理、结合目标和进度主动建议下一步；Knowledge 能力更新沿 [Workspace 教程](https://github.com/DreamSoul-AI/workspace/blob/main/资料/教程和工具/使用教程.md#workspace-与-knowledge-更新) 默认接入，保留通用与个人来源、项目专有约定和原整版基线。
 - 单项更新：[Workspace f020aa5](https://github.com/DreamSoul-AI/workspace/tree/f020aa5b6965766f7308fa31b0836e478c9da914)。采用加粗只包文字、所有标点放在外面的统一写法，移除未采用的本机配置默认目录及专门忽略项；配置位置和相应保护沿用项目约定，保留其他规则及原整版基线。
 - 单项更新：[Workspace a9da11e](https://github.com/DreamSoul-AI/workspace/tree/a9da11e30412aa3ec52a88cf76150da129b5063b)。文档按用途和目标读者组织正文，补齐独立阅读所需的背景与依据；保留原整版采用基线及项目约定。
+- 本轮适用更新：[Workspace 84f9696](https://github.com/DreamSoul-AI/workspace/tree/84f969679eb06b7d742ee7b384c13e371df9d425)。核对并合并当前适用的共用规则，补充新对话项目选择和按场景理解输入的约定，保留项目专有内容、个人配置、现有布局及原整版采用基线。
