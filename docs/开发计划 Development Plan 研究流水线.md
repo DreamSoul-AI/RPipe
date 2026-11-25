@@ -6,7 +6,7 @@
 
 ## 经验归档与main同步
 
-将[Workspace经验建议](<经验 Learnings/workspace.md>)及文档导航经工作分支PR交付dev。先在工作分支对齐既有main历史，确认dev包含main最新提交，再提交dev → main PR，审查整个差异及当前候选的必需检查。main集成包含dev已验证的CI策略、取消读端修复与Workspace约定，不将其误记为纯文档变更。
+将[Workspace经验建议](https://github.com/DreamSoul-AI/RPipe/blob/18809718388ed76f22ae40788ddd4dc74fb2bf80/docs/%E7%BB%8F%E9%AA%8C%20Learnings/workspace.md)及文档导航经工作分支PR交付dev。先在工作分支对齐既有main历史，确认dev包含main最新提交，再提交dev → main PR，审查整个差异及当前候选的必需检查。main集成包含dev已验证的CI策略、取消读端修复与Workspace约定，不将其误记为纯文档变更。
 
 保留现有验证规则：文档PR走轻量检查，dev合并后核验匹配的成功证据；main PR和main合并后均执行完整CPU与严格打包检查。成功后同步本地dev，清理本任务工作分支。main采用后核对默认分支的手动事件声明，不另外启动手动矩阵或GPU实验。实际运行、失败及未覆盖项进入本轮日期记录，版本标签和已发布附件保持原身份。
 
