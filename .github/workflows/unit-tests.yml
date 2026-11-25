@@ -10,26 +10,66 @@ on:
       - dev
       - main
 
+  workflow_dispatch:
+
 permissions:
   contents: read
 
 env:
   MPLBACKEND: Agg
+  OMP_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
 
 jobs:
+  plan:
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      cpu: ${{ steps.plan.outputs.cpu }}
+      plan: ${{ steps.plan.outputs.plan }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - id: plan
+        name: Select checks and verify prior evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tests/ci.py plan --kind unit
+      - name: Retain selection evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rpipe-ci/plan.json
+          if-no-files-found: error
+          retention-days: 7
+
   unit:
+    needs: plan
+    if: needs.plan.outputs.cpu == 'true'
     name: CPU tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: ["3.10", "3.13"]
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -49,19 +89,13 @@ jobs:
           python -m pip install -e ".[dev,tensorboard]" "huggingface_hub==1.33.0" "datasets==5.0.0" "httpx==0.28.1" requests aiohttp Pillow
           2>&1 | tee "$RPIPE_TEST_RESULTS_ROOT/install.log"
 
-      - name: Run core unit tests
+      - name: Run selected offline CPU checks in one batch
         shell: bash
+        env:
+          PLAN_JSON: ${{ needs.plan.outputs.plan }}
         run: >-
-          python tests/run.py --core -- --basetemp "${{ runner.temp }}/pytest-core"
-          2>&1 | tee "$RPIPE_TEST_RESULTS_ROOT/core.log"
-
-      - name: Run native CPU integration and end-to-end flows
-        shell: bash
-        run: >-
-          python tests/run.py --all --plan-id offline-integration --cost-class c1 --cost-class c2 --
-          -m "(integration or e2e) and not external and not gpu and not slow"
-          --basetemp "${{ runner.temp }}/pytest-integration"
-          2>&1 | tee "$RPIPE_TEST_RESULTS_ROOT/integration.log"
+          python tests/ci.py run --kind unit
+          2>&1 | tee "$RPIPE_TEST_RESULTS_ROOT/offline.log"
 
       - name: Read back optional TensorBoard events (CPU, offline)
         shell: bash
@@ -83,9 +117,26 @@ jobs:
 
   unit-gate:
     name: Unit tests
-    needs: unit
+    needs: [plan, unit]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Require every CPU matrix job to succeed
-        run: test "${{ needs.unit.result }}" = success
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Require selected checks and bind success to the tested tree
+        env:
+          PLAN_JSON: ${{ needs.plan.outputs.plan }}
+          PLAN_RESULT: ${{ needs.plan.result }}
+          JOB_RESULT: ${{ needs.unit.result }}
+        run: python tests/ci.py gate --kind unit
+      - name: Retain successful validation receipt
+        uses: actions/upload-artifact@v7
+        with:
+          name: rpipe-unit-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rpipe-ci/receipt.json
+          if-no-files-found: error
+          retention-days: 7

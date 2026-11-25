@@ -4,6 +4,85 @@ import os
 
 import pytest
 
+
+@pytest.mark.parametrize('code', [32, 33])
+def test_cancel_request_retries_transient_windows_sharing(source_study, run_root, monkeypatch, code):
+    from rpipe.flow import worker
+    from rpipe.flow.context import Cancelled
+    from rpipe.structure.make import plan
+    spec = plan(source_study, run_root=run_root)[0]
+    expected = worker._cancel_body(spec, 'a' * 32, 'b' * 32)
+    calls, waits = [], []
+    def read(path):
+        calls.append(path)
+        if len(calls) == 1:
+            error = PermissionError(13, 'controlled sharing conflict')
+            error.winerror = code
+            raise error
+        return expected
+    monkeypatch.setattr(worker, 'read_json', read)
+    monkeypatch.setattr(worker.time, 'sleep', waits.append)
+    with pytest.raises(Cancelled):
+        worker._cancel_check(spec.run_dir, spec, 'a' * 32, 'b' * 32)()
+    assert len(calls) == 2 and waits == [.01]
+
+
+@pytest.mark.parametrize('code,attempts', [(32, 6), (33, 6), (5, 1), (None, 6 if os.name == 'nt' else 1)])
+def test_cancel_request_preserves_persistent_and_other_read_failures(
+        source_study, run_root, monkeypatch, code, attempts):
+    from rpipe.flow import worker
+    from rpipe.structure.make import plan
+    spec = plan(source_study, run_root=run_root)[0]
+    error = PermissionError(13, 'controlled persistent read failure')
+    error.winerror = code
+    reads, waits = [], []
+    def read(path):
+        reads.append(path)
+        raise error
+    monkeypatch.setattr(worker, 'read_json', read)
+    monkeypatch.setattr(worker.time, 'sleep', waits.append)
+    with pytest.raises(PermissionError) as caught:
+        worker._cancel_check(spec.run_dir, spec, 'a' * 32, 'b' * 32)()
+    assert caught.value is error and len(reads) == attempts
+    assert waits == [.01] * (attempts - 1)
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='native Windows sharing violation')
+def test_cancel_request_recovers_after_actual_exclusive_handle_closes(source_study, run_root, monkeypatch):
+    import ctypes
+    from ctypes import wintypes
+    from rpipe.flow import worker
+    from rpipe.flow.context import Cancelled
+    from rpipe.structure.make import plan
+    spec = plan(source_study, run_root=run_root)[0]
+    marker = spec.run_dir / 'worker-cancel.json'
+    worker.write_json(marker, worker._cancel_body(spec, 'a' * 32, 'b' * 32))
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.CreateFileW(str(marker), 0x80000000, 0, None, 3, 0x80, None)
+    assert handle != wintypes.HANDLE(-1).value, ctypes.get_last_error()
+    native_read, observed = worker.read_json, []
+    def read(path):
+        nonlocal handle
+        try:
+            return native_read(path)
+        except PermissionError as error:
+            observed.append(error.winerror)
+            assert kernel.CloseHandle(handle)
+            handle = None
+            raise
+    monkeypatch.setattr(worker, 'read_json', read)
+    try:
+        with pytest.raises(Cancelled):
+            worker._cancel_check(spec.run_dir, spec, 'a' * 32, 'b' * 32)()
+    finally:
+        if handle is not None:
+            kernel.CloseHandle(handle)
+    assert len(observed) == 1 and observed[0] in (None, 32)
+
 pytestmark = [pytest.mark.integration, pytest.mark.content, pytest.mark.p1,
               pytest.mark.flow_layer, pytest.mark.module_runner,
               pytest.mark.cost(cost_class='c1'),
