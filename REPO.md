@@ -80,3 +80,4 @@
 - 单项更新：[Workspace f020aa5](https://github.com/DreamSoul-AI/workspace/tree/f020aa5b6965766f7308fa31b0836e478c9da914)。采用加粗只包文字、所有标点放在外面的统一写法，移除未采用的本机配置默认目录及专门忽略项；配置位置和相应保护沿用项目约定，保留其他规则及原整版基线。
 - 单项更新：[Workspace a9da11e](https://github.com/DreamSoul-AI/workspace/tree/a9da11e30412aa3ec52a88cf76150da129b5063b)。文档按用途和目标读者组织正文，补齐独立阅读所需的背景与依据；保留原整版采用基线及项目约定。
 - 本轮适用更新：[Workspace 84f9696](https://github.com/DreamSoul-AI/workspace/tree/84f969679eb06b7d742ee7b384c13e371df9d425)。核对并合并当前适用的共用规则，补充新对话项目选择和按场景理解输入的约定，保留项目专有内容、个人配置、现有布局及原整版采用基线。
+- 2026年11月29日适用增量：[Workspace 0539f70](https://github.com/DreamSoul-AI/workspace/tree/0539f70a3298fdbde255b9bcb5c9f61cd46cf961)。采用关联资料工作区轻读入口与主任务/临时实验分区短句；核对正式来源的其余适用变化，本仓未维护的共用规范继续沿已有入口读取，未新增规范副本或覆盖项目约定。保留原整版基线、个人配置、业务布局及既有排除。
